@@ -1,9 +1,5 @@
 {
-  "version": 2,
   "rewrites": [
-    { "source": "/css/(.*)", "destination": "/css/$1" },
-    { "source": "/js/(.*)", "destination": "/js/$1" },
-    { "source": "/manifest.json", "destination": "/manifest.json" },
     { "source": "/(.*)", "destination": "/api/index" }
   ],
   "crons": [
