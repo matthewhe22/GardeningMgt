@@ -1,44 +1,69 @@
 const path = require('path');
-const fs = require('fs');
 const express = require('express');
-const session = require('express-session');
+const cookieSession = require('cookie-session');
 
-const db = require('./db');
+const { q1, ready } = require('./db');
 const { currentUser, requireLogin } = require('./auth');
-const { startReminderScheduler } = require('./reminders');
+const { sendRemindersForDate } = require('./reminders');
+const { asyncHandler } = require('./asyncHandler');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, '..', 'data', 'uploads');
-fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-app.locals.uploadDir = UPLOAD_DIR;
-
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, '..', 'views'));
+app.set('trust proxy', 1);
 
 app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
 app.use(express.static(path.join(__dirname, '..', 'public')));
-app.use(session({
+
+// Signed cookie sessions: no server-side store, so login survives
+// serverless cold starts and multiple instances.
+app.use(cookieSession({
+  name: 'gmgt',
   secret: process.env.SESSION_SECRET || 'dev-secret-change-me',
-  resave: false,
-  saveUninitialized: false,
-  cookie: { httpOnly: true, sameSite: 'lax' },
+  httpOnly: true,
+  sameSite: 'lax',
+  secure: !!process.env.VERCEL,
+  maxAge: 14 * 24 * 60 * 60 * 1000,
 }));
 
-// Expose user + unread notification count to all views.
-app.use((req, res, next) => {
-  res.locals.user = currentUser(req);
+// Ensure schema exists (no-op after first call), then resolve the user and
+// unread notification count for every request.
+app.use(asyncHandler(async (req, res, next) => {
+  await ready();
+  res.locals.user = await currentUser(req);
   res.locals.unreadCount = res.locals.user
-    ? db.prepare('SELECT COUNT(*) AS c FROM notifications WHERE user_id = ? AND read_at IS NULL')
-        .get(res.locals.user.id).c
+    ? (await q1('SELECT COUNT(*)::int AS c FROM notifications WHERE user_id = $1 AND read_at IS NULL',
+        [res.locals.user.id])).c
     : 0;
   res.locals.currentPath = req.path;
   next();
-});
+}));
+
+// Vercel Cron (or any scheduler) hits this daily; Vercel sends
+// "Authorization: Bearer $CRON_SECRET" automatically when the env var is set.
+app.get('/cron/reminders', asyncHandler(async (req, res) => {
+  const secret = process.env.CRON_SECRET;
+  if (secret && req.headers.authorization !== `Bearer ${secret}`) {
+    return res.status(401).json({ ok: false });
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  const sent = await sendRemindersForDate(today);
+  res.json({ ok: true, date: today, sent });
+}));
+
+// Photos are stored in the database; stream them out by filename key.
+app.get('/uploads/:filename', requireLogin, asyncHandler(async (req, res) => {
+  const photo = await q1('SELECT mime, data FROM photos WHERE filename = $1', [req.params.filename]);
+  if (!photo) return res.status(404).end();
+  res.set('Content-Type', photo.mime);
+  res.set('Cache-Control', 'private, max-age=86400');
+  res.send(photo.data);
+}));
 
 app.use('/', require('./routes/auth'));
-app.use('/uploads', requireLogin, express.static(UPLOAD_DIR));
 app.use('/', requireLogin, require('./routes/dashboard'));
 app.use('/visits', requireLogin, require('./routes/visits'));
 app.use('/tasks', requireLogin, require('./routes/tasks'));
@@ -59,6 +84,7 @@ app.use((err, req, res, next) => {
 });
 
 if (require.main === module) {
+  const { startReminderScheduler } = require('./reminders');
   startReminderScheduler();
   app.listen(PORT, () => console.log(`GardeningMgt running on http://localhost:${PORT}`));
 }

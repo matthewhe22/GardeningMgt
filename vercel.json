@@ -1,27 +1,12 @@
 {
   "version": 2,
-  "builds": [
-    {
-      "src": "src/server.js",
-      "use": "@vercel/node"
-    },
-    {
-      "src": "public/**",
-      "use": "@vercel/static"
-    }
+  "rewrites": [
+    { "source": "/css/(.*)", "destination": "/css/$1" },
+    { "source": "/js/(.*)", "destination": "/js/$1" },
+    { "source": "/manifest.json", "destination": "/manifest.json" },
+    { "source": "/(.*)", "destination": "/api/index" }
   ],
-  "routes": [
-    {
-      "src": "/public/(.*)",
-      "dest": "/public/$1"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/src/server.js"
-    }
-  ],
-  "env": {
-    "SESSION_SECRET": "@session_secret",
-    "PORT": "3000"
-  }
+  "crons": [
+    { "path": "/cron/reminders", "schedule": "0 6 * * *" }
+  ]
 }

@@ -1,20 +1,21 @@
-const db = require('./db');
+const { q1 } = require('./db');
 
-function currentUser(req) {
+async function currentUser(req) {
   if (!req.session || !req.session.userId) return null;
-  return db.prepare('SELECT id, name, email, role, phone FROM users WHERE id = ? AND active = 1')
-    .get(req.session.userId) || null;
+  return q1(
+    'SELECT id, name, email, role, phone FROM users WHERE id = $1 AND active',
+    [req.session.userId]
+  );
 }
 
 function requireLogin(req, res, next) {
-  const user = currentUser(req);
-  if (!user) return res.redirect('/login');
-  req.user = user;
-  res.locals.user = user;
+  // res.locals.user is set for every request in server.js
+  if (!res.locals.user) return res.redirect('/login');
+  req.user = res.locals.user;
   next();
 }
 
-/** requireRole('admin','supervisor') — admin always passes. */
+/** requireRole('supervisor') — admin always passes; no args = admin only. */
 function requireRole(...roles) {
   return (req, res, next) => {
     if (!req.user) return res.redirect('/login');

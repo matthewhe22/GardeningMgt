@@ -8,13 +8,17 @@ A job management platform for gardening businesses with three roles
 
 ## Stack
 
-- **Backend**: Node.js + Express 5, server-rendered EJS. One process, no build step.
-- **Database**: SQLite via better-sqlite3 (WAL mode). Single-file, easy to back up;
-  the schema is plain SQL and ports to Postgres when multi-server scale is needed.
-- **Auth**: session cookies + bcrypt password hashes. Role checks in middleware
-  (`requireRole`), admin implicitly passes all checks.
-- **Files**: photo uploads on local disk (`data/uploads`), served behind login.
-- **Scheduler**: node-cron inside the web process (fine for one instance).
+- **Backend**: Node.js + Express 5, server-rendered EJS. Deployed as a single
+  Vercel serverless function (`api/index.js`) or run as a normal Node process.
+- **Database**: PostgreSQL via `pg` (e.g. Supabase). Schema is created
+  idempotently on first request; an empty database also gets a bootstrap admin.
+- **Auth**: signed cookie sessions (`cookie-session`, no server-side store —
+  survives serverless cold starts) + bcrypt password hashes. Role checks in
+  middleware (`requireRole`), admin implicitly passes all checks.
+- **Files**: photos stored in PostgreSQL (`bytea`) and streamed out behind
+  login — serverless filesystems are read-only/ephemeral, so no disk is used.
+- **Scheduler**: Vercel Cron hits `/cron/reminders` daily (protected by
+  `CRON_SECRET`); `npm start` on a normal server uses in-process node-cron.
 
 ## Data model
 
@@ -62,7 +66,8 @@ mutating route and the cron job (userId = null → "System"). Staff view at
 `/admin/activity`.
 
 ### Photos
-Multer disk storage, 10 MB limit, image extensions only, random filenames.
+Multer memory storage → PostgreSQL `bytea`, 10 MB limit, image extensions only,
+random filename keys served from `/uploads/:filename`.
 Every photo records uploader and `created_at`; the UI overlays the timestamp
 on the image. Photos attach to a job or an issue and appear in the shared
 team gallery (`shared` flag lets a gardener keep one private to staff+self).

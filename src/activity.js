@@ -1,8 +1,4 @@
-const db = require('./db');
-
-const insert = db.prepare(`
-  INSERT INTO activity_log (user_id, action, entity_type, entity_id, details)
-  VALUES (?, ?, ?, ?, ?)`);
+const { pool } = require('./db');
 
 /**
  * Record an auditable change. Call from every mutating route.
@@ -12,8 +8,12 @@ const insert = db.prepare(`
  * @param {number|null} entityId
  * @param {string} details      human-readable summary of the change
  */
-function logActivity(userId, action, entityType, entityId, details) {
-  insert.run(userId, action, entityType, entityId, details || null);
+async function logActivity(userId, action, entityType, entityId, details) {
+  await pool.query(
+    `INSERT INTO activity_log (user_id, action, entity_type, entity_id, details)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [userId, action, entityType, entityId, details || null]
+  );
 }
 
 module.exports = { logActivity };
