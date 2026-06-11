@@ -206,6 +206,9 @@ function ready() {
         console.log(`[bootstrap] created admin account ${email} — change its password!`);
       }
     })();
+    // Don't memoize failures: a transient DB outage at cold start should not
+    // poison every later request in this process.
+    readyPromise.catch(() => { readyPromise = null; });
   }
   return readyPromise;
 }
