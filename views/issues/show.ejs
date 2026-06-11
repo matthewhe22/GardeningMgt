@@ -1,0 +1,71 @@
+<%- include('../partials/header') %>
+<h1>Issue #<%= issue.id %>: <%= issue.title %></h1>
+<p class="muted">Reported by <%= issue.reporter_name || 'unknown' %> on <%= issue.created_at %> UTC
+  <% if (issue.property_name) { %> · <%= issue.property_name %><% } %></p>
+
+<div class="grid">
+  <section class="card">
+    <h2>Details</h2>
+    <p><%= issue.description || 'No description.' %></p>
+    <p>
+      <span class="prio prio-<%= issue.priority %>"><%= issue.priority %></span>
+      <span class="status status-<%= issue.status %>"><%= issue.status.replace('_',' ') %></span>
+      <% if (issue.resolved_at) { %><span class="muted">resolved <%= issue.resolved_at %> UTC</span><% } %>
+    </p>
+    <form method="post" action="/issues/<%= issue.id %>/update" class="form-grid">
+      <label>Status
+        <select name="status">
+          <% ['open','in_progress','resolved','closed'].forEach(s => { %>
+            <option value="<%= s %>" <%= issue.status === s ? 'selected' : '' %>><%= s.replace('_',' ') %></option>
+          <% }) %>
+        </select>
+      </label>
+      <label>Priority
+        <select name="priority">
+          <% ['low','medium','high','urgent'].forEach(p => { %>
+            <option value="<%= p %>" <%= issue.priority === p ? 'selected' : '' %>><%= p %></option>
+          <% }) %>
+        </select>
+      </label>
+      <label>Assignee
+        <select name="assigned_to">
+          <option value="">Unassigned</option>
+          <% users.forEach(u => { %>
+            <option value="<%= u.id %>" <%= issue.assigned_to === u.id ? 'selected' : '' %>><%= u.name %></option>
+          <% }) %>
+        </select>
+      </label>
+      <button class="btn btn-primary">Update</button>
+    </form>
+  </section>
+
+  <section class="card" id="photos">
+    <h2>Photos</h2>
+    <div class="photo-grid">
+      <% photos.forEach(ph => { %>
+        <figure class="photo">
+          <a href="/uploads/<%= ph.filename %>" target="_blank"><img src="/uploads/<%= ph.filename %>" alt="<%= ph.caption || ph.original_name %>" loading="lazy"></a>
+          <figcaption><span class="photo-stamp">📅 <%= ph.created_at %> UTC</span><br>
+            <span class="muted">by <%= ph.uploader_name %></span></figcaption>
+        </figure>
+      <% }) %>
+    </div>
+    <form method="post" action="/issues/<%= issue.id %>/photos" enctype="multipart/form-data" class="add-row">
+      <input type="file" name="photos" accept="image/*" capture="environment" multiple required>
+      <button class="btn">Upload</button>
+    </form>
+  </section>
+
+  <section class="card" id="comments">
+    <h2>Comments</h2>
+    <% comments.forEach(c => { %>
+      <div class="comment"><strong><%= c.author_name %></strong> <span class="muted"><%= c.created_at %> UTC</span>
+        <p><%= c.body %></p></div>
+    <% }) %>
+    <form method="post" action="/issues/<%= issue.id %>/comments">
+      <textarea name="body" rows="2" placeholder="Add a comment…" required></textarea>
+      <button class="btn">Comment</button>
+    </form>
+  </section>
+</div>
+<%- include('../partials/footer') %>

@@ -1,0 +1,23 @@
+{
+  "name": "gardeningmgt",
+  "version": "0.1.0",
+  "description": "Gardening job management platform: daily tasks, issues, photos, route optimization, reminders and activity logging.",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "seed": "node scripts/seed.js",
+    "test": "node --test"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "better-sqlite3": "^12.10.0",
+    "ejs": "^6.0.1",
+    "express": "^5.2.1",
+    "express-session": "^1.19.0",
+    "multer": "^2.1.1",
+    "node-cron": "^4.2.1"
+  }
+}

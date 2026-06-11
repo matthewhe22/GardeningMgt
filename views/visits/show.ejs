@@ -1,0 +1,142 @@
+<%- include('../partials/header') %>
+<h1>Job #<%= visit.id %> — <%= visit.property_name %></h1>
+<p class="muted"><%= visit.address %> · <%= visit.scheduled_date %><% if (visit.time_window) { %> · <%= visit.time_window %><% } %>
+  · Gardener: <%= visit.gardener_name || 'Unassigned' %>
+  · <span class="status status-<%= visit.status %>"><%= visit.status.replace('_',' ') %></span></p>
+
+<div class="card timer-card">
+  <h2>⏱ Job timer</h2>
+  <% if (visit.started_at && !visit.finished_at) { %>
+    <p>Started at <strong><%= visit.started_at %></strong> (UTC). Timer running…</p>
+    <form method="post" action="/visits/<%= visit.id %>/timer/stop" class="gps-form">
+      <input type="hidden" name="lat"><input type="hidden" name="lng">
+      <button class="btn btn-danger">■ Finish job</button>
+    </form>
+  <% } else if (visit.finished_at) { %>
+    <p>Worked <strong><%= visit.duration_minutes %> min</strong>
+      (<%= visit.started_at %> → <%= visit.finished_at %> UTC).</p>
+    <form method="post" action="/visits/<%= visit.id %>/timer/start" class="gps-form">
+      <input type="hidden" name="lat"><input type="hidden" name="lng">
+      <button class="btn">↻ Restart timer</button>
+    </form>
+  <% } else { %>
+    <form method="post" action="/visits/<%= visit.id %>/timer/start" class="gps-form">
+      <input type="hidden" name="lat"><input type="hidden" name="lng">
+      <button class="btn btn-primary">▶ Start job</button>
+    </form>
+  <% } %>
+  <p class="muted">Your GPS position is recorded when you start and finish (if location access is allowed).</p>
+  <% if (gpsPoints.length) { %>
+    <details><summary><%= gpsPoints.length %> GPS point(s) recorded</summary>
+      <table class="table">
+        <% gpsPoints.forEach(g => { %>
+          <tr><td><%= g.kind %></td><td><%= g.lat.toFixed(5) %>, <%= g.lng.toFixed(5) %></td><td class="muted"><%= g.recorded_at %></td></tr>
+        <% }) %>
+      </table>
+    </details>
+  <% } %>
+</div>
+
+<div class="grid">
+  <section class="card" id="tasks">
+    <h2>Tasks</h2>
+    <table class="table">
+      <% tasks.forEach(t => { %>
+      <tr>
+        <td><strong><%= t.title %></strong><% if (t.description) { %><br><span class="muted"><%= t.description %></span><% } %></td>
+        <td><span class="status status-<%= t.status %>"><%= t.status.replace('_',' ') %></span></td>
+        <td>
+          <form method="post" action="/tasks/<%= t.id %>/status" class="inline">
+            <select name="status" onchange="this.form.submit()">
+              <% ['pending','in_progress','done','blocked'].forEach(s => { %>
+                <option value="<%= s %>" <%= t.status === s ? 'selected' : '' %>><%= s.replace('_',' ') %></option>
+              <% }) %>
+            </select>
+          </form>
+        </td>
+      </tr>
+      <% }) %>
+    </table>
+    <form method="post" action="/visits/<%= visit.id %>/tasks" class="add-row">
+      <input type="text" name="title" placeholder="New task…" required>
+      <button class="btn">Add</button>
+    </form>
+  </section>
+
+  <section class="card" id="photos">
+    <h2>Photos</h2>
+    <div class="photo-grid">
+      <% photos.forEach(ph => { %>
+        <figure class="photo">
+          <a href="/uploads/<%= ph.filename %>" target="_blank"><img src="/uploads/<%= ph.filename %>" alt="<%= ph.caption || ph.original_name %>" loading="lazy"></a>
+          <figcaption>
+            <span class="photo-stamp">📅 <%= ph.created_at %> UTC</span><br>
+            <% if (ph.caption) { %><%= ph.caption %> · <% } %><span class="muted">by <%= ph.uploader_name %></span>
+          </figcaption>
+        </figure>
+      <% }) %>
+    </div>
+    <% if (!photos.length) { %><p class="muted">No photos yet.</p><% } %>
+    <form method="post" action="/visits/<%= visit.id %>/photos" enctype="multipart/form-data" class="form-grid">
+      <label class="span2">Photos <input type="file" name="photos" accept="image/*" capture="environment" multiple required></label>
+      <label class="span2">Caption <input type="text" name="caption"></label>
+      <label><input type="checkbox" name="shared" checked> Share with the whole team</label>
+      <button class="btn btn-primary">Upload</button>
+    </form>
+  </section>
+
+  <section class="card" id="comments">
+    <h2>Comments</h2>
+    <% comments.forEach(c => { %>
+      <div class="comment">
+        <strong><%= c.author_name %></strong> <span class="tag tag-<%= c.author_role %>"><%= c.author_role %></span>
+        <span class="muted"><%= c.created_at %> UTC</span>
+        <p><%= c.body %></p>
+      </div>
+    <% }) %>
+    <% if (!comments.length) { %><p class="muted">No comments yet.</p><% } %>
+    <form method="post" action="/visits/<%= visit.id %>/comments">
+      <textarea name="body" rows="2" placeholder="Add a comment…" required></textarea>
+      <button class="btn">Comment</button>
+    </form>
+  </section>
+
+  <% if (staff) { %>
+  <section class="card">
+    <h2>Manage job</h2>
+    <form method="post" action="/visits/<%= visit.id %>/update" class="form-grid">
+      <label>Gardener
+        <select name="gardener_id">
+          <option value="">Unassigned</option>
+          <% gardeners.forEach(g => { %>
+            <option value="<%= g.id %>" <%= visit.gardener_id === g.id ? 'selected' : '' %>><%= g.name %></option>
+          <% }) %>
+        </select>
+      </label>
+      <label>Date <input type="date" name="scheduled_date" value="<%= visit.scheduled_date %>" required></label>
+      <label>Time window <input type="text" name="time_window" value="<%= visit.time_window || '' %>"></label>
+      <label>Status
+        <select name="status">
+          <% ['scheduled','in_progress','completed','skipped','cancelled'].forEach(s => { %>
+            <option value="<%= s %>" <%= visit.status === s ? 'selected' : '' %>><%= s.replace('_',' ') %></option>
+          <% }) %>
+        </select>
+      </label>
+      <label>Duration (min) <input type="number" name="duration_minutes" value="<%= visit.duration_minutes || '' %>"></label>
+      <label class="span2">Notes <input type="text" name="notes" value="<%= visit.notes || '' %>"></label>
+      <button class="btn btn-primary">Save</button>
+    </form>
+    <hr>
+    <h3>Invoice</h3>
+    <% if (invoice) { %>
+      <p><a class="btn" href="/invoices/<%= invoice.id %>">View <%= invoice.number %> (<%= invoice.status %>)</a></p>
+    <% } else { %>
+      <form method="post" action="/invoices">
+        <input type="hidden" name="visit_id" value="<%= visit.id %>">
+        <button class="btn">Create invoice for this job</button>
+      </form>
+    <% } %>
+  </section>
+  <% } %>
+</div>
+<%- include('../partials/footer') %>

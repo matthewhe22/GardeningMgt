@@ -1,0 +1,54 @@
+<%- include('../partials/header') %>
+<h1>Route planner</h1>
+
+<div class="card">
+  <form method="get" class="filter-row">
+    <label>Date <input type="date" name="date" value="<%= date %>"></label>
+    <% if (staff) { %>
+    <label>Gardener
+      <select name="gardener_id">
+        <option value="">— pick —</option>
+        <% gardeners.forEach(g => { %>
+          <option value="<%= g.id %>" <%= g.id === gardenerId ? 'selected' : '' %>><%= g.name %></option>
+        <% }) %>
+      </select>
+    </label>
+    <% } %>
+    <button class="btn">Show route</button>
+  </form>
+</div>
+
+<% if (gardenerId) { %>
+<div class="card">
+  <div class="filter-row">
+    <form method="post" action="/routes/optimize">
+      <input type="hidden" name="date" value="<%= date %>">
+      <input type="hidden" name="gardener_id" value="<%= gardenerId %>">
+      <button class="btn btn-primary">⚡ Optimize this route</button>
+    </form>
+    <% if (staff) { %>
+    <form method="post" action="/routes/optimize-all">
+      <input type="hidden" name="date" value="<%= date %>">
+      <button class="btn">⚡ Optimize all gardeners for <%= date %></button>
+    </form>
+    <% } %>
+    <% if (totalKm > 0) { %><p>Current route length: <strong><%= totalKm.toFixed(1) %> km</strong> (straight-line)</p><% } %>
+  </div>
+
+  <ol class="route-list">
+    <% visits.forEach(v => { %>
+    <li>
+      <a href="/visits/<%= v.id %>"><strong><%= v.property_name %></strong></a>
+      — <%= v.address %>
+      <% if (v.time_window) { %><span class="muted">(<%= v.time_window %>)</span><% } %>
+      <span class="status status-<%= v.status %>"><%= v.status.replace('_',' ') %></span>
+      <% if (v.lat == null) { %><span class="muted">⚠ no coordinates — left at end of route</span><% } %>
+    </li>
+    <% }) %>
+  </ol>
+  <% if (!visits.length) { %><p class="muted">No visits for this gardener on <%= date %>.</p><% } %>
+</div>
+<% } else { %>
+<div class="card"><p class="muted">Pick a gardener and date to view and optimize their route.</p></div>
+<% } %>
+<%- include('../partials/footer') %>

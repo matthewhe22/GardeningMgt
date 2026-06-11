@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title><%= title %> · GardeningMgt</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#2e7d32">
+</head>
+<body>
+<% if (user) { %>
+<nav class="nav">
+  <a class="brand" href="/">🌱 GardeningMgt</a>
+  <input type="checkbox" id="nav-toggle" class="nav-toggle">
+  <label for="nav-toggle" class="nav-burger">☰</label>
+  <div class="nav-links">
+    <a href="/visits" class="<%= currentPath.startsWith('/visits') ? 'active' : '' %>">Jobs</a>
+    <a href="/tasks" class="<%= currentPath.startsWith('/tasks') ? 'active' : '' %>">Tasks</a>
+    <a href="/issues" class="<%= currentPath.startsWith('/issues') ? 'active' : '' %>">Issues</a>
+    <a href="/photos" class="<%= currentPath.startsWith('/photos') ? 'active' : '' %>">Photos</a>
+    <a href="/routes" class="<%= currentPath.startsWith('/routes') ? 'active' : '' %>">Routes</a>
+    <% if (user.role === 'admin' || user.role === 'supervisor') { %>
+      <a href="/invoices" class="<%= currentPath.startsWith('/invoices') ? 'active' : '' %>">Invoices</a>
+      <a href="/reports" class="<%= currentPath.startsWith('/reports') ? 'active' : '' %>">Reports</a>
+      <a href="/admin/reminders" class="<%= currentPath.startsWith('/admin/reminders') ? 'active' : '' %>">Reminders</a>
+      <a href="/admin/properties" class="<%= currentPath.startsWith('/admin/properties') ? 'active' : '' %>">Properties</a>
+      <a href="/admin/activity" class="<%= currentPath.startsWith('/admin/activity') ? 'active' : '' %>">Activity</a>
+    <% } %>
+    <% if (user.role === 'admin') { %>
+      <a href="/admin/users" class="<%= currentPath.startsWith('/admin/users') ? 'active' : '' %>">Users</a>
+    <% } %>
+    <a href="/notifications" class="<%= currentPath.startsWith('/notifications') ? 'active' : '' %>">
+      🔔<% if (unreadCount > 0) { %><span class="badge"><%= unreadCount %></span><% } %>
+    </a>
+    <form method="post" action="/logout" class="inline"><button class="link-btn"><%= user.name %> · Sign out</button></form>
+  </div>
+</nav>
+<% } %>
+<main class="container">

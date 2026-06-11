@@ -1,0 +1,10 @@
+{
+  "name": "GardeningMgt",
+  "short_name": "GardeningMgt",
+  "description": "Gardening job management: jobs, tasks, issues, photos, routes and timers.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f4f6f3",
+  "theme_color": "#2e7d32",
+  "icons": []
+}

@@ -1,0 +1,33 @@
+<%- include('../partials/header') %>
+<h1>Properties</h1>
+
+<details class="card">
+  <summary><strong>＋ Add property</strong></summary>
+  <form method="post" action="/admin/properties" class="form-grid">
+    <label>Name <input type="text" name="name" required></label>
+    <label>Address <input type="text" name="address" required></label>
+    <label>Contact name <input type="text" name="contact_name"></label>
+    <label>Contact phone <input type="text" name="contact_phone"></label>
+    <label>Latitude <input type="number" name="lat" step="any" placeholder="-36.8485"></label>
+    <label>Longitude <input type="number" name="lng" step="any" placeholder="174.7633"></label>
+    <label class="span2">Notes <input type="text" name="notes"></label>
+    <button class="btn btn-primary">Add property</button>
+  </form>
+  <p class="muted">Latitude/longitude enable route optimization for visits to this property.</p>
+</details>
+
+<div class="card">
+  <table class="table">
+    <tr><th>Name</th><th>Address</th><th>Contact</th><th>Coordinates</th></tr>
+    <% properties.forEach(p => { %>
+    <tr>
+      <td><strong><%= p.name %></strong></td>
+      <td><%= p.address %></td>
+      <td class="muted"><%= p.contact_name || '' %> <%= p.contact_phone || '' %></td>
+      <td class="muted"><%= p.lat != null ? p.lat.toFixed(4) + ', ' + p.lng.toFixed(4) : '⚠ none' %></td>
+    </tr>
+    <% }) %>
+  </table>
+  <% if (!properties.length) { %><p class="muted">No properties yet.</p><% } %>
+</div>
+<%- include('../partials/footer') %>

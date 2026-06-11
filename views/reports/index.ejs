@@ -1,0 +1,56 @@
+<%- include('../partials/header') %>
+<h1>Reports</h1>
+
+<div class="card">
+  <form method="get" class="filter-row">
+    <label>From <input type="date" name="from" value="<%= from %>"></label>
+    <label>To <input type="date" name="to" value="<%= to %>"></label>
+    <button class="btn">Run report</button>
+  </form>
+</div>
+
+<div class="grid">
+  <section class="card">
+    <h2>Visits by status</h2>
+    <table class="table">
+      <% visitStats.forEach(s => { %>
+        <tr><td><span class="status status-<%= s.status %>"><%= s.status.replace('_',' ') %></span></td><td><%= s.count %></td></tr>
+      <% }) %>
+    </table>
+    <% if (!visitStats.length) { %><p class="muted">No visits in range.</p><% } %>
+  </section>
+
+  <section class="card">
+    <h2>Per gardener</h2>
+    <table class="table">
+      <tr><th>Gardener</th><th>Visits</th><th>Completed</th><th>Hours</th></tr>
+      <% perGardener.forEach(g => { %>
+        <tr><td><%= g.name %></td><td><%= g.visits %></td><td><%= g.completed %></td>
+          <td><%= (g.minutes / 60).toFixed(1) %></td></tr>
+      <% }) %>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>Issues by status</h2>
+    <table class="table">
+      <% issueStats.forEach(s => { %>
+        <tr><td><span class="status status-<%= s.status %>"><%= s.status.replace('_',' ') %></span></td><td><%= s.count %></td></tr>
+      <% }) %>
+    </table>
+    <% if (!issueStats.length) { %><p class="muted">No issues in range.</p><% } %>
+  </section>
+
+  <section class="card">
+    <h2>Invoicing</h2>
+    <table class="table">
+      <tr><th>Status</th><th>Count</th><th>Total</th></tr>
+      <% invoiceStats.forEach(s => { %>
+        <tr><td><span class="status status-<%= s.status %>"><%= s.status %></span></td>
+          <td><%= s.count %></td><td>$<%= s.total.toFixed(2) %></td></tr>
+      <% }) %>
+    </table>
+    <p class="muted">Photos uploaded in range: <%= photoCount %></p>
+  </section>
+</div>
+<%- include('../partials/footer') %>

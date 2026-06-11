@@ -1,0 +1,21 @@
+<%- include('../partials/header') %>
+<h1>Photo gallery</h1>
+<p class="muted">Photos shared by the team. Every photo carries its upload timestamp. Upload photos from a job or issue page.</p>
+
+<div class="photo-grid large">
+  <% photos.forEach(ph => { %>
+    <figure class="photo">
+      <a href="/uploads/<%= ph.filename %>" target="_blank"><img src="/uploads/<%= ph.filename %>" alt="<%= ph.caption || ph.original_name %>" loading="lazy"></a>
+      <figcaption>
+        <span class="photo-stamp">📅 <%= ph.created_at %> UTC</span><br>
+        <% if (ph.caption) { %><%= ph.caption %><br><% } %>
+        <span class="muted">by <%= ph.uploader_name %>
+          <% if (ph.visit_ref) { %> · <a href="/visits/<%= ph.visit_ref %>">job #<%= ph.visit_ref %><% if (ph.property_name) { %> (<%= ph.property_name %>)<% } %></a><% } %>
+          <% if (ph.issue_id) { %> · <a href="/issues/<%= ph.issue_id %>">issue: <%= ph.issue_title %></a><% } %>
+        </span>
+      </figcaption>
+    </figure>
+  <% }) %>
+</div>
+<% if (!photos.length) { %><div class="card"><p class="muted">No photos yet.</p></div><% } %>
+<%- include('../partials/footer') %>

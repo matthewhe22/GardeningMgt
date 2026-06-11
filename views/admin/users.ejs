@@ -1,0 +1,43 @@
+<%- include('../partials/header') %>
+<h1>Users</h1>
+
+<details class="card">
+  <summary><strong>＋ Add user</strong></summary>
+  <form method="post" action="/admin/users" class="form-grid">
+    <label>Name <input type="text" name="name" required></label>
+    <label>Email <input type="email" name="email" required></label>
+    <label>Password <input type="password" name="password" required minlength="8"></label>
+    <label>Role
+      <select name="role">
+        <option value="gardener">Gardener</option>
+        <option value="supervisor">Supervisor</option>
+        <option value="admin">Admin</option>
+      </select>
+    </label>
+    <label>Phone <input type="text" name="phone"></label>
+    <button class="btn btn-primary">Create user</button>
+  </form>
+</details>
+
+<div class="card">
+  <table class="table">
+    <tr><th>Name</th><th>Email</th><th>Role</th><th>Phone</th><th>Status</th><th></th></tr>
+    <% users.forEach(u => { %>
+    <tr>
+      <td><strong><%= u.name %></strong></td>
+      <td class="muted"><%= u.email %></td>
+      <td><span class="tag tag-<%= u.role %>"><%= u.role %></span></td>
+      <td class="muted"><%= u.phone || '' %></td>
+      <td><%= u.active ? 'active' : 'disabled' %></td>
+      <td>
+        <% if (u.id !== user.id) { %>
+        <form method="post" action="/admin/users/<%= u.id %>/toggle" class="inline">
+          <button class="link-btn"><%= u.active ? 'Disable' : 'Enable' %></button>
+        </form>
+        <% } %>
+      </td>
+    </tr>
+    <% }) %>
+  </table>
+</div>
+<%- include('../partials/footer') %>

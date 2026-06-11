@@ -1,0 +1,63 @@
+<%- include('../partials/header') %>
+<h1>Tasks</h1>
+
+<div class="card">
+  <form method="get" class="filter-row">
+    <label>Status
+      <select name="status">
+        <option value="">All</option>
+        <% ['pending','in_progress','done','blocked'].forEach(s => { %>
+          <option value="<%= s %>" <%= status === s ? 'selected' : '' %>><%= s.replace('_',' ') %></option>
+        <% }) %>
+      </select>
+    </label>
+    <button class="btn">Filter</button>
+  </form>
+</div>
+
+<% if (staff) { %>
+<details class="card">
+  <summary><strong>＋ New standalone task</strong></summary>
+  <form method="post" action="/tasks" class="form-grid">
+    <label class="span2">Title <input type="text" name="title" required></label>
+    <label class="span2">Description <input type="text" name="description"></label>
+    <label>Assignee
+      <select name="assignee_id">
+        <option value="">Unassigned</option>
+        <% gardeners.forEach(g => { %><option value="<%= g.id %>"><%= g.name %></option><% }) %>
+      </select>
+    </label>
+    <label>Due date <input type="date" name="due_date"></label>
+    <button class="btn btn-primary">Create task</button>
+  </form>
+</details>
+<% } %>
+
+<div class="card">
+  <table class="table">
+    <tr><th>Task</th><th>Assignee</th><th>Due / visit</th><th>Status</th><th></th></tr>
+    <% tasks.forEach(t => { %>
+    <tr>
+      <td><strong><%= t.title %></strong>
+        <% if (t.property_name) { %><br><span class="muted"><%= t.property_name %></span><% } %></td>
+      <td><%= t.assignee_name || '—' %></td>
+      <td class="muted">
+        <% if (t.visit_ref) { %><a href="/visits/<%= t.visit_ref %>"><%= t.scheduled_date %></a>
+        <% } else { %><%= t.due_date || '—' %><% } %>
+      </td>
+      <td><span class="status status-<%= t.status %>"><%= t.status.replace('_',' ') %></span></td>
+      <td>
+        <form method="post" action="/tasks/<%= t.id %>/status" class="inline">
+          <select name="status" onchange="this.form.submit()">
+            <% ['pending','in_progress','done','blocked'].forEach(s => { %>
+              <option value="<%= s %>" <%= t.status === s ? 'selected' : '' %>><%= s.replace('_',' ') %></option>
+            <% }) %>
+          </select>
+        </form>
+      </td>
+    </tr>
+    <% }) %>
+  </table>
+  <% if (!tasks.length) { %><p class="muted">No tasks found.</p><% } %>
+</div>
+<%- include('../partials/footer') %>

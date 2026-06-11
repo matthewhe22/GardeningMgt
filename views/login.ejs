@@ -1,0 +1,12 @@
+<%- include('partials/header') %>
+<div class="card auth-card">
+  <h1>🌱 GardeningMgt</h1>
+  <p class="muted">Sign in to manage your gardening jobs.</p>
+  <% if (error) { %><p class="alert alert-error"><%= error %></p><% } %>
+  <form method="post" action="/login">
+    <label>Email <input type="email" name="email" required autofocus></label>
+    <label>Password <input type="password" name="password" required></label>
+    <button class="btn btn-primary">Sign in</button>
+  </form>
+</div>
+<%- include('partials/footer') %>

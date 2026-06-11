@@ -1,0 +1,58 @@
+<%- include('partials/header') %>
+<h1>Dashboard <span class="muted">· <%= today %></span></h1>
+
+<div class="grid">
+  <section class="card">
+    <h2>Today's visits<% if (staff) { %> (all gardeners)<% } %></h2>
+    <% if (!todayVisits.length) { %><p class="muted">No visits scheduled for today.</p><% } %>
+    <table class="table">
+      <% todayVisits.forEach(v => { %>
+      <tr>
+        <td><span class="route-no"><%= v.route_order || '–' %></span></td>
+        <td>
+          <a href="/visits/<%= v.id %>"><strong><%= v.property_name %></strong></a><br>
+          <span class="muted"><%= v.address %><% if (v.time_window) { %> · <%= v.time_window %><% } %></span>
+        </td>
+        <% if (staff) { %><td><%= v.gardener_name || 'Unassigned' %></td><% } %>
+        <td><span class="status status-<%= v.status %>"><%= v.status.replace('_',' ') %></span></td>
+      </tr>
+      <% }) %>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>Open tasks</h2>
+    <% if (!myTasks.length) { %><p class="muted">Nothing pending. 🎉</p><% } %>
+    <table class="table">
+      <% myTasks.forEach(t => { %>
+      <tr>
+        <td>
+          <% if (t.visit_id) { %><a href="/visits/<%= t.visit_id %>"><%= t.title %></a>
+          <% } else { %><%= t.title %><% } %>
+          <% if (t.property_name) { %><br><span class="muted"><%= t.property_name %></span><% } %>
+        </td>
+        <td class="muted"><%= t.due_date || t.scheduled_date || '' %></td>
+        <td><span class="status status-<%= t.status %>"><%= t.status.replace('_',' ') %></span></td>
+      </tr>
+      <% }) %>
+    </table>
+    <a class="btn" href="/tasks">All tasks →</a>
+  </section>
+
+  <section class="card">
+    <h2>Open issues</h2>
+    <% if (!openIssues.length) { %><p class="muted">No open issues.</p><% } %>
+    <table class="table">
+      <% openIssues.forEach(i => { %>
+      <tr>
+        <td><a href="/issues/<%= i.id %>"><%= i.title %></a>
+          <% if (i.property_name) { %><br><span class="muted"><%= i.property_name %></span><% } %></td>
+        <td><span class="prio prio-<%= i.priority %>"><%= i.priority %></span></td>
+        <td><span class="status status-<%= i.status %>"><%= i.status.replace('_',' ') %></span></td>
+      </tr>
+      <% }) %>
+    </table>
+    <a class="btn" href="/issues">All issues →</a>
+  </section>
+</div>
+<%- include('partials/footer') %>

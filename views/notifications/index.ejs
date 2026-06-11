@@ -1,0 +1,15 @@
+<%- include('../partials/header') %>
+<h1>Notifications</h1>
+<form method="post" action="/notifications/read-all"><button class="btn">Mark all read</button></form>
+<div class="card">
+  <% notifications.forEach(n => { %>
+    <div class="notification <%= n.read_at ? '' : 'unread' %>">
+      <span class="tag tag-<%= n.type === 'job_summary' ? 'supervisor' : 'gardener' %>"><%= n.type.replace('_',' ') %></span>
+      <%= n.message %>
+      <% if (n.visit_id) { %> · <a href="/visits/<%= n.visit_id %>">view job</a><% } %>
+      <br><span class="muted"><%= n.created_at %> UTC</span>
+    </div>
+  <% }) %>
+  <% if (!notifications.length) { %><p class="muted">No notifications.</p><% } %>
+</div>
+<%- include('../partials/footer') %>

@@ -1,0 +1,20 @@
+<%- include('../partials/header') %>
+<h1>Invoices</h1>
+<p class="muted">Create invoices from a job page — the labour line is pre-filled from the job timer.</p>
+<div class="card">
+  <table class="table">
+    <tr><th>Number</th><th>Property</th><th>Job date</th><th>Total</th><th>Status</th><th>Created</th></tr>
+    <% invoices.forEach(inv => { %>
+    <tr>
+      <td><a href="/invoices/<%= inv.id %>"><strong><%= inv.number %></strong></a></td>
+      <td><%= inv.property_name %></td>
+      <td class="muted"><%= inv.scheduled_date %></td>
+      <td>$<%= inv.total.toFixed(2) %></td>
+      <td><span class="status status-<%= inv.status %>"><%= inv.status %></span></td>
+      <td class="muted"><%= inv.created_at %></td>
+    </tr>
+    <% }) %>
+  </table>
+  <% if (!invoices.length) { %><p class="muted">No invoices yet.</p><% } %>
+</div>
+<%- include('../partials/footer') %>

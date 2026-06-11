@@ -1,0 +1,60 @@
+<%- include('../partials/header') %>
+<h1>Jobs / Visits</h1>
+
+<div class="card">
+  <form method="get" class="filter-row">
+    <label>Date <input type="date" name="date" value="<%= date %>"></label>
+    <% if (staff) { %>
+    <label>Gardener
+      <select name="gardener_id">
+        <option value="">All</option>
+        <% gardeners.forEach(g => { %>
+          <option value="<%= g.id %>" <%= String(g.id) === String(gardenerId) ? 'selected' : '' %>><%= g.name %></option>
+        <% }) %>
+      </select>
+    </label>
+    <% } %>
+    <button class="btn">Filter</button>
+  </form>
+</div>
+
+<% if (staff) { %>
+<details class="card">
+  <summary><strong>＋ Schedule a new visit</strong></summary>
+  <form method="post" action="/visits" class="form-grid">
+    <label>Property
+      <select name="property_id" required>
+        <% properties.forEach(p => { %><option value="<%= p.id %>"><%= p.name %></option><% }) %>
+      </select>
+    </label>
+    <label>Gardener
+      <select name="gardener_id">
+        <option value="">Unassigned</option>
+        <% gardeners.forEach(g => { %><option value="<%= g.id %>"><%= g.name %></option><% }) %>
+      </select>
+    </label>
+    <label>Date <input type="date" name="scheduled_date" required></label>
+    <label>Time window <input type="text" name="time_window" placeholder="08:00-10:00"></label>
+    <label class="span2">Notes <input type="text" name="notes"></label>
+    <button class="btn btn-primary">Schedule visit</button>
+  </form>
+</details>
+<% } %>
+
+<div class="card">
+  <table class="table">
+    <tr><th>#</th><th>Date</th><th>Property</th><th>Gardener</th><th>Status</th><th>Duration</th></tr>
+    <% visits.forEach(v => { %>
+    <tr>
+      <td><span class="route-no"><%= v.route_order || '–' %></span></td>
+      <td><%= v.scheduled_date %><% if (v.time_window) { %><br><span class="muted"><%= v.time_window %></span><% } %></td>
+      <td><a href="/visits/<%= v.id %>"><strong><%= v.property_name %></strong></a><br><span class="muted"><%= v.address %></span></td>
+      <td><%= v.gardener_name || 'Unassigned' %></td>
+      <td><span class="status status-<%= v.status %>"><%= v.status.replace('_',' ') %></span></td>
+      <td class="muted"><%= v.duration_minutes ? v.duration_minutes + ' min' : '' %></td>
+    </tr>
+    <% }) %>
+  </table>
+  <% if (!visits.length) { %><p class="muted">No visits match this filter.</p><% } %>
+</div>
+<%- include('../partials/footer') %>

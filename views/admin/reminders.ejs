@@ -1,0 +1,33 @@
+<%- include('../partials/header') %>
+<h1>Visit reminders</h1>
+<p class="muted">Automatic reminders go out every morning at 06:00 for the day's visits.
+  Use bulk send to remind everyone now (e.g. for tomorrow's schedule).</p>
+
+<% if (sent !== undefined && sent !== null) { %>
+  <p class="alert alert-ok">Sent <%= sent %> reminder(s).</p>
+<% } %>
+
+<div class="card">
+  <form method="post" action="/admin/reminders/bulk" class="filter-row">
+    <label>Date <input type="date" name="date" value="<%= date %>"></label>
+    <label><input type="checkbox" name="force"> Re-send even if already reminded</label>
+    <button class="btn btn-primary">📣 Send bulk reminders</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Scheduled visits on <%= date %></h2>
+  <table class="table">
+    <tr><th>Gardener</th><th>Property</th><th>Window</th><th>Reminder</th></tr>
+    <% pending.forEach(v => { %>
+    <tr>
+      <td><%= v.gardener_name || '⚠ Unassigned' %></td>
+      <td><a href="/visits/<%= v.id %>"><%= v.property_name %></a></td>
+      <td class="muted"><%= v.time_window || '—' %></td>
+      <td><%= v.reminder_sent_at ? '✅ ' + v.reminder_sent_at : 'not sent' %></td>
+    </tr>
+    <% }) %>
+  </table>
+  <% if (!pending.length) { %><p class="muted">No scheduled visits on this date.</p><% } %>
+</div>
+<%- include('../partials/footer') %>
