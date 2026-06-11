@@ -80,7 +80,10 @@ app.use((req, res) => {
 });
 app.use((err, req, res, next) => {
   console.error(err);
-  res.status(500).render('error', { title: 'Error', message: 'Something went wrong.' });
+  res.status(500).render('error', { title: 'Error', message: 'Something went wrong.' }, (renderErr, html) => {
+    if (renderErr) return res.type('text/plain').send(`Error: ${err.message}`);
+    res.send(html);
+  });
 });
 
 if (require.main === module) {
