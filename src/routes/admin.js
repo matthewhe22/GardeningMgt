@@ -125,4 +125,36 @@ router.post('/users/:id/toggle', requireRole(), asyncHandler(async (req, res) =>
   res.redirect('/admin/users');
 }));
 
+// --- App settings (OneDrive archiving): admin only ---
+
+const { getSettings, setSetting } = require('../settings');
+const { testConnection, SETTING_KEYS } = require('../onedrive');
+
+router.get('/settings', requireRole(), asyncHandler(async (req, res) => {
+  const settings = await getSettings(SETTING_KEYS);
+  res.render('admin/settings', {
+    title: 'Settings', settings,
+    saved: req.query.saved, test: null,
+  });
+}));
+
+router.post('/settings', requireRole(), asyncHandler(async (req, res) => {
+  for (const key of SETTING_KEYS) {
+    const value = (req.body[key] || '').trim();
+    // Leave the stored secret untouched when the masked placeholder comes back.
+    if (key === 'onedrive_client_secret' && value === '********') continue;
+    await setSetting(key, value || null);
+  }
+  await logActivity(req.user.id, 'settings.update', 'settings', null, 'Updated OneDrive settings');
+  res.redirect('/admin/settings?saved=1');
+}));
+
+router.post('/settings/test', requireRole(), asyncHandler(async (req, res) => {
+  const settings = await getSettings(SETTING_KEYS);
+  const test = await testConnection();
+  await logActivity(req.user.id, 'settings.test', 'settings', null,
+    `OneDrive connection test: ${test.ok ? 'OK' : 'failed'} — ${test.message}`);
+  res.render('admin/settings', { title: 'Settings', settings, saved: null, test });
+}));
+
 module.exports = router;

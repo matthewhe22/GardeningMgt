@@ -26,11 +26,20 @@
     <p>Started at <strong><%= visit.started_at %></strong> (UTC). Timer running…</p>
     <form method="post" action="/visits/<%= visit.id %>/timer/stop" class="gps-form">
       <input type="hidden" name="lat"><input type="hidden" name="lng">
-      <button class="btn btn-danger">■ Finish job</button>
+      <p><strong><%= photos.length %></strong> photo(s) uploaded for this site so far.
+        <% if (!photos.length) { %><span class="muted">Upload your photos in the Photos section below before completing.</span><% } %></p>
+      <label><input type="checkbox" name="confirm_photos" required>
+        I confirm all photos for this site have been uploaded</label>
+      <button class="btn btn-danger">✔ Complete job</button>
+      <p class="muted">Completing records the date &amp; time, notifies your supervisor with a summary,
+        and files the job report and photos.</p>
     </form>
   <% } else if (visit.finished_at) { %>
     <p>Worked <strong><%= visit.duration_minutes %> min</strong>
       (<%= visit.started_at %> → <%= visit.finished_at %> UTC).</p>
+    <p>
+      <a class="btn btn-primary" href="/visits/<%= visit.id %>/report" target="_blank">📄 View completion report</a>
+    </p>
     <form method="post" action="/visits/<%= visit.id %>/timer/start" class="gps-form">
       <input type="hidden" name="lat"><input type="hidden" name="lng">
       <button class="btn">↻ Restart timer</button>

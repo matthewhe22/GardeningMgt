@@ -1,0 +1,48 @@
+<%- include('../partials/header') %>
+<div class="page-head">
+  <h1>Settings</h1>
+  <p class="page-sub">OneDrive archiving: when a job is completed, its report and photos are
+    uploaded to the OneDrive below. Jobs complete normally even if OneDrive is not configured
+    or unavailable — failures are recorded in the activity log.</p>
+</div>
+
+<% if (locals.saved) { %><p class="alert alert-ok">Settings saved.</p><% } %>
+<% if (locals.test) { %>
+  <p class="alert <%= test.ok ? 'alert-ok' : 'alert-error' %>"><%= test.ok ? '✅' : '❌' %> <%= test.message %></p>
+<% } %>
+
+<div class="card">
+  <h2>OneDrive (Microsoft Graph)</h2>
+  <form method="post" action="/admin/settings" class="form-grid">
+    <label>Tenant (Directory) ID
+      <input type="text" name="onedrive_tenant_id" value="<%= settings.onedrive_tenant_id || '' %>" placeholder="00000000-0000-0000-0000-000000000000"></label>
+    <label>Client (Application) ID
+      <input type="text" name="onedrive_client_id" value="<%= settings.onedrive_client_id || '' %>"></label>
+    <label>Client secret
+      <input type="password" name="onedrive_client_secret"
+        value="<%= settings.onedrive_client_secret ? '********' : '' %>"
+        placeholder="<%= settings.onedrive_client_secret ? 'saved — leave as is to keep' : 'paste secret value' %>"></label>
+    <label>Drive user (UPN)
+      <input type="email" name="onedrive_drive_user" value="<%= settings.onedrive_drive_user || '' %>" placeholder="ops@yourcompany.com"></label>
+    <label>Folder
+      <input type="text" name="onedrive_folder" value="<%= settings.onedrive_folder || '' %>" placeholder="GardeningMgt"></label>
+    <button class="btn btn-primary">Save settings</button>
+  </form>
+  <form method="post" action="/admin/settings/test" style="margin-top:8px">
+    <button class="btn">Test connection</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>How to set this up in Azure</h2>
+  <ol class="muted" style="line-height:1.9">
+    <li>Go to <strong>portal.azure.com → Microsoft Entra ID → App registrations → New registration</strong>.</li>
+    <li>Copy the <strong>Application (client) ID</strong> and <strong>Directory (tenant) ID</strong> into the form above.</li>
+    <li>Under <strong>Certificates &amp; secrets</strong>, create a client secret and paste its <em>value</em> above.</li>
+    <li>Under <strong>API permissions</strong>, add Microsoft Graph → <strong>Application permissions</strong> →
+      <code>Files.ReadWrite.All</code>, then click <strong>Grant admin consent</strong>.</li>
+    <li>Set <strong>Drive user</strong> to the account whose OneDrive should receive the files.</li>
+    <li>Click <strong>Test connection</strong> to verify.</li>
+  </ol>
+</div>
+<%- include('../partials/footer') %>

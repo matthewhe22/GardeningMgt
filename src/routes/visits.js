@@ -4,6 +4,7 @@ const { requireRole, isStaff } = require('../auth');
 const { logActivity } = require('../activity');
 const { upload, savePhoto } = require('../upload');
 const { nextDate } = require('../recurrence');
+const { loadReportData, renderReportHtml, archiveToOneDrive } = require('../report');
 const { asyncHandler } = require('../asyncHandler');
 
 const router = express.Router();
@@ -152,10 +153,13 @@ router.post('/:id/gps', asyncHandler(async (req, res) => {
   res.json({ ok: true });
 }));
 
-// Job timer: stop (computes duration, marks completed, notifies supervisors/admins)
+// Job complete (timer stop): requires confirming all photos are uploaded,
+// then records completion date/time, notifies staff, schedules the next
+// occurrence and archives the report + photos to OneDrive.
 router.post('/:id/timer/stop', asyncHandler(async (req, res) => {
   const visit = await getVisit(req.params.id);
   if (!visit || !canSeeVisit(req.user, visit)) return res.redirect('/visits');
+  if (req.body.confirm_photos !== 'on') return res.redirect(`/visits/${visit.id}`);
   if (visit.started_at) {
     await q(`
       UPDATE visits SET finished_at = now(),
@@ -179,8 +183,20 @@ router.post('/:id/timer/stop', asyncHandler(async (req, res) => {
       [visit.id, summary]);
 
     await rollRecurringJob(visit, req.user.id);
+    // Archive the completion report + photos to OneDrive (best-effort).
+    await archiveToOneDrive(visit.id);
   }
   res.redirect(`/visits/${visit.id}`);
+}));
+
+// Printable completion report for a job (also archived to OneDrive on completion).
+router.get('/:id/report', asyncHandler(async (req, res) => {
+  const visit = await getVisit(req.params.id);
+  if (!visit || !canSeeVisit(req.user, visit)) {
+    return res.status(404).render('error', { title: 'Not found', message: 'Report not found.' });
+  }
+  const data = await loadReportData(visit.id);
+  res.send(await renderReportHtml(data));
 }));
 
 /**
