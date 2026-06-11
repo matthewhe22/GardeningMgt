@@ -51,7 +51,7 @@
       <% }) %>
     </div>
     <form method="post" action="/issues/<%= issue.id %>/photos" enctype="multipart/form-data" class="add-row">
-      <input type="file" name="photos" accept="image/*" capture="environment" multiple required>
+      <input type="file" name="photos" accept="image/*" multiple required>
       <button class="btn">Upload</button>
     </form>
   </section>

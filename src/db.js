@@ -47,8 +47,27 @@ CREATE TABLE IF NOT EXISTS properties (
   created_at    TIMESTAMP NOT NULL DEFAULT now()
 );
 
+-- A recurring contract: one job per site, serviced on a schedule by a
+-- default gardener. Individual dated occurrences live in "visits".
+CREATE TABLE IF NOT EXISTS jobs (
+  id                SERIAL PRIMARY KEY,
+  property_id       INTEGER NOT NULL REFERENCES properties(id),
+  gardener_id       INTEGER REFERENCES users(id),     -- default gardener for every occurrence
+  frequency         TEXT NOT NULL DEFAULT 'weekly'
+                    CHECK (frequency IN ('weekly','fortnightly','monthly')),
+  contract_years    INTEGER NOT NULL DEFAULT 1 CHECK (contract_years IN (1,2)),
+  start_date        DATE NOT NULL,
+  end_date          DATE NOT NULL,                    -- start_date + contract term
+  time_window       TEXT,
+  last_completed_at TIMESTAMP,                        -- set every time an occurrence completes
+  active            BOOLEAN NOT NULL DEFAULT true,
+  created_by        INTEGER REFERENCES users(id),
+  created_at        TIMESTAMP NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS visits (
   id               SERIAL PRIMARY KEY,
+  job_id           INTEGER REFERENCES jobs(id),
   property_id      INTEGER NOT NULL REFERENCES properties(id),
   gardener_id      INTEGER REFERENCES users(id),
   scheduled_date   DATE NOT NULL,
@@ -103,6 +122,14 @@ CREATE TABLE IF NOT EXISTS issue_comments (
   created_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS visit_comments (
+  id         SERIAL PRIMARY KEY,
+  visit_id   INTEGER NOT NULL REFERENCES visits(id) ON DELETE CASCADE,
+  user_id    INTEGER REFERENCES users(id),
+  body       TEXT NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT now()
+);
+
 -- Image bytes live in the database so the app works on serverless hosts
 -- (Vercel's filesystem is read-only and not shared between invocations).
 CREATE TABLE IF NOT EXISTS photos (
@@ -114,6 +141,7 @@ CREATE TABLE IF NOT EXISTS photos (
   caption       TEXT,
   visit_id      INTEGER REFERENCES visits(id) ON DELETE SET NULL,
   issue_id      INTEGER REFERENCES issues(id) ON DELETE SET NULL,
+  visit_comment_id INTEGER REFERENCES visit_comments(id) ON DELETE SET NULL,
   uploaded_by   INTEGER REFERENCES users(id),
   shared        BOOLEAN NOT NULL DEFAULT true,
   created_at    TIMESTAMP NOT NULL DEFAULT now()
@@ -129,14 +157,6 @@ CREATE TABLE IF NOT EXISTS gps_points (
   recorded_at TIMESTAMP NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_gps_visit ON gps_points (visit_id, recorded_at);
-
-CREATE TABLE IF NOT EXISTS visit_comments (
-  id         SERIAL PRIMARY KEY,
-  visit_id   INTEGER NOT NULL REFERENCES visits(id) ON DELETE CASCADE,
-  user_id    INTEGER REFERENCES users(id),
-  body       TEXT NOT NULL,
-  created_at TIMESTAMP NOT NULL DEFAULT now()
-);
 
 CREATE TABLE IF NOT EXISTS invoices (
   id         SERIAL PRIMARY KEY,
@@ -194,6 +214,8 @@ function ready() {
       await pool.query(SCHEMA);
       // Migrations for databases created before these columns existed.
       await pool.query('ALTER TABLE properties ADD COLUMN IF NOT EXISTS lots INTEGER');
+      await pool.query('ALTER TABLE visits ADD COLUMN IF NOT EXISTS job_id INTEGER REFERENCES jobs(id)');
+      await pool.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS visit_comment_id INTEGER REFERENCES visit_comments(id) ON DELETE SET NULL');
       const { c } = (await pool.query('SELECT COUNT(*)::int AS c FROM users')).rows[0];
       if (c === 0) {
         const bcrypt = require('bcryptjs');

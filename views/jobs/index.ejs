@@ -1,0 +1,92 @@
+<%- include('../partials/header') %>
+<div class="page-head">
+  <h1>Site jobs</h1>
+  <p class="page-sub">One recurring job per site. The default gardener is assigned to every
+    occurrence; individual visits can still be reassigned as a replacement. Completing a visit
+    automatically schedules the next one per the frequency, within the contract term.</p>
+</div>
+
+<% if (staff) { %>
+<details class="card">
+  <summary><strong>＋ New site job</strong></summary>
+  <form method="post" action="/jobs" class="form-grid">
+    <label>Site
+      <select name="property_id" required>
+        <% properties.forEach(p => { %><option value="<%= p.id %>"><%= p.name %></option><% }) %>
+      </select>
+    </label>
+    <label>Default gardener
+      <select name="gardener_id">
+        <option value="">Unassigned</option>
+        <% gardeners.forEach(g => { %><option value="<%= g.id %>"><%= g.name %></option><% }) %>
+      </select>
+    </label>
+    <label>Frequency
+      <select name="frequency">
+        <% frequencies.forEach(f => { %><option value="<%= f %>"><%= f %></option><% }) %>
+      </select>
+    </label>
+    <label>Contract term
+      <select name="contract_years">
+        <option value="1">1 year</option>
+        <option value="2">2 years</option>
+      </select>
+    </label>
+    <label>First visit date <input type="date" name="start_date" required></label>
+    <label>Time window <input type="text" name="time_window" placeholder="08:00-10:00"></label>
+    <button class="btn btn-primary">Create job &amp; schedule first visit</button>
+  </form>
+</details>
+<% } %>
+
+<div class="card">
+  <table class="table">
+    <tr><th>Site</th><th>Frequency</th><th>Contract</th><th>Gardener</th><th>Last completed</th><th>Next visit</th><% if (staff) { %><th></th><% } %></tr>
+    <% jobs.forEach(j => { %>
+    <tr>
+      <td><strong><%= j.property_name %></strong><br>
+        <span class="muted"><%= j.address %><% if (j.lots != null) { %> · <%= j.lots %> lots<% } %></span>
+        <% if (!j.active) { %><span class="status status-cancelled">inactive</span><% } %>
+      </td>
+      <td><span class="status status-scheduled"><%= j.frequency %></span></td>
+      <td class="muted"><%= j.contract_years %> yr<br><%= j.start_date %> → <%= j.end_date %></td>
+      <td><%= j.gardener_name || '⚠ Unassigned' %></td>
+      <td class="muted"><%= j.last_completed_at ? j.last_completed_at + ' UTC' : 'never' %></td>
+      <td>
+        <% if (j.next_visit_date) { %>
+          <a href="/visits/<%= j.next_visit_id %>"><%= j.next_visit_date %></a>
+        <% } else { %><span class="muted">none scheduled</span><% } %>
+      </td>
+      <% if (staff) { %>
+      <td>
+        <details>
+          <summary class="muted">Edit</summary>
+          <form method="post" action="/jobs/<%= j.id %>/update" class="form-grid">
+            <label>Gardener
+              <select name="gardener_id">
+                <option value="">Unassigned</option>
+                <% gardeners.forEach(g => { %>
+                  <option value="<%= g.id %>" <%= j.gardener_id === g.id ? 'selected' : '' %>><%= g.name %></option>
+                <% }) %>
+              </select>
+            </label>
+            <label>Frequency
+              <select name="frequency">
+                <% frequencies.forEach(f => { %>
+                  <option value="<%= f %>" <%= j.frequency === f ? 'selected' : '' %>><%= f %></option>
+                <% }) %>
+              </select>
+            </label>
+            <label>Time window <input type="text" name="time_window" value="<%= j.time_window || '' %>"></label>
+            <label><input type="checkbox" name="active" <%= j.active ? 'checked' : '' %>> Active</label>
+            <button class="btn">Save</button>
+          </form>
+        </details>
+      </td>
+      <% } %>
+    </tr>
+    <% }) %>
+  </table>
+  <% if (!jobs.length) { %><p class="muted">No site jobs yet<% if (staff) { %> — create one above<% } %>.</p><% } %>
+</div>
+<%- include('../partials/footer') %>

@@ -3,6 +3,7 @@ const { q, q1, pool } = require('../db');
 const { requireRole, isStaff } = require('../auth');
 const { logActivity } = require('../activity');
 const { upload, savePhoto } = require('../upload');
+const { nextDate } = require('../recurrence');
 const { asyncHandler } = require('../asyncHandler');
 
 const router = express.Router();
@@ -61,14 +62,21 @@ router.get('/:id', asyncHandler(async (req, res) => {
     return res.status(403).render('error', { title: 'Forbidden', message: 'Not your visit.' });
   }
   const tasks = await q('SELECT t.*, u.name AS assignee_name FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id WHERE t.visit_id = $1 ORDER BY t.id', [visit.id]);
-  const photos = await q('SELECT ph.id, ph.filename, ph.caption, ph.original_name, ph.created_at, u.name AS uploader_name FROM photos ph LEFT JOIN users u ON u.id = ph.uploaded_by WHERE ph.visit_id = $1 ORDER BY ph.created_at DESC', [visit.id]);
+  const photos = await q('SELECT ph.id, ph.filename, ph.caption, ph.original_name, ph.created_at, u.name AS uploader_name FROM photos ph LEFT JOIN users u ON u.id = ph.uploaded_by WHERE ph.visit_id = $1 AND ph.visit_comment_id IS NULL ORDER BY ph.created_at DESC', [visit.id]);
   const comments = await q('SELECT c.*, u.name AS author_name, u.role AS author_role FROM visit_comments c LEFT JOIN users u ON u.id = c.user_id WHERE c.visit_id = $1 ORDER BY c.created_at', [visit.id]);
+  const commentPhotos = await q('SELECT ph.visit_comment_id, ph.filename, ph.created_at FROM photos ph WHERE ph.visit_id = $1 AND ph.visit_comment_id IS NOT NULL ORDER BY ph.created_at', [visit.id]);
+  const photosByComment = {};
+  for (const ph of commentPhotos) (photosByComment[ph.visit_comment_id] ||= []).push(ph);
   const invoice = await q1('SELECT * FROM invoices WHERE visit_id = $1 ORDER BY id DESC LIMIT 1', [visit.id]);
   const gardeners = await q("SELECT id, name FROM users WHERE role = 'gardener' AND active");
   const gpsPoints = await q('SELECT * FROM gps_points WHERE visit_id = $1 ORDER BY recorded_at', [visit.id]);
+  const job = visit.job_id
+    ? await q1('SELECT j.*, u.name AS default_gardener_name FROM jobs j LEFT JOIN users u ON u.id = j.gardener_id WHERE j.id = $1', [visit.job_id])
+    : null;
   res.render('visits/show', {
     title: `Job #${visit.id} — ${visit.property_name}`,
-    visit, tasks, photos, comments, invoice, gardeners, gpsPoints, staff: isStaff(req.user),
+    visit, tasks, photos, comments, photosByComment, invoice, gardeners, gpsPoints, job,
+    staff: isStaff(req.user),
   });
 }));
 
@@ -85,6 +93,20 @@ router.post('/:id/update', requireRole('supervisor'), asyncHandler(async (req, r
       duration_minutes ? Number(duration_minutes) : visit.duration_minutes, visit.id]);
   await logActivity(req.user.id, 'visit.update', 'visit', visit.id,
     `Updated visit #${visit.id} (status: ${visit.status} -> ${status})`);
+  if (status === 'completed' && visit.status !== 'completed') await rollRecurringJob(visit, req.user.id);
+  res.redirect(`/visits/${visit.id}`);
+}));
+
+// Reschedule: the assigned gardener (or staff) can set the date of a visit.
+router.post('/:id/reschedule', asyncHandler(async (req, res) => {
+  const visit = await getVisit(req.params.id);
+  if (!visit || !canSeeVisit(req.user, visit)) return res.redirect('/visits');
+  const date = req.body.scheduled_date;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(date || '')) {
+    await q('UPDATE visits SET scheduled_date = $1, route_order = NULL WHERE id = $2', [date, visit.id]);
+    await logActivity(req.user.id, 'visit.reschedule', 'visit', visit.id,
+      `Moved job #${visit.id} from ${visit.scheduled_date} to ${date}`);
+  }
   res.redirect(`/visits/${visit.id}`);
 }));
 
@@ -96,6 +118,7 @@ router.post('/:id/status', asyncHandler(async (req, res) => {
   if (!['scheduled', 'in_progress', 'completed', 'skipped'].includes(status)) return res.redirect(`/visits/${visit.id}`);
   await q('UPDATE visits SET status = $1 WHERE id = $2', [status, visit.id]);
   await logActivity(req.user.id, 'visit.status', 'visit', visit.id, `Visit #${visit.id}: ${visit.status} -> ${status}`);
+  if (status === 'completed' && visit.status !== 'completed') await rollRecurringJob(visit, req.user.id);
   res.redirect(`/visits/${visit.id}`);
 }));
 
@@ -154,19 +177,67 @@ router.post('/:id/timer/stop', asyncHandler(async (req, res) => {
       INSERT INTO notifications (user_id, visit_id, type, message)
       SELECT id, $1, 'job_summary', $2 FROM users WHERE role IN ('admin','supervisor') AND active`,
       [visit.id, summary]);
+
+    await rollRecurringJob(visit, req.user.id);
   }
   res.redirect(`/visits/${visit.id}`);
 }));
 
-// Comments on a job (supervisors, admins and the assigned gardener)
-router.post('/:id/comments', asyncHandler(async (req, res) => {
+/**
+ * After an occurrence of a recurring site job completes: record the
+ * completion time on the job and schedule the next visit per the job's
+ * frequency (assigned to the job's default gardener), while the contract
+ * is active and within its term.
+ */
+async function rollRecurringJob(visit, actorId) {
+  if (!visit.job_id) return;
+  const job = await q1('SELECT * FROM jobs WHERE id = $1', [visit.job_id]);
+  if (!job) return;
+  await q('UPDATE jobs SET last_completed_at = now() WHERE id = $1', [job.id]);
+  if (!job.active) return;
+  const next = nextDate(visit.scheduled_date, job.frequency);
+  if (next > job.end_date) return; // contract term over
+  const exists = await q1(
+    `SELECT id FROM visits WHERE job_id = $1 AND scheduled_date >= $2 AND status = 'scheduled' LIMIT 1`,
+    [job.id, next]);
+  if (exists) return; // next occurrence already on the books
+  await q(`
+    INSERT INTO visits (job_id, property_id, gardener_id, scheduled_date, time_window, created_by)
+    VALUES ($1, $2, $3, $4, $5, $6)`,
+    [job.id, job.property_id, job.gardener_id, next, job.time_window, actorId]);
+  await logActivity(null, 'job.roll', 'job', job.id,
+    `Scheduled next ${job.frequency} visit for job #${job.id} on ${next}`);
+}
+
+// Comments on a job (supervisors, admins and the assigned gardener).
+// Photos can be attached, and the other party is notified: commenting staff
+// notify the assigned gardener; a commenting gardener notifies staff.
+router.post('/:id/comments', upload.array('photos', 10), asyncHandler(async (req, res) => {
   const visit = await getVisit(req.params.id);
   if (!visit || !canSeeVisit(req.user, visit)) return res.redirect('/visits');
   const body = (req.body.body || '').trim();
-  if (body) {
-    await q('INSERT INTO visit_comments (visit_id, user_id, body) VALUES ($1, $2, $3)',
-      [visit.id, req.user.id, body]);
-    await logActivity(req.user.id, 'visit.comment', 'visit', visit.id, `Commented on job #${visit.id}`);
+  const files = req.files || [];
+  if (body || files.length) {
+    const comment = await q1(
+      'INSERT INTO visit_comments (visit_id, user_id, body) VALUES ($1, $2, $3) RETURNING id',
+      [visit.id, req.user.id, body || '(photo)']);
+    for (const f of files) {
+      await savePhoto(f, { visitId: visit.id, commentId: comment.id, userId: req.user.id });
+    }
+    await logActivity(req.user.id, 'visit.comment', 'visit', visit.id,
+      `Commented on job #${visit.id}${files.length ? ` with ${files.length} photo(s)` : ''}`);
+
+    const message = `${req.user.name} commented on job #${visit.id} (${visit.property_name}): ` +
+      `${body.slice(0, 120)}${files.length ? ` [${files.length} photo(s)]` : ''}`;
+    if (req.user.id === visit.gardener_id) {
+      await pool.query(`
+        INSERT INTO notifications (user_id, visit_id, type, message)
+        SELECT id, $1, 'comment', $2 FROM users WHERE role IN ('admin','supervisor') AND active`,
+        [visit.id, message]);
+    } else if (visit.gardener_id) {
+      await q('INSERT INTO notifications (user_id, visit_id, type, message) VALUES ($1, $2, $3, $4)',
+        [visit.gardener_id, visit.id, 'comment', message]);
+    }
   }
   res.redirect(`/visits/${visit.id}#comments`);
 }));

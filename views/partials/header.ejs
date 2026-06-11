@@ -28,7 +28,8 @@
     activity: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg>',
     users: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 5a3.5 3.5 0 0 1 0 7"/><path d="M17.5 14.5a6.5 6.5 0 0 1 4 5.5"/></svg>',
     logout: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4H6a1.5 1.5 0 0 0-1.5 1.5v13A1.5 1.5 0 0 0 6 20h8"/><path d="m16.5 8 4 4-4 4"/><path d="M20 12H9.5"/></svg>',
-    more: '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>'
+    more: '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>',
+    repeat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>'
   };
 %>
 <aside class="sidebar">
@@ -37,6 +38,7 @@
     <div class="nav-label">Workspace</div>
     <a href="/" class="nav-item<%= active('/') %>"><%- icons.home %> Dashboard</a>
     <a href="/visits" class="nav-item<%= active('/visits') %>"><%- icons.jobs %> Jobs</a>
+    <a href="/jobs" class="nav-item<%= active('/jobs') %>"><%- icons.repeat %> Site jobs</a>
     <a href="/tasks" class="nav-item<%= active('/tasks') %>"><%- icons.tasks %> Tasks</a>
     <a href="/issues" class="nav-item<%= active('/issues') %>"><%- icons.issues %> Issues</a>
     <a href="/photos" class="nav-item<%= active('/photos') %>"><%- icons.photos %> Photos</a>
@@ -83,6 +85,7 @@
 <label for="nav-toggle" class="sheet-backdrop" aria-hidden="true"></label>
 <div class="sheet" aria-label="More options">
   <div class="sheet-handle"></div>
+  <a href="/jobs" class="nav-item<%= active('/jobs') %>"><%- icons.repeat %> Site jobs</a>
   <a href="/tasks" class="nav-item<%= active('/tasks') %>"><%- icons.tasks %> Tasks</a>
   <a href="/photos" class="nav-item<%= active('/photos') %>"><%- icons.photos %> Photos</a>
   <a href="/notifications" class="nav-item<%= active('/notifications') %>"><%- icons.bell %> Notifications<% if (unreadCount > 0) { %><span class="badge"><%= unreadCount %></span><% } %></a>

@@ -4,6 +4,22 @@
   · Gardener: <%= visit.gardener_name || 'Unassigned' %>
   · <span class="status status-<%= visit.status %>"><%= visit.status.replace('_',' ') %></span></p>
 
+<% if (locals.job) { %>
+<p class="muted">🔁 Recurring <strong><%= job.frequency %></strong> job
+  (<%= job.contract_years %>-year contract, <%= job.start_date %> → <%= job.end_date %>)
+  · default gardener: <%= job.default_gardener_name || 'unassigned' %>
+  <% if (job.default_gardener_name && visit.gardener_name && job.gardener_id !== visit.gardener_id) { %>
+    · <span class="status status-in_progress">replacement: <%= visit.gardener_name %></span>
+  <% } %>
+  · last completed: <%= job.last_completed_at ? job.last_completed_at + ' UTC' : 'never' %>
+  · <a href="/jobs">all site jobs</a></p>
+<% } %>
+
+<form method="post" action="/visits/<%= visit.id %>/reschedule" class="filter-row" style="margin-bottom:16px">
+  <label>Visit date <input type="date" name="scheduled_date" value="<%= visit.scheduled_date %>" required></label>
+  <button class="btn">Change date</button>
+</form>
+
 <div class="card timer-card">
   <h2>⏱ Job timer</h2>
   <% if (visit.started_at && !visit.finished_at) { %>
@@ -78,10 +94,12 @@
     </div>
     <% if (!photos.length) { %><p class="muted">No photos yet.</p><% } %>
     <form method="post" action="/visits/<%= visit.id %>/photos" enctype="multipart/form-data" class="form-grid">
-      <label class="span2">Photos <input type="file" name="photos" accept="image/*" capture="environment" multiple required></label>
+      <label class="span2">Photos <input type="file" name="photos" accept="image/*" multiple required></label>
       <label class="span2">Caption <input type="text" name="caption"></label>
       <label><input type="checkbox" name="shared" checked> Share with the whole team</label>
       <button class="btn btn-primary">Upload</button>
+      <p class="muted span2">On a phone you can pick from your photo library or take a new picture
+        with the camera. Every photo is timestamped automatically.</p>
     </form>
   </section>
 
@@ -92,12 +110,21 @@
         <strong><%= c.author_name %></strong> <span class="tag tag-<%= c.author_role %>"><%= c.author_role %></span>
         <span class="muted"><%= c.created_at %> UTC</span>
         <p><%= c.body %></p>
+        <% (photosByComment[c.id] || []).forEach(ph => { %>
+          <figure class="photo" style="max-width:140px;display:inline-block">
+            <a href="/uploads/<%= ph.filename %>" target="_blank"><img src="/uploads/<%= ph.filename %>" alt="comment photo" loading="lazy"></a>
+            <figcaption><span class="photo-stamp">📅 <%= ph.created_at %> UTC</span></figcaption>
+          </figure>
+        <% }) %>
       </div>
     <% }) %>
     <% if (!comments.length) { %><p class="muted">No comments yet.</p><% } %>
-    <form method="post" action="/visits/<%= visit.id %>/comments">
+    <form method="post" action="/visits/<%= visit.id %>/comments" enctype="multipart/form-data">
       <textarea name="body" rows="2" placeholder="Add a comment…" required></textarea>
+      <label class="muted">Attach photos (optional)
+        <input type="file" name="photos" accept="image/*" multiple></label>
       <button class="btn">Comment</button>
+      <p class="muted">The assigned gardener is notified of staff comments; gardener comments notify supervisors and admins.</p>
     </form>
   </section>
 

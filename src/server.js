@@ -66,6 +66,7 @@ app.get('/uploads/:filename', requireLogin, asyncHandler(async (req, res) => {
 app.use('/', require('./routes/auth'));
 app.use('/', requireLogin, require('./routes/dashboard'));
 app.use('/visits', requireLogin, require('./routes/visits'));
+app.use('/jobs', requireLogin, require('./routes/jobs'));
 app.use('/tasks', requireLogin, require('./routes/tasks'));
 app.use('/issues', requireLogin, require('./routes/issues'));
 app.use('/photos', requireLogin, require('./routes/photos'));
