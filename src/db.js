@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS properties (
   contact_phone TEXT,
   lat           REAL,
   lng           REAL,
+  lots          INTEGER,
   notes         TEXT,
   created_at    TIMESTAMP NOT NULL DEFAULT now()
 );
@@ -191,6 +192,8 @@ function ready() {
   if (!readyPromise) {
     readyPromise = (async () => {
       await pool.query(SCHEMA);
+      // Migrations for databases created before these columns existed.
+      await pool.query('ALTER TABLE properties ADD COLUMN IF NOT EXISTS lots INTEGER');
       const { c } = (await pool.query('SELECT COUNT(*)::int AS c FROM users')).rows[0];
       if (c === 0) {
         const bcrypt = require('bcryptjs');

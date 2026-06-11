@@ -1,5 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
+const multer = require('multer');
+const { parseSiteUpload } = require('../siteImport');
 const { q, q1 } = require('../db');
 const { requireRole } = require('../auth');
 const { logActivity } = require('../activity');
@@ -35,24 +37,62 @@ router.get('/reminders', requireRole('supervisor'), asyncHandler(async (req, res
   res.render('admin/reminders', { title: 'Visit reminders', date, pending, sent: req.query.sent });
 }));
 
-// --- Properties: supervisors and admins ---
+// --- Properties / sites: supervisors and admins ---
 
 router.get('/properties', requireRole('supervisor'), asyncHandler(async (req, res) => {
   const properties = await q('SELECT * FROM properties ORDER BY name');
-  res.render('admin/properties', { title: 'Properties', properties });
+  res.render('admin/properties', {
+    title: 'Sites', properties,
+    imported: req.query.imported, importErrors: req.query.errors,
+  });
 }));
 
 router.post('/properties', requireRole('supervisor'), asyncHandler(async (req, res) => {
-  const { name, address, contact_name, contact_phone, lat, lng, notes } = req.body;
+  const { name, address, contact_name, contact_phone, lat, lng, lots, notes } = req.body;
   if (!(name || '').trim() || !(address || '').trim()) return res.redirect('/admin/properties');
   const { id } = await q1(`
-    INSERT INTO properties (name, address, contact_name, contact_phone, lat, lng, notes)
-    VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+    INSERT INTO properties (name, address, contact_name, contact_phone, lat, lng, lots, notes)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
     [name.trim(), address.trim(), contact_name || null, contact_phone || null,
-      lat ? Number(lat) : null, lng ? Number(lng) : null, notes || null]);
-  await logActivity(req.user.id, 'property.create', 'property', id, `Added property "${name.trim()}"`);
+      lat ? Number(lat) : null, lng ? Number(lng) : null,
+      lots ? Math.round(Number(lots)) : null, notes || null]);
+  await logActivity(req.user.id, 'property.create', 'property', id, `Added site "${name.trim()}"`);
   res.redirect('/admin/properties');
 }));
+
+// Bulk import sites from an Excel (.xlsx) or CSV upload.
+// Expected columns (flexible spelling): Site Name, Address, # of Lots,
+// Lat, Lng, Contact, Phone, Notes.
+const spreadsheetUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) =>
+    cb(null, /\.(xlsx|csv)$/i.test(file.originalname || '')),
+});
+
+router.post('/properties/import', requireRole('supervisor'),
+  spreadsheetUpload.single('file'), asyncHandler(async (req, res) => {
+    if (!req.file) {
+      return res.redirect('/admin/properties?errors=' +
+        encodeURIComponent('No file received — upload a .xlsx or .csv file'));
+    }
+    const { sites, errors } = await parseSiteUpload(req.file);
+    let imported = 0;
+    for (const s of sites) {
+      await q(`
+        INSERT INTO properties (name, address, contact_name, contact_phone, lat, lng, lots, notes)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [s.name, s.address, s.contact_name, s.contact_phone, s.lat, s.lng, s.lots, s.notes]);
+      imported++;
+    }
+    if (imported) {
+      await logActivity(req.user.id, 'property.import', 'property', null,
+        `Imported ${imported} site(s) from ${req.file.originalname}`);
+    }
+    const params = new URLSearchParams({ imported: String(imported) });
+    if (errors.length) params.set('errors', errors.slice(0, 10).join(' · '));
+    res.redirect(`/admin/properties?${params}`);
+  }));
 
 // --- User management: admin only ---
 

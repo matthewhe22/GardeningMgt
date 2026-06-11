@@ -1,33 +1,55 @@
 <%- include('../partials/header') %>
-<h1>Properties</h1>
+<h1>Sites</h1>
+
+<% if (locals.imported !== undefined && imported !== null) { %>
+  <p class="alert alert-ok">Imported <%= imported %> site(s).</p>
+<% } %>
+<% if (locals.importErrors) { %>
+  <p class="alert alert-error">Some rows were skipped: <%= importErrors %></p>
+<% } %>
 
 <details class="card">
-  <summary><strong>＋ Add property</strong></summary>
+  <summary><strong>📥 Import sites from Excel / CSV</strong></summary>
+  <form method="post" action="/admin/properties/import" enctype="multipart/form-data" class="filter-row">
+    <input type="file" name="file" accept=".xlsx,.csv" required>
+    <button class="btn btn-primary">Upload &amp; import</button>
+  </form>
+  <p class="muted">First row must be headers. Recognized columns:
+    <code>Site Name</code> (required), <code>Address</code> (required),
+    <code># of Lots</code>, <code>Lat</code>, <code>Lng</code>,
+    <code>Contact</code>, <code>Phone</code>, <code>Notes</code>.
+    Column order doesn't matter; extra columns are ignored.</p>
+</details>
+
+<details class="card">
+  <summary><strong>＋ Add a single site</strong></summary>
   <form method="post" action="/admin/properties" class="form-grid">
-    <label>Name <input type="text" name="name" required></label>
+    <label>Site name <input type="text" name="name" required></label>
     <label>Address <input type="text" name="address" required></label>
     <label>Contact name <input type="text" name="contact_name"></label>
     <label>Contact phone <input type="text" name="contact_phone"></label>
+    <label># of lots <input type="number" name="lots" min="0"></label>
     <label>Latitude <input type="number" name="lat" step="any" placeholder="-36.8485"></label>
     <label>Longitude <input type="number" name="lng" step="any" placeholder="174.7633"></label>
     <label class="span2">Notes <input type="text" name="notes"></label>
-    <button class="btn btn-primary">Add property</button>
+    <button class="btn btn-primary">Add site</button>
   </form>
-  <p class="muted">Latitude/longitude enable route optimization for visits to this property.</p>
+  <p class="muted">Latitude/longitude enable route optimization for visits to this site.</p>
 </details>
 
 <div class="card">
   <table class="table">
-    <tr><th>Name</th><th>Address</th><th>Contact</th><th>Coordinates</th></tr>
+    <tr><th>Site</th><th>Address</th><th>Lots</th><th>Contact</th><th>Coordinates</th></tr>
     <% properties.forEach(p => { %>
     <tr>
       <td><strong><%= p.name %></strong></td>
       <td><%= p.address %></td>
+      <td><%= p.lots != null ? p.lots : '—' %></td>
       <td class="muted"><%= p.contact_name || '' %> <%= p.contact_phone || '' %></td>
       <td class="muted"><%= p.lat != null ? p.lat.toFixed(4) + ', ' + p.lng.toFixed(4) : '⚠ none' %></td>
     </tr>
     <% }) %>
   </table>
-  <% if (!properties.length) { %><p class="muted">No properties yet.</p><% } %>
+  <% if (!properties.length) { %><p class="muted">No sites yet — import a spreadsheet or add one above.</p><% } %>
 </div>
 <%- include('../partials/footer') %>
