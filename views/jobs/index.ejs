@@ -1,6 +1,6 @@
 <%- include('../partials/header') %>
 <div class="page-head">
-  <h1>Site jobs</h1>
+  <h1>Sites</h1>
   <p class="page-sub">One recurring job per site. The default gardener is assigned to every
     occurrence; individual visits can still be reassigned as a replacement. Completing a visit
     automatically schedules the next one per the frequency, within the contract term.</p>
@@ -8,7 +8,7 @@
 
 <% if (staff) { %>
 <details class="card">
-  <summary><strong>＋ New site job</strong></summary>
+  <summary><strong>＋ New site</strong></summary>
   <form method="post" action="/jobs" class="form-grid">
     <label>Site
       <select name="property_id" required>

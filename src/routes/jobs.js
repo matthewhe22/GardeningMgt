@@ -25,7 +25,7 @@ router.get('/', asyncHandler(async (req, res) => {
     ORDER BY j.active DESC, p.name`, staff ? [] : [req.user.id]);
   const properties = await q('SELECT id, name FROM properties ORDER BY name');
   const gardeners = await q("SELECT id, name FROM users WHERE role = 'gardener' AND active");
-  res.render('jobs/index', { title: 'Site jobs', jobs, properties, gardeners, staff, frequencies: FREQUENCIES });
+  res.render('jobs/index', { title: 'Sites', jobs, properties, gardeners, staff, frequencies: FREQUENCIES });
 }));
 
 // Create a recurring job; schedules its first visit on the start date.

@@ -918,3 +918,42 @@ body.anon {
   body.authed main.container { margin: 0; padding: 0; }
   .card { box-shadow: none; }
 }
+
+/* --------------------------------------------------------------------------
+   Job page workflow & job list rows
+   -------------------------------------------------------------------------- */
+
+.chips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0 4px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 999px; padding: 4px 12px; font-size: 0.84rem; color: var(--text-soft);
+}
+
+.btn-block { display: block; width: 100%; padding: 14px 16px; font-size: 1.05rem; font-weight: 650; text-align: center; }
+.btn-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.confirm-line { display: flex; align-items: center; gap: 10px; font-weight: 600; margin: 10px 0; }
+.confirm-line input { width: 20px; height: 20px; }
+
+.timer-card details { margin-top: 12px; }
+.manage-card summary { cursor: pointer; }
+.comment-photo { max-width: 140px; display: inline-block; margin-right: 8px; }
+
+.job-list { display: flex; flex-direction: column; gap: 10px; }
+.job-row {
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 16px; margin: 0;
+  text-decoration: none; color: var(--text);
+  transition: box-shadow 0.12s ease, transform 0.12s ease;
+}
+.job-row:hover { text-decoration: none; box-shadow: var(--shadow); transform: translateY(-1px); }
+.job-row-main { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.job-row-main strong { font-size: 0.98rem; }
+.job-row-main .muted { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.job-row-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; flex: none; }
+.job-row .status { flex: none; }
+
+@media (max-width: 600px) {
+  .job-row { flex-wrap: wrap; }
+  .job-row-meta { align-items: flex-start; flex-direction: row; gap: 10px; width: 100%; order: 4; padding-left: 38px; }
+}
