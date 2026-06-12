@@ -12,9 +12,16 @@ const isLocal = /localhost|127\.0\.0\.1/.test(process.env.DATABASE_URL || 'local
 const pool = new Pool({
   connectionString:
     process.env.DATABASE_URL || 'postgresql://postgres@localhost:5433/gardeningmgt',
-  // Verify the server certificate in production. Supabase presents a valid
-  // public chain, so rejectUnauthorized can stay on; opt out with DB_INSECURE_TLS.
-  ssl: isLocal ? false : { rejectUnauthorized: process.env.DB_INSECURE_TLS !== '1' },
+  // Hosted Postgres (e.g. the Supabase pooler) presents a certificate signed
+  // by the provider's own CA, which Node does not trust by default, so full
+  // verification fails with SELF_SIGNED_CERT_IN_CHAIN. Verify only when the
+  // CA is supplied via DB_SSL_CA (PEM contents); otherwise still encrypt but
+  // skip chain verification.
+  ssl: isLocal
+    ? false
+    : process.env.DB_SSL_CA
+      ? { rejectUnauthorized: true, ca: process.env.DB_SSL_CA }
+      : { rejectUnauthorized: false },
   max: process.env.VERCEL ? 3 : 10, // keep connections low per serverless instance
 });
 
