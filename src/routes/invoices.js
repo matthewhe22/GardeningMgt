@@ -7,9 +7,11 @@ const { asyncHandler } = require('../asyncHandler');
 const router = express.Router();
 
 async function nextInvoiceNumber() {
+  // A DB sequence is atomic, so concurrent creates never collide on the
+  // UNIQUE number (the old COUNT(*) approach raced into 500s).
   const year = new Date().getFullYear();
-  const { c } = await q1('SELECT COUNT(*)::int AS c FROM invoices WHERE number LIKE $1', [`INV-${year}-%`]);
-  return `INV-${year}-${String(c + 1).padStart(4, '0')}`;
+  const { n } = await q1("SELECT nextval('invoice_seq')::int AS n");
+  return `INV-${year}-${String(n).padStart(4, '0')}`;
 }
 
 async function invoiceWithItems(id) {

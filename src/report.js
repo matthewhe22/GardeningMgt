@@ -30,13 +30,13 @@ async function loadReportData(visitId) {
  */
 async function renderReportHtml(data, { inlinePhotos = false } = {}) {
   let photoSrc = (ph) => `/uploads/${ph.filename}`;
-  if (inlinePhotos) {
+  if (inlinePhotos && data.photos.length) {
+    // One query for all photo bytes (was N+1).
+    const ids = data.photos.map((p) => p.id);
+    const rows = await q('SELECT id, data, mime FROM photos WHERE id = ANY($1)', [ids]);
     const srcs = {};
-    for (const ph of data.photos) {
-      const row = await q1('SELECT data, mime FROM photos WHERE id = $1', [ph.id]);
-      srcs[ph.id] = `data:${row.mime};base64,${row.data.toString('base64')}`;
-    }
-    photoSrc = (ph) => srcs[ph.id];
+    for (const r of rows) srcs[r.id] = `data:${r.mime};base64,${r.data.toString('base64')}`;
+    photoSrc = (ph) => srcs[ph.id] || '';
   }
   return ejs.renderFile(
     path.join(__dirname, '..', 'views', 'visits', 'report.ejs'),
@@ -57,16 +57,20 @@ async function archiveToOneDrive(visitId) {
     const html = await renderReportHtml(data, { inlinePhotos: true });
     const result = await uploadFile(`${dir}/report.html`, html, 'text/html');
     if (result.skipped) return; // OneDrive not configured
-    for (const ph of data.photos) {
-      const row = await q1('SELECT data, mime FROM photos WHERE id = $1', [ph.id]);
-      await uploadFile(`${dir}/${ph.filename}`, row.data, row.mime);
+    const ids = data.photos.map((p) => p.id);
+    const rows = ids.length
+      ? await q('SELECT id, filename, data, mime FROM photos WHERE id = ANY($1)', [ids]) : [];
+    for (const row of rows) {
+      await uploadFile(`${dir}/${row.filename}`, row.data, row.mime);
     }
     await logActivity(null, 'report.archive', 'visit', visitId,
       `Archived job #${visitId} report and ${data.photos.length} photo(s) to OneDrive`);
   } catch (e) {
+    // Detail goes to server logs only; the activity log gets a generic note so
+    // Graph error bodies (which can echo tokens/ids) never persist in the DB.
     console.error(`[onedrive] archive of job #${visitId} failed:`, e.message);
     await logActivity(null, 'report.archive_failed', 'visit', visitId,
-      `OneDrive archive failed for job #${visitId}: ${e.message.slice(0, 200)}`).catch(() => {});
+      `OneDrive archive failed for job #${visitId} (see server logs)`).catch(() => {});
   }
 }
 

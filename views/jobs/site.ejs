@@ -1,0 +1,49 @@
+<%- include('../partials/header') %>
+<div class="page-head">
+  <h1><%= property.name %></h1>
+  <p class="page-sub"><%= property.address %><% if (property.lots != null) { %> · <%= property.lots %> lots<% } %>
+    <% if (property.contact_name) { %> · contact: <%= property.contact_name %> <%= property.contact_phone || '' %><% } %></p>
+</div>
+
+<div class="stat-row">
+  <div class="card stat"><div class="stat-num"><%= totals.completed %></div><div class="stat-label">Visits completed</div></div>
+  <div class="card stat"><div class="stat-num"><%= (totals.minutes / 60).toFixed(1) %></div><div class="stat-label">Total hours on site</div></div>
+  <div class="card stat"><div class="stat-num"><%= invoices.length %></div><div class="stat-label">Invoices</div></div>
+</div>
+
+<div class="card">
+  <h2>Visit history</h2>
+  <div class="table-wrap">
+    <table class="table">
+      <tr><th>Date</th><th>Gardener</th><th>Status</th><th>Duration</th><th>Photos</th><th></th></tr>
+      <% visits.forEach(v => { %>
+      <tr>
+        <td><%= v.scheduled_date %></td>
+        <td><%= v.gardener_name || '—' %></td>
+        <td><span class="status status-<%= v.status %>"><%= v.status.replace('_',' ') %></span></td>
+        <td class="muted"><%= v.duration_minutes != null ? v.duration_minutes + ' min' : '—' %></td>
+        <td class="muted"><%= v.photo_count %></td>
+        <td><a href="/visits/<%= v.id %>">open</a><% if (v.status === 'completed') { %> · <a href="/visits/<%= v.id %>/report" target="_blank">report</a><% } %></td>
+      </tr>
+      <% }) %>
+    </table>
+  </div>
+  <% if (!visits.length) { %><p class="muted">No visits recorded for this site yet.</p><% } %>
+</div>
+
+<% if (invoices.length) { %>
+<div class="card">
+  <h2>Invoices</h2>
+  <div class="table-wrap">
+    <table class="table">
+      <tr><th>Number</th><th>Status</th><th>Created</th></tr>
+      <% invoices.forEach(inv => { %>
+        <tr><td><a href="/invoices/<%= inv.id %>"><%= inv.number %></a></td>
+          <td><span class="status status-<%= inv.status %>"><%= inv.status %></span></td>
+          <td class="muted"><%= inv.created_at %></td></tr>
+      <% }) %>
+    </table>
+  </div>
+</div>
+<% } %>
+<%- include('../partials/footer') %>

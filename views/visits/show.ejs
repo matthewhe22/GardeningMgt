@@ -4,6 +4,7 @@
   <h1><%= visit.property_name %></h1>
   <div class="chips">
     <span class="chip">📅 <%= visit.scheduled_date %><% if (visit.time_window) { %> · <%= visit.time_window %><% } %></span>
+    <a class="chip chip-link" href="https://www.google.com/maps/dir/?api=1&destination=<%= encodeURIComponent((visit.lat != null && visit.lng != null) ? (visit.lat + ',' + visit.lng) : (visit.property_name + ', ' + visit.address)) %>" target="_blank" rel="noopener">🧭 Navigate</a>
     <span class="chip">📍 <%= visit.address %></span>
     <span class="chip">👤 <%= visit.gardener_name || 'Unassigned' %></span>
     <span class="status status-<%= visit.status %>"><%= visit.status.replace('_',' ') %></span>
@@ -11,10 +12,18 @@
       <span class="status status-in_progress">replacement for <%= job.default_gardener_name %></span>
     <% } %>
   </div>
+  <% if (locals.flash === 'photos') { %>
+    <p class="alert alert-error">⚠ Add at least one photo for this site before completing the job.</p>
+  <% } else if (locals.flash === 'confirm') { %>
+    <p class="alert alert-error">⚠ Please tick the confirmation box to complete the job.</p>
+  <% } else if (locals.flash === 'invalid') { %>
+    <p class="alert alert-error">⚠ Some details were invalid — please check and try again.</p>
+  <% } %>
   <% if (locals.job) { %>
   <p class="page-sub">🔁 <%= job.frequency %> · <%= job.contract_years %>-year contract
     (<%= job.start_date %> → <%= job.end_date %>)
     · last completed: <%= job.last_completed_at ? job.last_completed_at + ' UTC' : 'never' %>
+    <% if (staff) { %> · <a href="/jobs/site/<%= visit.property_id %>">site history</a><% } %>
     · <a href="/jobs">all sites</a></p>
   <% } %>
 </div>

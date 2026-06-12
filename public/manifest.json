@@ -4,7 +4,9 @@
   "description": "Gardening job management: jobs, tasks, issues, photos, routes and timers.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#f4f6f3",
-  "theme_color": "#2e7d32",
-  "icons": []
+  "background_color": "#f6f5f1",
+  "theme_color": "#0f3424",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
 }

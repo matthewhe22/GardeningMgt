@@ -2,11 +2,12 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const multer = require('multer');
 const { parseSiteUpload } = require('../siteImport');
-const { q, q1 } = require('../db');
+const { q, q1, withTransaction } = require('../db');
 const { requireRole } = require('../auth');
 const { logActivity } = require('../activity');
 const { sendRemindersForDate } = require('../reminders');
 const { asyncHandler } = require('../asyncHandler');
+const { assertCsrf } = require('../csrf');
 
 const router = express.Router();
 
@@ -42,7 +43,7 @@ router.get('/reminders', requireRole('supervisor'), asyncHandler(async (req, res
 router.get('/properties', requireRole('supervisor'), asyncHandler(async (req, res) => {
   const properties = await q('SELECT * FROM properties ORDER BY name');
   res.render('admin/properties', {
-    title: 'Sites', properties,
+    title: 'Properties', properties,
     imported: req.query.imported, importErrors: req.query.errors,
   });
 }));
@@ -72,19 +73,30 @@ const spreadsheetUpload = multer({
 
 router.post('/properties/import', requireRole('supervisor'),
   spreadsheetUpload.single('file'), asyncHandler(async (req, res) => {
+    assertCsrf(req);
     if (!req.file) {
       return res.redirect('/admin/properties?errors=' +
         encodeURIComponent('No file received — upload a .xlsx or .csv file'));
     }
     const { sites, errors } = await parseSiteUpload(req.file);
+    // One transaction; skip rows that duplicate an existing (name, address)
+    // so re-uploading the same sheet doesn't create duplicates.
     let imported = 0;
-    for (const s of sites) {
-      await q(`
-        INSERT INTO properties (name, address, contact_name, contact_phone, lat, lng, lots, notes)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [s.name, s.address, s.contact_name, s.contact_phone, s.lat, s.lng, s.lots, s.notes]);
-      imported++;
-    }
+    let skipped = 0;
+    await withTransaction(async (tx) => {
+      for (const s of sites) {
+        const exists = await tx.q1(
+          'SELECT 1 FROM properties WHERE lower(name) = lower($1) AND lower(address) = lower($2)',
+          [s.name, s.address]);
+        if (exists) { skipped++; continue; }
+        await tx.q(`
+          INSERT INTO properties (name, address, contact_name, contact_phone, lat, lng, lots, notes)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [s.name, s.address, s.contact_name, s.contact_phone, s.lat, s.lng, s.lots, s.notes]);
+        imported++;
+      }
+    });
+    if (skipped) errors.push(`${skipped} row(s) skipped as duplicates`);
     if (imported) {
       await logActivity(req.user.id, 'property.import', 'property', null,
         `Imported ${imported} site(s) from ${req.file.originalname}`);
@@ -104,17 +116,19 @@ router.get('/users', requireRole(), asyncHandler(async (req, res) => {
 router.post('/users', requireRole(), asyncHandler(async (req, res) => {
   const { name, email, password, role, phone } = req.body;
   if (!(name || '').trim() || !(email || '').trim() || !password || !['admin', 'supervisor', 'gardener'].includes(role)) {
-    return res.redirect('/admin/users');
+    return res.redirect('/admin/users?error=invalid');
   }
+  if (String(password).length < 8) return res.redirect('/admin/users?error=weak');
   try {
     const { id } = await q1(`
       INSERT INTO users (name, email, password_hash, role, phone) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
       [name.trim(), email.trim().toLowerCase(), bcrypt.hashSync(password, 10), role, phone || null]);
     await logActivity(req.user.id, 'user.create', 'user', id, `Created ${role} account for ${name.trim()}`);
   } catch (e) {
-    // duplicate email — fall through to the list
+    if (e.code === '23505') return res.redirect('/admin/users?error=dupemail'); // unique_violation
+    throw e; // anything else is a real error
   }
-  res.redirect('/admin/users');
+  res.redirect('/admin/users?created=1');
 }));
 
 router.post('/users/:id/toggle', requireRole(), asyncHandler(async (req, res) => {
@@ -152,8 +166,9 @@ router.post('/settings', requireRole(), asyncHandler(async (req, res) => {
 router.post('/settings/test', requireRole(), asyncHandler(async (req, res) => {
   const settings = await getSettings(SETTING_KEYS);
   const test = await testConnection();
+  // Log only pass/fail — the message can contain Graph error detail.
   await logActivity(req.user.id, 'settings.test', 'settings', null,
-    `OneDrive connection test: ${test.ok ? 'OK' : 'failed'} — ${test.message}`);
+    `OneDrive connection test: ${test.ok ? 'OK' : 'failed'}`);
   res.render('admin/settings', { title: 'Settings', settings, saved: null, test });
 }));
 

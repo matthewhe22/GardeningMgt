@@ -1,13 +1,16 @@
 const express = require('express');
-const { q, q1, pool } = require('../db');
+const { q, q1, pool, withTransaction } = require('../db');
 const { requireRole, isStaff } = require('../auth');
 const { logActivity } = require('../activity');
 const { upload, savePhoto } = require('../upload');
-const { nextDate } = require('../recurrence');
+const { nextOccurrenceAfter, isValidDate } = require('../recurrence');
 const { loadReportData, renderReportHtml, archiveToOneDrive } = require('../report');
 const { asyncHandler } = require('../asyncHandler');
+const { assertCsrf } = require('../csrf');
 
 const router = express.Router();
+
+const VISIT_STATUSES = ['scheduled', 'in_progress', 'completed', 'skipped', 'cancelled'];
 
 function getVisit(id) {
   return q1(`
@@ -47,10 +50,13 @@ router.get('/', asyncHandler(async (req, res) => {
 // Create (staff only)
 router.post('/', requireRole('supervisor'), asyncHandler(async (req, res) => {
   const { property_id, gardener_id, scheduled_date, time_window, notes } = req.body;
+  if (!Number(property_id) || !isValidDate(scheduled_date)) {
+    return res.redirect('/visits?error=invalid');
+  }
   const { id } = await q1(`
     INSERT INTO visits (property_id, gardener_id, scheduled_date, time_window, notes, created_by)
     VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-    [property_id, gardener_id || null, scheduled_date, time_window || null, notes || null, req.user.id]);
+    [Number(property_id), gardener_id || null, scheduled_date, time_window || null, notes || null, req.user.id]);
   await logActivity(req.user.id, 'visit.create', 'visit', id, `Scheduled visit #${id} for ${scheduled_date}`);
   res.redirect(`/visits/${id}`);
 }));
@@ -77,7 +83,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
   res.render('visits/show', {
     title: `Job #${visit.id} — ${visit.property_name}`,
     visit, tasks, photos, comments, photosByComment, invoice, gardeners, gpsPoints, job,
-    staff: isStaff(req.user),
+    staff: isStaff(req.user), flash: req.query.error || null,
   });
 }));
 
@@ -86,15 +92,25 @@ router.post('/:id/update', requireRole('supervisor'), asyncHandler(async (req, r
   const visit = await getVisit(req.params.id);
   if (!visit) return res.redirect('/visits');
   const { gardener_id, scheduled_date, time_window, status, notes, duration_minutes } = req.body;
+  if (!VISIT_STATUSES.includes(status) || !isValidDate(scheduled_date)) {
+    return res.redirect(`/visits/${visit.id}?error=invalid`);
+  }
+  // When staff mark a visit completed here, fill timing if missing so the
+  // record (and report) is consistent with the timer path.
+  const completing = status === 'completed' && visit.status !== 'completed';
   await q(`
     UPDATE visits SET gardener_id = $1, scheduled_date = $2, time_window = $3, status = $4, notes = $5,
-      duration_minutes = $6
+      duration_minutes = $6,
+      finished_at = CASE WHEN $4 = 'completed' AND finished_at IS NULL THEN now() ELSE finished_at END
     WHERE id = $7`,
     [gardener_id || null, scheduled_date, time_window || null, status, notes || null,
       duration_minutes ? Number(duration_minutes) : visit.duration_minutes, visit.id]);
   await logActivity(req.user.id, 'visit.update', 'visit', visit.id,
     `Updated visit #${visit.id} (status: ${visit.status} -> ${status})`);
-  if (status === 'completed' && visit.status !== 'completed') await rollRecurringJob(visit, req.user.id);
+  // Advance the recurring contract when this occurrence reaches a terminal state.
+  if (['completed', 'skipped', 'cancelled'].includes(status) && status !== visit.status) {
+    await advanceRecurringJob(visit, req.user.id, status === 'completed');
+  }
   res.redirect(`/visits/${visit.id}`);
 }));
 
@@ -103,7 +119,7 @@ router.post('/:id/reschedule', asyncHandler(async (req, res) => {
   const visit = await getVisit(req.params.id);
   if (!visit || !canSeeVisit(req.user, visit)) return res.redirect('/visits');
   const date = req.body.scheduled_date;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(date || '')) {
+  if (isValidDate(date)) {
     await q('UPDATE visits SET scheduled_date = $1, route_order = NULL WHERE id = $2', [date, visit.id]);
     await logActivity(req.user.id, 'visit.reschedule', 'visit', visit.id,
       `Moved job #${visit.id} from ${visit.scheduled_date} to ${date}`);
@@ -111,15 +127,19 @@ router.post('/:id/reschedule', asyncHandler(async (req, res) => {
   res.redirect(`/visits/${visit.id}`);
 }));
 
-// Status shortcut for gardeners (complete / skip)
+// Status shortcut (gardeners: skip; staff: any). Advances the contract on a
+// terminal status so a skipped/cancelled occurrence still schedules the next one.
 router.post('/:id/status', asyncHandler(async (req, res) => {
   const visit = await getVisit(req.params.id);
   if (!visit || !canSeeVisit(req.user, visit)) return res.redirect('/visits');
   const status = req.body.status;
-  if (!['scheduled', 'in_progress', 'completed', 'skipped'].includes(status)) return res.redirect(`/visits/${visit.id}`);
+  if (!['scheduled', 'in_progress', 'skipped', 'cancelled'].includes(status)) {
+    return res.redirect(`/visits/${visit.id}`);
+  }
+  if (status === visit.status) return res.redirect(`/visits/${visit.id}`);
   await q('UPDATE visits SET status = $1 WHERE id = $2', [status, visit.id]);
   await logActivity(req.user.id, 'visit.status', 'visit', visit.id, `Visit #${visit.id}: ${visit.status} -> ${status}`);
-  if (status === 'completed' && visit.status !== 'completed') await rollRecurringJob(visit, req.user.id);
+  if (['skipped', 'cancelled'].includes(status)) await advanceRecurringJob(visit, req.user.id, false);
   res.redirect(`/visits/${visit.id}`);
 }));
 
@@ -153,39 +173,46 @@ router.post('/:id/gps', asyncHandler(async (req, res) => {
   res.json({ ok: true });
 }));
 
-// Job complete (timer stop): requires confirming all photos are uploaded,
-// then records completion date/time, notifies staff, schedules the next
-// occurrence and archives the report + photos to OneDrive.
+// Job complete (timer stop): requires confirming all photos are uploaded AND
+// at least one photo on file, then records completion date/time, notifies
+// staff, advances the recurring contract and archives to OneDrive.
+// Idempotent: an atomic status gate prevents a double-tap from re-running it.
 router.post('/:id/timer/stop', asyncHandler(async (req, res) => {
   const visit = await getVisit(req.params.id);
   if (!visit || !canSeeVisit(req.user, visit)) return res.redirect('/visits');
-  if (req.body.confirm_photos !== 'on') return res.redirect(`/visits/${visit.id}`);
-  if (visit.started_at) {
-    await q(`
-      UPDATE visits SET finished_at = now(),
-        duration_minutes = GREATEST(0, ROUND(EXTRACT(EPOCH FROM (now() - started_at)) / 60))::int,
-        status = 'completed'
-      WHERE id = $1`, [visit.id]);
-    await recordGps(visit.id, req.user.id, req.body, 'finish');
-    const updated = await getVisit(visit.id);
-    await logActivity(req.user.id, 'visit.timer.stop', 'visit', visit.id,
-      `Finished job #${visit.id} in ${updated.duration_minutes} min`);
-
-    // Job summary -> every supervisor and admin, in-app.
-    const { dc } = await q1("SELECT COUNT(*)::int AS dc FROM tasks WHERE visit_id = $1 AND status = 'done'", [visit.id]);
-    const { tc } = await q1('SELECT COUNT(*)::int AS tc FROM tasks WHERE visit_id = $1', [visit.id]);
-    const { pc } = await q1('SELECT COUNT(*)::int AS pc FROM photos WHERE visit_id = $1', [visit.id]);
-    const summary = `Job #${visit.id} completed by ${req.user.name} at ${updated.property_name}: ` +
-      `${updated.duration_minutes} min, tasks ${dc}/${tc} done, ${pc} photo(s).`;
-    await pool.query(`
-      INSERT INTO notifications (user_id, visit_id, type, message)
-      SELECT id, $1, 'job_summary', $2 FROM users WHERE role IN ('admin','supervisor') AND active`,
-      [visit.id, summary]);
-
-    await rollRecurringJob(visit, req.user.id);
-    // Archive the completion report + photos to OneDrive (best-effort).
-    await archiveToOneDrive(visit.id);
+  if (!visit.started_at) return res.redirect(`/visits/${visit.id}`);
+  if (req.body.confirm_photos !== 'on') {
+    return res.redirect(`/visits/${visit.id}?error=confirm`);
   }
+  // Enforce the photo requirement server-side (not just the honor checkbox).
+  const { pc } = await q1('SELECT COUNT(*)::int AS pc FROM photos WHERE visit_id = $1', [visit.id]);
+  if (pc === 0) return res.redirect(`/visits/${visit.id}?error=photos`);
+
+  // Atomic gate: only the first request that flips status off 'completed' wins.
+  const gate = await q1(`
+    UPDATE visits SET finished_at = now(),
+      duration_minutes = GREATEST(0, ROUND(EXTRACT(EPOCH FROM (now() - started_at)) / 60))::int,
+      status = 'completed'
+    WHERE id = $1 AND status <> 'completed'
+    RETURNING id, duration_minutes`, [visit.id]);
+  if (!gate) return res.redirect(`/visits/${visit.id}`); // already completed — no double side effects
+
+  await recordGps(visit.id, req.user.id, req.body, 'finish');
+  await logActivity(req.user.id, 'visit.timer.stop', 'visit', visit.id,
+    `Finished job #${visit.id} in ${gate.duration_minutes} min`);
+
+  const { dc } = await q1("SELECT COUNT(*)::int AS dc FROM tasks WHERE visit_id = $1 AND status = 'done'", [visit.id]);
+  const { tc } = await q1('SELECT COUNT(*)::int AS tc FROM tasks WHERE visit_id = $1', [visit.id]);
+  const summary = `Job #${visit.id} completed by ${req.user.name} at ${visit.property_name}: ` +
+    `${gate.duration_minutes} min, tasks ${dc}/${tc} done, ${pc} photo(s).`;
+  await pool.query(`
+    INSERT INTO notifications (user_id, visit_id, type, message)
+    SELECT id, $1, 'job_summary', $2 FROM users WHERE role IN ('admin','supervisor') AND active`,
+    [visit.id, summary]);
+
+  await advanceRecurringJob(visit, req.user.id, true);
+  // Archive report + photos to OneDrive (best-effort; never blocks completion).
+  await archiveToOneDrive(visit.id);
   res.redirect(`/visits/${visit.id}`);
 }));
 
@@ -200,35 +227,42 @@ router.get('/:id/report', asyncHandler(async (req, res) => {
 }));
 
 /**
- * After an occurrence of a recurring site job completes: record the
- * completion time on the job and schedule the next visit per the job's
- * frequency (assigned to the job's default gardener), while the contract
- * is active and within its term.
+ * When an occurrence of a recurring site job reaches a terminal state
+ * (completed / skipped / cancelled), schedule the next occurrence so the
+ * contract never silently stops. The next date is anchored to the contract
+ * start (no monthly drift) and inserted with ON CONFLICT DO NOTHING against
+ * the partial unique index, so concurrent calls/double-taps can't double-book.
+ * Only `completed` stamps last_completed_at.
  */
-async function rollRecurringJob(visit, actorId) {
+async function advanceRecurringJob(visit, actorId, completed) {
   if (!visit.job_id) return;
   const job = await q1('SELECT * FROM jobs WHERE id = $1', [visit.job_id]);
   if (!job) return;
-  await q('UPDATE jobs SET last_completed_at = now() WHERE id = $1', [job.id]);
+  if (completed) await q('UPDATE jobs SET last_completed_at = now() WHERE id = $1', [job.id]);
   if (!job.active) return;
-  const next = nextDate(visit.scheduled_date, job.frequency);
-  if (next > job.end_date) return; // contract term over
-  const exists = await q1(
-    `SELECT id FROM visits WHERE job_id = $1 AND scheduled_date >= $2 AND status = 'scheduled' LIMIT 1`,
-    [job.id, next]);
-  if (exists) return; // next occurrence already on the books
-  await q(`
+  const next = nextOccurrenceAfter(job.start_date, job.frequency, visit.scheduled_date);
+  if (next > job.end_date) {
+    // Contract term reached — flag for renewal rather than silently stopping.
+    await q('UPDATE jobs SET renewal_acknowledged = false WHERE id = $1', [job.id]);
+    return;
+  }
+  const inserted = await q1(`
     INSERT INTO visits (job_id, property_id, gardener_id, scheduled_date, time_window, created_by)
-    VALUES ($1, $2, $3, $4, $5, $6)`,
+    VALUES ($1, $2, $3, $4, $5, $6)
+    ON CONFLICT (job_id, scheduled_date) WHERE status = 'scheduled' AND job_id IS NOT NULL
+    DO NOTHING RETURNING id`,
     [job.id, job.property_id, job.gardener_id, next, job.time_window, actorId]);
-  await logActivity(null, 'job.roll', 'job', job.id,
-    `Scheduled next ${job.frequency} visit for job #${job.id} on ${next}`);
+  if (inserted) {
+    await logActivity(null, 'job.roll', 'job', job.id,
+      `Scheduled next ${job.frequency} visit for job #${job.id} on ${next}`);
+  }
 }
 
 // Comments on a job (supervisors, admins and the assigned gardener).
 // Photos can be attached, and the other party is notified: commenting staff
 // notify the assigned gardener; a commenting gardener notifies staff.
 router.post('/:id/comments', upload.array('photos', 10), asyncHandler(async (req, res) => {
+  assertCsrf(req);
   const visit = await getVisit(req.params.id);
   if (!visit || !canSeeVisit(req.user, visit)) return res.redirect('/visits');
   const body = (req.body.body || '').trim();
@@ -260,6 +294,7 @@ router.post('/:id/comments', upload.array('photos', 10), asyncHandler(async (req
 
 // Photo upload for a job
 router.post('/:id/photos', upload.array('photos', 10), asyncHandler(async (req, res) => {
+  assertCsrf(req);
   const visit = await getVisit(req.params.id);
   if (!visit || !canSeeVisit(req.user, visit)) return res.redirect('/visits');
   const shared = req.body.shared === 'on' || req.body.shared === '1';

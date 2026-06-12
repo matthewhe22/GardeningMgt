@@ -1,6 +1,7 @@
 const express = require('express');
 const { q, q1 } = require('../db');
-const { isStaff } = require('../auth');
+const { isStaff, requireRole } = require('../auth');
+const { assertCsrf } = require('../csrf');
 const { logActivity } = require('../activity');
 const { upload, savePhoto } = require('../upload');
 const { asyncHandler } = require('../asyncHandler');
@@ -59,10 +60,15 @@ router.get('/:id', asyncHandler(async (req, res) => {
   res.render('issues/show', { title: `Issue #${issue.id}`, issue, comments, photos, users, staff: isStaff(req.user) });
 }));
 
-router.post('/:id/update', asyncHandler(async (req, res) => {
+// Only staff change an issue's status/priority/assignment.
+router.post('/:id/update', requireRole('supervisor'), asyncHandler(async (req, res) => {
   const issue = await q1('SELECT * FROM issues WHERE id = $1', [req.params.id]);
   if (!issue) return res.redirect('/issues');
   const { status, priority, assigned_to } = req.body;
+  if (!['open', 'in_progress', 'resolved', 'closed'].includes(status) ||
+      !['low', 'medium', 'high', 'urgent'].includes(priority)) {
+    return res.redirect(`/issues/${issue.id}?error=invalid`);
+  }
   await q(`
     UPDATE issues SET status = $1, priority = $2, assigned_to = $3,
       resolved_at = CASE WHEN $1 IN ('resolved','closed') AND resolved_at IS NULL THEN now()
@@ -85,6 +91,7 @@ router.post('/:id/comments', asyncHandler(async (req, res) => {
 }));
 
 router.post('/:id/photos', upload.array('photos', 10), asyncHandler(async (req, res) => {
+  assertCsrf(req);
   for (const f of req.files || []) {
     await savePhoto(f, { caption: req.body.caption || null, issueId: Number(req.params.id), userId: req.user.id });
   }

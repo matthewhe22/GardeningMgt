@@ -8,12 +8,13 @@ types.setTypeParser(1184, (v) => v.replace('T', ' ').slice(0, 19)); // timestamp
 types.setTypeParser(20, (v) => parseInt(v, 10));           // int8 (COUNT)
 types.setTypeParser(1700, (v) => parseFloat(v));           // numeric (SUM)
 
+const isLocal = /localhost|127\.0\.0\.1/.test(process.env.DATABASE_URL || 'localhost');
 const pool = new Pool({
   connectionString:
     process.env.DATABASE_URL || 'postgresql://postgres@localhost:5433/gardeningmgt',
-  ssl: /localhost|127\.0\.0\.1/.test(process.env.DATABASE_URL || 'localhost')
-    ? false
-    : { rejectUnauthorized: false },
+  // Verify the server certificate in production. Supabase presents a valid
+  // public chain, so rejectUnauthorized can stay on; opt out with DB_INSECURE_TLS.
+  ssl: isLocal ? false : { rejectUnauthorized: process.env.DB_INSECURE_TLS !== '1' },
   max: process.env.VERCEL ? 3 : 10, // keep connections low per serverless instance
 });
 
@@ -21,6 +22,30 @@ const pool = new Pool({
 const q = async (sql, params = []) => (await pool.query(sql, params)).rows;
 /** First row or null. */
 const q1 = async (sql, params = []) => (await pool.query(sql, params)).rows[0] || null;
+
+/**
+ * Run fn(client) inside a transaction, with guaranteed COMMIT/ROLLBACK and
+ * client release. fn receives a query helper bound to the transaction.
+ */
+async function withTransaction(fn) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const tx = {
+      q: async (sql, params = []) => (await client.query(sql, params)).rows,
+      q1: async (sql, params = []) => (await client.query(sql, params)).rows[0] || null,
+      client,
+    };
+    const result = await fn(tx);
+    await client.query('COMMIT');
+    return result;
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+}
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
@@ -206,6 +231,25 @@ CREATE TABLE IF NOT EXISTS notifications (
   created_at TIMESTAMP NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications (user_id, read_at);
+
+-- Foreign-key indexes for hot detail-page joins.
+CREATE INDEX IF NOT EXISTS idx_visits_job ON visits (job_id);
+CREATE INDEX IF NOT EXISTS idx_visits_property ON visits (property_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_visit ON tasks (visit_id);
+CREATE INDEX IF NOT EXISTS idx_photos_visit ON photos (visit_id);
+CREATE INDEX IF NOT EXISTS idx_photos_issue ON photos (issue_id);
+CREATE INDEX IF NOT EXISTS idx_visit_comments_visit ON visit_comments (visit_id);
+CREATE INDEX IF NOT EXISTS idx_issue_comments_issue ON issue_comments (issue_id);
+CREATE INDEX IF NOT EXISTS idx_invoices_visit ON invoices (visit_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_property ON jobs (property_id);
+
+-- Prevent duplicate future occurrences of the same job on the same day
+-- (closes the check-then-insert race in rollRecurringJob).
+CREATE UNIQUE INDEX IF NOT EXISTS uq_visits_job_day_scheduled
+  ON visits (job_id, scheduled_date) WHERE status = 'scheduled' AND job_id IS NOT NULL;
+
+-- Per-year gapless invoice numbers without racing on COUNT(*).
+CREATE SEQUENCE IF NOT EXISTS invoice_seq;
 `;
 
 let readyPromise = null;
@@ -223,16 +267,23 @@ function ready() {
       await pool.query('ALTER TABLE properties ADD COLUMN IF NOT EXISTS lots INTEGER');
       await pool.query('ALTER TABLE visits ADD COLUMN IF NOT EXISTS job_id INTEGER REFERENCES jobs(id)');
       await pool.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS visit_comment_id INTEGER REFERENCES visit_comments(id) ON DELETE SET NULL');
+      // Renewal tracking: flag when a contract has been renewed/closed.
+      await pool.query("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS renewal_acknowledged BOOLEAN NOT NULL DEFAULT false");
       const { c } = (await pool.query('SELECT COUNT(*)::int AS c FROM users')).rows[0];
       if (c === 0) {
         const bcrypt = require('bcryptjs');
+        const crypto = require('crypto');
         const email = process.env.BOOTSTRAP_ADMIN_EMAIL || 'admin@example.com';
-        const password = process.env.BOOTSTRAP_ADMIN_PASSWORD || 'admin1234';
+        // In production, never use a known default: take the env password or
+        // generate a random one and print it once to the server logs.
+        const inProd = process.env.VERCEL || process.env.NODE_ENV === 'production';
+        const password = process.env.BOOTSTRAP_ADMIN_PASSWORD
+          || (inProd ? crypto.randomBytes(9).toString('base64url') : 'admin1234');
         await pool.query(
           `INSERT INTO users (name, email, password_hash, role) VALUES ($1, $2, $3, 'admin')`,
           ['Admin', email.toLowerCase(), bcrypt.hashSync(password, 10)]
         );
-        console.log(`[bootstrap] created admin account ${email} — change its password!`);
+        console.log(`[bootstrap] created admin ${email} with password: ${password} — sign in and change it now.`);
       }
     })();
     // Don't memoize failures: a transient DB outage at cold start should not
@@ -242,4 +293,4 @@ function ready() {
   return readyPromise;
 }
 
-module.exports = { pool, q, q1, ready };
+module.exports = { pool, q, q1, ready, withTransaction };

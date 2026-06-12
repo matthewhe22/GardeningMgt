@@ -957,3 +957,30 @@ body.anon {
   .job-row { flex-wrap: wrap; }
   .job-row-meta { align-items: flex-start; flex-direction: row; gap: 10px; width: 100%; order: 4; padding-left: 38px; }
 }
+
+/* --------------------------------------------------------------------------
+   Review fixes: contrast, responsive tables, site-history stats, nav chips
+   -------------------------------------------------------------------------- */
+
+/* WCAG AA: darken muted text and the amber "in progress" pill. */
+:root { --muted: #5b665d; --warn: #855600; }
+.status-in_progress, .status-sent { background: #fdf0d5; color: #855600; }
+
+/* Tables: never clip columns on small screens — scroll horizontally instead. */
+.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+@media (max-width: 640px) {
+  .card > .table, .table-wrap > .table { display: block; overflow-x: auto; white-space: nowrap; }
+}
+
+.chip-link { color: var(--green-700); border-color: var(--green-100); background: var(--green-50); font-weight: 600; }
+.chip-link:hover { text-decoration: none; background: var(--green-100); }
+
+/* Site-history stat cards */
+.stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.stat { text-align: center; }
+.stat-num { font-size: 1.6rem; font-weight: 700; color: var(--green-800); }
+.stat-label { color: var(--muted); font-size: 0.85rem; }
+
+/* Bump default button/control min height to 44px for touch. */
+.btn, select, input[type="date"], input[type="text"], input[type="email"], input[type="password"], input[type="number"] { min-height: 44px; }
+.btn { display: inline-flex; align-items: center; justify-content: center; }

@@ -6,6 +6,14 @@
     automatically schedules the next one per the frequency, within the contract term.</p>
 </div>
 
+<% if (locals.flash) { %>
+  <p class="alert alert-error">
+    <% if (flash === 'duplicate') { %>That site already has an active job.
+    <% } else if (flash === 'gardener') { %>The default gardener must be an active gardener.
+    <% } else { %>Some details were invalid — please check and try again.<% } %>
+  </p>
+<% } %>
+
 <% if (staff) { %>
 <details class="card">
   <summary><strong>＋ New site</strong></summary>
@@ -44,9 +52,10 @@
     <tr><th>Site</th><th>Frequency</th><th>Contract</th><th>Gardener</th><th>Last completed</th><th>Next visit</th><% if (staff) { %><th></th><% } %></tr>
     <% jobs.forEach(j => { %>
     <tr>
-      <td><strong><%= j.property_name %></strong><br>
+      <td><strong><% if (staff) { %><a href="/jobs/site/<%= j.property_id %>"><%= j.property_name %></a><% } else { %><%= j.property_name %><% } %></strong><br>
         <span class="muted"><%= j.address %><% if (j.lots != null) { %> · <%= j.lots %> lots<% } %></span>
         <% if (!j.active) { %><span class="status status-cancelled">inactive</span><% } %>
+        <% if (j.expired) { %><span class="status status-open">expired — needs renewal</span><% } %>
       </td>
       <td><span class="status status-scheduled"><%= j.frequency %></span></td>
       <td class="muted"><%= j.contract_years %> yr<br><%= j.start_date %> → <%= j.end_date %></td>
@@ -55,10 +64,17 @@
       <td>
         <% if (j.next_visit_date) { %>
           <a href="/visits/<%= j.next_visit_id %>"><%= j.next_visit_date %></a>
+          <% if (j.upcoming_count > 1) { %><br><span class="muted"><%= j.upcoming_count %> upcoming</span><% } %>
         <% } else { %><span class="muted">none scheduled</span><% } %>
       </td>
       <% if (staff) { %>
       <td>
+        <% if (j.expired) { %>
+        <form method="post" action="/jobs/<%= j.id %>/renew" class="add-row" style="margin-bottom:6px">
+          <select name="contract_years"><option value="1">1 yr</option><option value="2">2 yr</option></select>
+          <button class="btn btn-primary">Renew</button>
+        </form>
+        <% } %>
         <details>
           <summary class="muted">Edit</summary>
           <form method="post" action="/jobs/<%= j.id %>/update" class="form-grid">
