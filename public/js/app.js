@@ -36,33 +36,60 @@ document.querySelectorAll('form.gps-form').forEach((form) => {
   );
 });
 
-// --- Photo capture feedback: show what's selected and enable Upload ---
-// Field gardeners tap "Take photo" / "Choose from library"; this confirms the
-// selection so they know the upload is ready before they submit.
+// --- Photo capture preview: show thumbnails of what was taken/selected ---
+// Field gardeners tap "Take photo" / "Choose from library"; this shows the
+// chosen photos right away so they can confirm before uploading. The upload
+// still works without JS — these are progressive enhancements only.
 document.querySelectorAll('form[data-upload]').forEach((form) => {
   const inputs = form.querySelectorAll('input[type="file"]');
   const status = form.querySelector('[data-upload-status]');
-  const submit = form.querySelector('[data-upload-submit]');
-  const update = () => {
-    let names = [];
-    inputs.forEach((inp) => {
-      for (const f of inp.files || []) names.push(f.name);
-    });
+  const previews = form.querySelector('[data-upload-previews]');
+  let urls = []; // object URLs to revoke between selections
+
+  const render = () => {
+    const files = [];
+    inputs.forEach((inp) => { for (const f of inp.files || []) files.push(f); });
+
     if (status) {
-      if (names.length) {
-        status.hidden = false;
-        status.textContent = names.length === 1
-          ? `✓ ${names[0]}`
-          : `✓ ${names.length} photos ready to upload`;
-      } else {
-        status.hidden = true;
-        status.textContent = '';
-      }
+      status.hidden = files.length === 0;
+      status.textContent = files.length
+        ? (files.length === 1 ? '✓ 1 photo ready to upload' : `✓ ${files.length} photos ready to upload`)
+        : '';
     }
-    if (submit) submit.disabled = names.length === 0;
+
+    if (previews) {
+      urls.forEach((u) => URL.revokeObjectURL(u));
+      urls = [];
+      previews.innerHTML = '';
+      previews.hidden = files.length === 0;
+      files.forEach((f) => {
+        const fig = document.createElement('figure');
+        fig.className = 'preview-thumb';
+        if (f.type && f.type.startsWith('image/')) {
+          const url = URL.createObjectURL(f);
+          urls.push(url);
+          const img = document.createElement('img');
+          img.src = url;
+          img.alt = f.name;
+          img.loading = 'lazy';
+          fig.appendChild(img);
+        } else {
+          // e.g. iPhone HEIC that the browser can't render — show a placeholder.
+          const span = document.createElement('span');
+          span.className = 'preview-file';
+          span.textContent = '🖼';
+          fig.appendChild(span);
+        }
+        const cap = document.createElement('figcaption');
+        cap.textContent = f.name;
+        fig.appendChild(cap);
+        previews.appendChild(fig);
+      });
+    }
   };
-  inputs.forEach((inp) => inp.addEventListener('change', update));
-  update();
+
+  inputs.forEach((inp) => inp.addEventListener('change', render));
+  render();
 });
 
 // Expose the token for any fetch()-based callers (e.g. GPS pings).
