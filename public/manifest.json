@@ -1,12 +1,21 @@
 {
+  "id": "/",
   "name": "GardeningMgt",
   "short_name": "GardeningMgt",
   "description": "Gardening job management: jobs, tasks, issues, photos, routes and timers.",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
+  "orientation": "portrait",
   "background_color": "#f6f5f1",
   "theme_color": "#0f3424",
+  "categories": ["productivity", "business"],
   "icons": [
     { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Today's jobs", "short_name": "Jobs", "url": "/visits" },
+    { "name": "My routes", "short_name": "Routes", "url": "/routes" },
+    { "name": "Report an issue", "short_name": "Issues", "url": "/issues" }
   ]
 }

@@ -33,16 +33,16 @@
   <% if (visit.started_at && !visit.finished_at) { %>
     <h2>⏱ Job running</h2>
     <p>Started at <strong><%= fmtDateTime(visit.started_at) %></strong>.</p>
-    <form method="post" action="/visits/<%= visit.id %>/timer/stop" class="gps-form">
+    <p class="muted">Completing records the date &amp; time, notifies your supervisor,
+      and files the report and photos.</p>
+    <form method="post" action="/visits/<%= visit.id %>/timer/stop" class="gps-form mobile-sticky-cta">
       <input type="hidden" name="lat"><input type="hidden" name="lng">
-      <p><strong><%= photos.length %></strong> photo(s) uploaded for this site so far.
-        <% if (!photos.length) { %><br><span class="muted">⚠ Upload your photos below before completing.</span><% } %></p>
+      <p class="cta-note"><strong><%= photos.length %></strong> photo(s) uploaded for this site so far.
+        <% if (!photos.length) { %><br><span class="muted">⚠ <a href="#photos">Upload your photos</a> before completing.</span><% } %></p>
       <label class="confirm-line"><input type="checkbox" name="confirm_photos" required>
         I confirm all photos for this site have been uploaded</label>
       <button class="btn btn-danger btn-block">✔ Complete job</button>
     </form>
-    <p class="muted">Completing records the date &amp; time, notifies your supervisor,
-      and files the report and photos.</p>
   <% } else if (visit.finished_at) { %>
     <h2>✅ Job completed</h2>
     <p>Worked <strong><%= visit.duration_minutes %> min</strong>
@@ -56,12 +56,12 @@
     </div>
   <% } else { %>
     <h2>⏱ Ready to start</h2>
-    <form method="post" action="/visits/<%= visit.id %>/timer/start" class="gps-form">
+    <p class="muted">Your GPS position is recorded when you start and finish
+      (if location access is allowed).</p>
+    <form method="post" action="/visits/<%= visit.id %>/timer/start" class="gps-form mobile-sticky-cta">
       <input type="hidden" name="lat"><input type="hidden" name="lng">
       <button class="btn btn-primary btn-block">▶ Start job</button>
     </form>
-    <p class="muted">Your GPS position is recorded when you start and finish
-      (if location access is allowed).</p>
   <% } %>
 
   <% if (locals.mapSvg && (visit.started_at || gpsPoints.length)) { %>
@@ -133,13 +133,23 @@
       <% }) %>
     </div>
     <% if (!photos.length) { %><p class="muted">No photos yet — add them before completing the job.</p><% } %>
-    <form method="post" action="/visits/<%= visit.id %>/photos" enctype="multipart/form-data" class="form-grid">
-      <label class="span2">Photos <input type="file" name="photos" accept="image/*" multiple required></label>
-      <label class="span2">Caption <input type="text" name="caption"></label>
-      <label><input type="checkbox" name="shared" checked> Share with the whole team</label>
-      <button class="btn btn-primary">Upload</button>
-      <p class="muted span2">On a phone you can take a picture or pick from your library.
-        Every photo is timestamped automatically.</p>
+    <form method="post" action="/visits/<%= visit.id %>/photos" enctype="multipart/form-data" class="photo-upload" data-upload>
+      <div class="photo-actions">
+        <label class="btn btn-primary photo-pick" data-camera>
+          📷 Take photo
+          <input type="file" name="photos" accept="image/*" capture="environment" multiple hidden>
+        </label>
+        <label class="btn photo-pick" data-library>
+          🖼 Choose from library
+          <input type="file" name="photos" accept="image/*" multiple hidden>
+        </label>
+      </div>
+      <p class="upload-status muted" data-upload-status hidden></p>
+      <label>Caption <input type="text" name="caption" placeholder="Optional note for these photos"></label>
+      <label class="confirm-line share-line"><input type="checkbox" name="shared" checked> Share with the whole team</label>
+      <button class="btn btn-primary btn-block" type="submit" data-upload-submit disabled>Upload photos</button>
+      <p class="muted">On a phone you can snap a picture with the camera or pick from your
+        library. Every photo is timestamped automatically.</p>
     </form>
   </section>
 
@@ -159,11 +169,16 @@
       </div>
     <% }) %>
     <% if (!comments.length) { %><p class="muted">No comments yet.</p><% } %>
-    <form method="post" action="/visits/<%= visit.id %>/comments" enctype="multipart/form-data">
+    <form method="post" action="/visits/<%= visit.id %>/comments" enctype="multipart/form-data" class="comment-form" data-upload>
       <textarea name="body" rows="2" placeholder="Add a comment…" required></textarea>
-      <label class="muted">Attach photos (optional)
-        <input type="file" name="photos" accept="image/*" multiple></label>
-      <button class="btn">Comment</button>
+      <div class="comment-actions">
+        <label class="btn comment-attach photo-pick" data-camera>
+          📎 Attach photo
+          <input type="file" name="photos" accept="image/*" multiple hidden>
+        </label>
+        <span class="upload-status muted" data-upload-status hidden></span>
+        <button class="btn btn-primary comment-send" type="submit">Send</button>
+      </div>
       <p class="muted">Staff comments notify the assigned gardener; gardener comments notify supervisors and admins.</p>
     </form>
   </section>
@@ -207,4 +222,5 @@
   <% } %>
 </details>
 <% } %>
+<% if (!visit.finished_at) { %><div class="cta-spacer" aria-hidden="true"></div><% } %>
 <%- include('../partials/footer') %>
