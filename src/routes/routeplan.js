@@ -4,6 +4,7 @@ const { requireRole, isStaff } = require('../auth');
 const { logActivity } = require('../activity');
 const { optimizeRoute, haversineKm } = require('../routeOptimizer');
 const { asyncHandler } = require('../asyncHandler');
+const { today: businessToday } = require('../time');
 
 const router = express.Router();
 
@@ -34,7 +35,7 @@ async function applyOrder(orderedIds) {
 // Route planner: pick gardener + date, view ordered stops, optimize.
 router.get('/', asyncHandler(async (req, res) => {
   const staff = isStaff(req.user);
-  const date = req.query.date || new Date().toISOString().slice(0, 10);
+  const date = req.query.date || businessToday();
   const gardenerId = staff ? Number(req.query.gardener_id || 0) : req.user.id;
   const gardeners = await q("SELECT id, name FROM users WHERE role = 'gardener' AND active");
   const visits = gardenerId ? await loadDayVisits(gardenerId, date) : [];

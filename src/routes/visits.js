@@ -82,8 +82,9 @@ router.get('/:id', asyncHandler(async (req, res) => {
     ? await q1('SELECT j.*, u.name AS default_gardener_name FROM jobs j LEFT JOIN users u ON u.id = j.gardener_id WHERE j.id = $1', [visit.job_id])
     : null;
   // Location snapshot from the captured GPS (falls back to the site's stored
-  // coordinates), shown once the job is under way / completed.
-  const mapSvg = renderMapSnapshot(gpsPoints, visit);
+  // coordinates), shown once the job is under way / completed. Tiles load by
+  // URL here (the browser fetches them; CSP allows the OSM tile host).
+  const mapSvg = await renderMapSnapshot(gpsPoints, visit, { inline: false });
   const mapLink = externalMapUrl(gpsPoints, visit);
   res.render('visits/show', {
     title: `Job #${visit.id} — ${visit.property_name}`,

@@ -3,13 +3,14 @@ const { q, q1 } = require('../db');
 const { requireRole } = require('../auth');
 const { logActivity } = require('../activity');
 const { asyncHandler } = require('../asyncHandler');
+const { year: businessYear } = require('../time');
 
 const router = express.Router();
 
 async function nextInvoiceNumber() {
   // A DB sequence is atomic, so concurrent creates never collide on the
   // UNIQUE number (the old COUNT(*) approach raced into 500s).
-  const year = new Date().getFullYear();
+  const year = businessYear();
   const { n } = await q1("SELECT nextval('invoice_seq')::int AS n");
   return `INV-${year}-${String(n).padStart(4, '0')}`;
 }

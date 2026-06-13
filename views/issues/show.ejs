@@ -1,6 +1,6 @@
 <%- include('../partials/header') %>
 <h1>Issue #<%= issue.id %>: <%= issue.title %></h1>
-<p class="muted">Reported by <%= issue.reporter_name || 'unknown' %> on <%= issue.created_at %> UTC
+<p class="muted">Reported by <%= issue.reporter_name || 'unknown' %> on <%= fmtDateTime(issue.created_at) %>
   <% if (issue.property_name) { %> · <%= issue.property_name %><% } %></p>
 
 <div class="grid">
@@ -10,7 +10,7 @@
     <p>
       <span class="prio prio-<%= issue.priority %>"><%= issue.priority %></span>
       <span class="status status-<%= issue.status %>"><%= issue.status.replace('_',' ') %></span>
-      <% if (issue.resolved_at) { %><span class="muted">resolved <%= issue.resolved_at %> UTC</span><% } %>
+      <% if (issue.resolved_at) { %><span class="muted">resolved <%= fmtDateTime(issue.resolved_at) %></span><% } %>
     </p>
     <form method="post" action="/issues/<%= issue.id %>/update" class="form-grid">
       <label>Status
@@ -45,7 +45,7 @@
       <% photos.forEach(ph => { %>
         <figure class="photo">
           <a href="/uploads/<%= ph.filename %>" target="_blank"><img src="/uploads/<%= ph.filename %>" alt="<%= ph.caption || ph.original_name %>" loading="lazy"></a>
-          <figcaption><span class="photo-stamp">📅 <%= ph.created_at %> UTC</span><br>
+          <figcaption><span class="photo-stamp">📅 <%= fmtDateTime(ph.created_at) %></span><br>
             <span class="muted">by <%= ph.uploader_name %></span></figcaption>
         </figure>
       <% }) %>
@@ -59,7 +59,7 @@
   <section class="card" id="comments">
     <h2>Comments</h2>
     <% comments.forEach(c => { %>
-      <div class="comment"><strong><%= c.author_name %></strong> <span class="muted"><%= c.created_at %> UTC</span>
+      <div class="comment"><strong><%= c.author_name %></strong> <span class="muted"><%= fmtDateTime(c.created_at) %></span>
         <p><%= c.body %></p></div>
     <% }) %>
     <form method="post" action="/issues/<%= issue.id %>/comments">

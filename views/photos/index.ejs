@@ -7,7 +7,7 @@
     <figure class="photo">
       <a href="/uploads/<%= ph.filename %>" target="_blank"><img src="/uploads/<%= ph.filename %>" alt="<%= ph.caption || ph.original_name %>" loading="lazy"></a>
       <figcaption>
-        <span class="photo-stamp">📅 <%= ph.created_at %> UTC</span><br>
+        <span class="photo-stamp">📅 <%= fmtDateTime(ph.created_at) %></span><br>
         <% if (ph.caption) { %><%= ph.caption %><br><% } %>
         <span class="muted">by <%= ph.uploader_name %>
           <% if (ph.visit_ref) { %> · <a href="/visits/<%= ph.visit_ref %>">job #<%= ph.visit_ref %><% if (ph.property_name) { %> (<%= ph.property_name %>)<% } %></a><% } %>

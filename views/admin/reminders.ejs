@@ -24,7 +24,7 @@
       <td><%= v.gardener_name || '⚠ Unassigned' %></td>
       <td><a href="/visits/<%= v.id %>"><%= v.property_name %></a></td>
       <td class="muted"><%= v.time_window || '—' %></td>
-      <td><%= v.reminder_sent_at ? '✅ ' + v.reminder_sent_at : 'not sent' %></td>
+      <td><%= v.reminder_sent_at ? '✅ ' + fmtDateTime(v.reminder_sent_at) : 'not sent' %></td>
     </tr>
     <% }) %>
   </table>

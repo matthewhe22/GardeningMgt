@@ -4,6 +4,7 @@ const { q, q1 } = require('./db');
 const { uploadFile } = require('./onedrive');
 const { logActivity } = require('./activity');
 const { renderMapSnapshot, externalMapUrl } = require('./mapSnapshot');
+const { fmtDateTime } = require('./time');
 
 /** Everything needed to render a job completion report. */
 async function loadReportData(visitId) {
@@ -39,14 +40,15 @@ async function renderReportHtml(data, { inlinePhotos = false } = {}) {
     for (const r of rows) srcs[r.id] = `data:${r.mime};base64,${r.data.toString('base64')}`;
     photoSrc = (ph) => srcs[ph.id] || '';
   }
-  // Self-contained location snapshot (inline SVG) from the captured GPS — works
-  // offline inside the archived report.
-  const mapSvg = renderMapSnapshot(data.gpsPoints, data.visit);
+  // Self-contained location snapshot from the captured GPS: OSM tiles are
+  // embedded as data URIs so the report still renders offline / from the
+  // OneDrive archive.
+  const mapSvg = await renderMapSnapshot(data.gpsPoints, data.visit, { inline: true });
   const mapLink = externalMapUrl(data.gpsPoints, data.visit);
   return ejs.renderFile(
     path.join(__dirname, '..', 'views', 'visits', 'report.ejs'),
-    { ...data, photoSrc, mapSvg, mapLink,
-      generatedAt: new Date().toISOString().replace('T', ' ').slice(0, 19) }
+    { ...data, photoSrc, mapSvg, mapLink, fmtDateTime,
+      generatedAt: fmtDateTime(new Date()) }
   );
 }
 

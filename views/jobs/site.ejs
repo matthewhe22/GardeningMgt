@@ -40,7 +40,7 @@
       <% invoices.forEach(inv => { %>
         <tr><td><a href="/invoices/<%= inv.id %>"><%= inv.number %></a></td>
           <td><span class="status status-<%= inv.status %>"><%= inv.status %></span></td>
-          <td class="muted"><%= inv.created_at %></td></tr>
+          <td class="muted"><%= fmtDateTime(inv.created_at) %></td></tr>
       <% }) %>
     </table>
   </div>

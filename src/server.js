@@ -8,7 +8,7 @@ const { currentUser, requireLogin } = require('./auth');
 const { sendRemindersForDate } = require('./reminders');
 const { asyncHandler } = require('./asyncHandler');
 const { csrfProtection } = require('./csrf');
-const { today: businessToday } = require('./time');
+const { today: businessToday, fmtDateTime, fmtDate } = require('./time');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -25,13 +25,15 @@ app.set('views', path.join(__dirname, '..', 'views'));
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
 
-// Baseline security headers (no external CDNs, so a strict CSP is safe).
+// Baseline security headers. The only external origin is the OpenStreetMap
+// tile server, used for the job-location map snapshot (img-src only).
 app.use((req, res, next) => {
   res.set('X-Content-Type-Options', 'nosniff');
   res.set('X-Frame-Options', 'DENY');
   res.set('Referrer-Policy', 'same-origin');
   res.set('Content-Security-Policy',
-    "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; " +
+    "default-src 'self'; img-src 'self' data: blob: https://tile.openstreetmap.org; " +
+    "style-src 'self' 'unsafe-inline'; " +
     "script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'self'");
   if (process.env.VERCEL) res.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   next();
@@ -62,6 +64,9 @@ app.use(asyncHandler(async (req, res, next) => {
         [res.locals.user.id])).c
     : 0;
   res.locals.currentPath = req.path;
+  // Timestamp formatters for views (render every time in the business timezone).
+  res.locals.fmtDateTime = fmtDateTime;
+  res.locals.fmtDate = fmtDate;
   next();
 }));
 

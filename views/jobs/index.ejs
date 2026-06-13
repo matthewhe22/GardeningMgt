@@ -60,7 +60,7 @@
       <td><span class="status status-scheduled"><%= j.frequency %></span></td>
       <td class="muted"><%= j.contract_years %> yr<br><%= j.start_date %> → <%= j.end_date %></td>
       <td><%= j.gardener_name || '⚠ Unassigned' %></td>
-      <td class="muted"><%= j.last_completed_at ? j.last_completed_at + ' UTC' : 'never' %></td>
+      <td class="muted"><%= j.last_completed_at ? fmtDateTime(j.last_completed_at) : 'never' %></td>
       <td>
         <% if (j.next_visit_date) { %>
           <a href="/visits/<%= j.next_visit_id %>"><%= j.next_visit_date %></a>

@@ -2,16 +2,19 @@ const express = require('express');
 const { q, q1 } = require('../db');
 const { requireRole } = require('../auth');
 const { asyncHandler } = require('../asyncHandler');
+const { today: businessToday } = require('../time');
 
 const router = express.Router();
 router.use(requireRole('supervisor'));
 
 // Operational report for a date range: jobs, hours, issues, invoicing.
 router.get('/', asyncHandler(async (req, res) => {
-  const today = new Date();
-  const defaultFrom = new Date(today.getTime() - 29 * 86400000).toISOString().slice(0, 10);
+  // Window anchored to the business calendar (Melbourne), last 30 days.
+  const todayStr = businessToday();
+  const [y, m, d] = todayStr.split('-').map(Number);
+  const defaultFrom = new Date(Date.UTC(y, m - 1, d - 29)).toISOString().slice(0, 10);
   const from = req.query.from || defaultFrom;
-  const to = req.query.to || today.toISOString().slice(0, 10);
+  const to = req.query.to || todayStr;
 
   const visitStats = await q(`
     SELECT status, COUNT(*)::int AS count FROM visits

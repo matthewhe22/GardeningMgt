@@ -1,22 +1,42 @@
 /**
- * Self-contained map snapshot of a job's location, drawn server-side as an
- * inline SVG from the GPS points captured by the timer (start / pings / finish).
+ * Map snapshot of a job's location, drawn from the GPS points captured by the
+ * timer (start / pings / finish) over a real OpenStreetMap street background.
  *
- * Why a generated SVG instead of map tiles: the app ships a strict CSP
- * (img-src 'self' data: blob:) and deliberately uses no external CDNs/APIs, and
- * completion reports are archived to OneDrive as a single self-contained file.
- * An inline SVG honours all three — it needs no network when viewed, so the
- * snapshot still renders inside an offline/archived report. For street-level
- * context we also expose a deep link to open the exact coordinates in a full
- * map app (see externalMapUrl), which is a navigation action, not an embed.
+ * The snapshot is an inline <svg>: OSM raster tiles sit in <image> elements
+ * behind the GPS track and start/finish markers. Two modes:
+ *   - inline:false (live pages) — tiles referenced by URL, loaded by the
+ *     browser. The app's CSP allows tile.openstreetmap.org for this.
+ *   - inline:true (completion report) — tiles are fetched server-side and
+ *     embedded as data: URIs, so the report stays self-contained and renders
+ *     offline / from the OneDrive archive.
+ *
+ * Tile fetches are best-effort: any tile that can't be loaded is simply
+ * dropped (the styled background shows through) so the track/markers always
+ * render. Falls back to the site's stored coordinates when no GPS exists.
  */
 
-// Metres per degree of latitude (good enough for a single job site).
-const M_PER_DEG_LAT = 111320;
+const TILE_SIZE = 256;
+const TILE_HOST = 'https://tile.openstreetmap.org';
+// Identify the app to OSM's tile servers (their usage policy requires a UA).
+const TILE_UA = 'GardeningMgt/0.1 (+https://github.com/matthewhe22/GardeningMgt; job location report)';
 
 function escapeXml(s) {
   return String(s).replace(/[<>&"']/g, (c) =>
     ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// --- Web Mercator pixel projection (256px tiles) ---
+function lngToWorldX(lng, z) {
+  return ((lng + 180) / 360) * TILE_SIZE * 2 ** z;
+}
+function latToWorldY(lat, z) {
+  const s = Math.sin((lat * Math.PI) / 180);
+  const y = 0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI);
+  return y * TILE_SIZE * 2 ** z;
+}
+// Ground resolution (metres per pixel) at a latitude / zoom.
+function metresPerPixel(lat, z) {
+  return (156543.03392804097 * Math.cos((lat * Math.PI) / 180)) / 2 ** z;
 }
 
 /**
@@ -56,115 +76,168 @@ function externalMapUrl(gpsPoints, property) {
 }
 
 const NICE_DISTANCES = [5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 5000, 10000];
-
 function niceScaleMeters(target) {
   let bar = NICE_DISTANCES[0];
   for (const n of NICE_DISTANCES) if (n <= target) bar = n;
   return bar;
 }
-
 function formatDistance(m) {
   return m >= 1000 ? `${(m / 1000) % 1 === 0 ? m / 1000 : (m / 1000).toFixed(1)} km` : `${m} m`;
 }
 
+// Highest zoom (<= max) at which all points fit inside width×height with padding.
+function fitZoom(pts, width, height, pad) {
+  const MIN_Z = 2, MAX_Z = 18;
+  if (pts.length === 1) return 17;
+  for (let z = MAX_Z; z >= MIN_Z; z--) {
+    const xs = pts.map((p) => lngToWorldX(p.lng, z));
+    const ys = pts.map((p) => latToWorldY(p.lat, z));
+    const spanX = Math.max(...xs) - Math.min(...xs);
+    const spanY = Math.max(...ys) - Math.min(...ys);
+    if (spanX <= width - 2 * pad && spanY <= height - 2 * pad) return z;
+  }
+  return MIN_Z;
+}
+
+function tileUrl(z, x, y) {
+  return `${TILE_HOST}/${z}/${x}/${y}.png`;
+}
+
+async function fetchTileDataUri(url) {
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 5000);
+    let res;
+    try {
+      res = await fetch(url, { headers: { 'User-Agent': TILE_UA }, signal: ctrl.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    return `data:image/png;base64,${buf.toString('base64')}`;
+  } catch {
+    return null; // network/policy/timeout — background shows through
+  }
+}
+
 /**
  * Render the job-location snapshot as an inline SVG string, or null when there
- * is no location to show. Plots the on-site GPS track with start/finish markers,
- * a north arrow and a scale bar, all in a self-contained <svg>.
+ * is no location to show. With { inline: true } the OSM tiles are embedded as
+ * data: URIs (self-contained); otherwise they are referenced by URL.
  */
-function renderMapSnapshot(gpsPoints, property, opts = {}) {
+async function renderMapSnapshot(gpsPoints, property, opts = {}) {
   const width = opts.width || 600;
-  const height = opts.height || 300;
-  const pad = 30;
+  const height = opts.height || 340;
+  const pad = 44;
+  const inline = !!opts.inline;
   const { pts, source } = collectPoints(gpsPoints, property);
   if (!pts.length) return null;
 
-  // Local equirectangular projection (metres) around the centroid.
-  const lat0 = pts.reduce((s, p) => s + p.lat, 0) / pts.length;
-  const lng0 = pts.reduce((s, p) => s + p.lng, 0) / pts.length;
-  const mPerLng = M_PER_DEG_LAT * Math.cos((lat0 * Math.PI) / 180);
-  const proj = pts.map((p) => ({
-    ...p,
-    x: (p.lng - lng0) * mPerLng,
-    y: (p.lat - lat0) * M_PER_DEG_LAT,
-  }));
+  const z = fitZoom(pts, width, height, pad);
+  const world = pts.map((p) => ({ ...p, wx: lngToWorldX(p.lng, z), wy: latToWorldY(p.lat, z) }));
+  const minX = Math.min(...world.map((p) => p.wx)), maxX = Math.max(...world.map((p) => p.wx));
+  const minY = Math.min(...world.map((p) => p.wy)), maxY = Math.max(...world.map((p) => p.wy));
+  const topLeftX = (minX + maxX) / 2 - width / 2;
+  const topLeftY = (minY + maxY) / 2 - height / 2;
+  const toScreen = (p) => ({ X: p.wx - topLeftX, Y: p.wy - topLeftY });
+  const screen = world.map((p) => ({ ...p, ...toScreen(p) }));
 
-  const xs = proj.map((p) => p.x), ys = proj.map((p) => p.y);
-  const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
-  const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
-  // Fit the largest span (min 80 m so a single point isn't absurdly zoomed),
-  // with headroom so markers near the edge aren't clipped. Isotropic scale.
-  const MIN_SPAN = 80;
-  const span = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys), MIN_SPAN) * 1.3;
-  const scale = Math.min(width - 2 * pad, height - 2 * pad) / span; // px per metre
-  const toSvg = (p) => ({
-    X: width / 2 + (p.x - cx) * scale,
-    Y: height / 2 - (p.y - cy) * scale, // invert Y for north-up
-  });
-  const svgPts = proj.map((p) => ({ ...p, ...toSvg(p) }));
+  // Tiles covering the viewport.
+  const n = 2 ** z;
+  const x0 = Math.floor(topLeftX / TILE_SIZE), x1 = Math.floor((topLeftX + width) / TILE_SIZE);
+  const y0 = Math.floor(topLeftY / TILE_SIZE), y1 = Math.floor((topLeftY + height) / TILE_SIZE);
+  const tiles = [];
+  for (let ty = y0; ty <= y1; ty++) {
+    if (ty < 0 || ty >= n) continue; // no vertical wrap
+    for (let tx = x0; tx <= x1; tx++) {
+      const wx = ((tx % n) + n) % n; // wrap horizontally
+      tiles.push({
+        sx: tx * TILE_SIZE - topLeftX,
+        sy: ty * TILE_SIZE - topLeftY,
+        url: tileUrl(z, wx, ty),
+      });
+    }
+  }
+  if (inline) {
+    const uris = await Promise.all(tiles.map((t) => fetchTileDataUri(t.url)));
+    tiles.forEach((t, i) => { t.href = uris[i]; });
+  } else {
+    tiles.forEach((t) => { t.href = t.url; });
+  }
+  const tilesSvg = tiles.filter((t) => t.href).map((t) =>
+    `<image x="${t.sx.toFixed(1)}" y="${t.sy.toFixed(1)}" width="${TILE_SIZE}" height="${TILE_SIZE}" ` +
+    `href="${t.href}" preserveAspectRatio="none"/>`).join('');
 
-  const start = svgPts.find((p) => p.kind === 'start') || svgPts[0];
-  const finish = svgPts.find((p) => p.kind === 'finish')
-    || (svgPts.length > 1 ? svgPts[svgPts.length - 1] : null);
-  const rep = svgPts.find((p) => p.kind === 'finish')
-    || svgPts.find((p) => p.kind === 'start') || svgPts[svgPts.length - 1];
+  const start = screen.find((p) => p.kind === 'start') || screen[0];
+  const finish = screen.find((p) => p.kind === 'finish')
+    || (screen.length > 1 ? screen[screen.length - 1] : null);
+  const rep = screen.find((p) => p.kind === 'finish')
+    || screen.find((p) => p.kind === 'start') || screen[screen.length - 1];
 
-  // Track path through every point in chronological order.
-  const track = svgPts.length > 1
-    ? `<polyline points="${svgPts.map((p) => `${p.X.toFixed(1)},${p.Y.toFixed(1)}`).join(' ')}" ` +
-      `fill="none" stroke="#15803d" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="1 5"/>`
+  const track = screen.length > 1
+    ? `<polyline points="${screen.map((p) => `${p.X.toFixed(1)},${p.Y.toFixed(1)}`).join(' ')}" ` +
+      `fill="none" stroke="#1d4ed8" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round" ` +
+      `opacity="0.9" paint-order="stroke"/>`
     : '';
 
-  // Scale bar (~ a quarter of the width, snapped to a round distance).
-  const barMeters = niceScaleMeters((width / 4) / scale);
-  const barPx = barMeters * scale;
+  // Scale bar from true ground resolution.
+  const res = metresPerPixel(rep.lat, z);
+  const barMeters = niceScaleMeters((width / 4) * res);
+  const barPx = barMeters / res;
 
   const marker = (p, fill, label) => p ? `
-    <circle cx="${p.X.toFixed(1)}" cy="${p.Y.toFixed(1)}" r="9" fill="${fill}" stroke="#fff" stroke-width="2.5"/>
-    <text x="${p.X.toFixed(1)}" y="${(p.Y + 3.5).toFixed(1)}" text-anchor="middle" font-size="10" font-weight="700" fill="#fff">${label}</text>` : '';
+    <circle cx="${p.X.toFixed(1)}" cy="${p.Y.toFixed(1)}" r="10" fill="${fill}" stroke="#fff" stroke-width="3"/>
+    <text x="${p.X.toFixed(1)}" y="${(p.Y + 3.5).toFixed(1)}" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">${label}</text>` : '';
 
-  const repLabel = source === 'property'
-    ? 'Site location (no GPS captured this visit)'
-    : `${rep.lat.toFixed(5)}, ${rep.lng.toFixed(5)}`;
-
-  // Single point (just started, or property fallback): one neutral pin.
-  const singlePoint = source !== 'property' && svgPts.length === 1;
+  const singlePoint = source !== 'property' && screen.length === 1;
   const markersSvg = (source === 'property' || singlePoint)
     ? marker(rep, '#15803d', '●')
     : `${marker(start, '#15803d', 'S')}${marker(finish, '#b91c1c', 'F')}`;
 
-  const showLegend = source === 'gps' && (finish || svgPts.length > 1);
+  const repLabel = source === 'property'
+    ? 'Site location (no GPS captured this visit)'
+    : `${rep.lat.toFixed(5)}, ${rep.lng.toFixed(5)}`;
+  const showLegend = source === 'gps' && (finish || screen.length > 1);
+
+  const chip = (x, y, w, h) =>
+    `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="5" fill="#ffffff" opacity="0.82"/>`;
 
   return `<svg viewBox="0 0 ${width} ${height}" width="100%" preserveAspectRatio="xMidYMid meet" ` +
     `role="img" aria-label="Job location map snapshot" xmlns="http://www.w3.org/2000/svg" ` +
-    `style="display:block;background:#eef4ee;border:1px solid #d7e0d7;border-radius:10px;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif">
-  <defs>
-    <pattern id="msgrid" width="40" height="40" patternUnits="userSpaceOnUse">
-      <path d="M40 0H0V40" fill="none" stroke="#dde7dd" stroke-width="1"/>
-    </pattern>
-  </defs>
-  <rect x="0" y="0" width="${width}" height="${height}" fill="url(#msgrid)"/>
+    `style="display:block;background:#dfe8df;border:1px solid #d7e0d7;border-radius:10px;overflow:hidden;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif">
+  ${tilesSvg}
   ${track}
   ${markersSvg}
   <!-- north arrow -->
-  <g transform="translate(${width - 26}, 26)">
+  <g transform="translate(${width - 26}, 28)">
+    ${chip(-13, -16, 26, 40)}
     <path d="M0 -12 L5 6 L0 2 L-5 6 Z" fill="#14532d"/>
     <text x="0" y="20" text-anchor="middle" font-size="10" font-weight="700" fill="#14532d">N</text>
   </g>
   <!-- scale bar -->
-  <g transform="translate(16, ${height - 16})">
+  <g transform="translate(14, ${height - 16})">
+    ${chip(-6, -22, barPx + 12, 28)}
     <line x1="0" y1="0" x2="${barPx.toFixed(1)}" y2="0" stroke="#14532d" stroke-width="3"/>
     <line x1="0" y1="-4" x2="0" y2="4" stroke="#14532d" stroke-width="3"/>
     <line x1="${barPx.toFixed(1)}" y1="-4" x2="${barPx.toFixed(1)}" y2="4" stroke="#14532d" stroke-width="3"/>
     <text x="${(barPx / 2).toFixed(1)}" y="-7" text-anchor="middle" font-size="10" fill="#14532d" font-weight="600">${formatDistance(barMeters)}</text>
   </g>
   <!-- coordinate caption -->
-  <text x="16" y="22" font-size="11" fill="#14532d" font-weight="600">📍 ${escapeXml(repLabel)}</text>
+  <g transform="translate(10, 10)">
+    ${chip(0, 0, Math.min(width - 64, 22 + repLabel.length * 6.2), 22)}
+    <text x="8" y="15" font-size="11" fill="#14532d" font-weight="600">📍 ${escapeXml(repLabel)}</text>
+  </g>
   ${showLegend ? `
-  <g transform="translate(16, ${height - 42})" font-size="10" fill="#3a463c">
-    <circle cx="6" cy="-3" r="5" fill="#15803d"/><text x="16" y="0">Start</text>
-    <circle cx="56" cy="-3" r="5" fill="#b91c1c"/><text x="66" y="0">Finish</text>
+  <g transform="translate(10, ${height - 50})" font-size="10" fill="#23311f">
+    ${chip(0, -13, 108, 20)}
+    <circle cx="12" cy="-3" r="5" fill="#15803d"/><text x="22" y="0">Start</text>
+    <circle cx="62" cy="-3" r="5" fill="#b91c1c"/><text x="72" y="0">Finish</text>
   </g>` : ''}
+  <!-- attribution (required by the OpenStreetMap tile usage policy) -->
+  <g transform="translate(${width}, ${height})">
+    <text x="-4" y="-5" text-anchor="end" font-size="9" fill="#3a463c" style="paint-order:stroke;stroke:#ffffff;stroke-width:2.5px">© OpenStreetMap contributors</text>
+  </g>
 </svg>`;
 }
 
