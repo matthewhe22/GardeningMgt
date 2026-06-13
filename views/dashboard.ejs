@@ -3,7 +3,22 @@
 
 <div class="grid">
   <section class="card">
-    <h2>Today's visits<% if (staff) { %> (all gardeners)<% } %></h2>
+    <div class="card-head">
+      <h2>Today's visits<% if (staff) { %> (all gardeners)<% } %></h2>
+      <% if (todayVisits.length > 1) { %>
+        <% if (staff) { %>
+        <form method="post" action="/routes/optimize-all" class="inline">
+          <input type="hidden" name="date" value="<%= today %>">
+          <button class="btn btn-sm">⚡ Optimize all routes</button>
+        </form>
+        <% } else { %>
+        <form method="post" action="/visits/optimize" class="inline">
+          <input type="hidden" name="date" value="<%= today %>">
+          <button class="btn btn-sm btn-primary">⚡ Optimize my day</button>
+        </form>
+        <% } %>
+      <% } %>
+    </div>
     <% if (!todayVisits.length) { %><p class="muted">No visits scheduled for today.</p><% } %>
     <table class="table">
       <% todayVisits.forEach(v => { %>
