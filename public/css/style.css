@@ -1014,6 +1014,43 @@ body.anon {
   color: var(--green-700);
 }
 
+/* Thumbnails of the photos just taken / picked, shown before upload. */
+.photo-previews {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+  margin: 10px 0;
+}
+.preview-thumb { margin: 0; position: relative; }
+.preview-thumb img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  display: block;
+}
+.preview-thumb .preview-file {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  font-size: 28px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.preview-thumb figcaption {
+  font-size: 0.68rem;
+  color: var(--muted);
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .photo-upload .share-line { font-weight: 500; margin: 10px 0; }
 .photo-upload .btn-block { margin-top: 4px; }
 
