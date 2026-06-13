@@ -75,7 +75,8 @@ async function backfillSchedules() {
 }
 
 /**
- * Daily at 06:00 server-local time — used by `npm start` on a normal server.
+ * Daily at 06:00 in the business timezone (BUSINESS_TZ, default
+ * Australia/Melbourne) — used by `npm start` on a normal server.
  * On Vercel, the schedule in vercel.json calls /cron/reminders instead.
  */
 function startReminderScheduler() {

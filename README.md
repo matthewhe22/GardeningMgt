@@ -76,6 +76,7 @@ Demo accounts (after seeding):
 | `CRON_SECRET` | unset | If set, `/cron/reminders` requires `Authorization: Bearer <secret>` |
 | `BOOTSTRAP_ADMIN_EMAIL/_PASSWORD` | admin@example.com / admin1234 | First admin on an empty database |
 | `HOURLY_RATE` | 50 | Default labour rate for invoices |
+| `BUSINESS_TZ` | Australia/Melbourne | Timezone for the business calendar, reminder scheduling and every timestamp shown to users |
 | `PORT` | 3000 | HTTP port (non-Vercel) |
 
 ## Mobile use

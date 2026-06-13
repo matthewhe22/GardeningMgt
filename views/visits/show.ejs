@@ -22,7 +22,7 @@
   <% if (locals.job) { %>
   <p class="page-sub">🔁 <%= job.frequency %> · <%= job.contract_years %>-year contract
     (<%= job.start_date %> → <%= job.end_date %>)
-    · last completed: <%= job.last_completed_at ? job.last_completed_at + ' UTC' : 'never' %>
+    · last completed: <%= job.last_completed_at ? fmtDateTime(job.last_completed_at) : 'never' %>
     <% if (staff) { %> · <a href="/jobs/site/<%= visit.property_id %>">site history</a><% } %>
     · <a href="/jobs">all sites</a></p>
   <% } %>
@@ -32,7 +32,7 @@
 <div class="card timer-card">
   <% if (visit.started_at && !visit.finished_at) { %>
     <h2>⏱ Job running</h2>
-    <p>Started at <strong><%= visit.started_at %></strong> UTC.</p>
+    <p>Started at <strong><%= fmtDateTime(visit.started_at) %></strong>.</p>
     <form method="post" action="/visits/<%= visit.id %>/timer/stop" class="gps-form">
       <input type="hidden" name="lat"><input type="hidden" name="lng">
       <p><strong><%= photos.length %></strong> photo(s) uploaded for this site so far.
@@ -46,7 +46,7 @@
   <% } else if (visit.finished_at) { %>
     <h2>✅ Job completed</h2>
     <p>Worked <strong><%= visit.duration_minutes %> min</strong>
-      (<%= visit.started_at %> → <%= visit.finished_at %> UTC).</p>
+      (<%= fmtDateTime(visit.started_at) %> → <%= fmtDateTime(visit.finished_at) %>).</p>
     <div class="btn-row">
       <a class="btn btn-primary" href="/visits/<%= visit.id %>/report" target="_blank">📄 Completion report</a>
       <form method="post" action="/visits/<%= visit.id %>/timer/start" class="gps-form inline">
@@ -64,11 +64,20 @@
       (if location access is allowed).</p>
   <% } %>
 
+  <% if (locals.mapSvg && (visit.started_at || gpsPoints.length)) { %>
+    <div class="map-snapshot">
+      <h3 class="map-snapshot-title">📍 Job location</h3>
+      <%- mapSvg %>
+      <p class="muted">From the GPS captured on this visit.<% if (locals.mapLink) { %>
+        · <a href="<%= mapLink %>" target="_blank" rel="noopener">Open in map ↗</a><% } %></p>
+    </div>
+  <% } %>
+
   <% if (gpsPoints.length) { %>
     <details><summary class="muted"><%= gpsPoints.length %> GPS point(s) recorded</summary>
       <table class="table">
         <% gpsPoints.forEach(g => { %>
-          <tr><td><%= g.kind %></td><td><%= g.lat.toFixed(5) %>, <%= g.lng.toFixed(5) %></td><td class="muted"><%= g.recorded_at %></td></tr>
+          <tr><td><%= g.kind %></td><td><%= g.lat.toFixed(5) %>, <%= g.lng.toFixed(5) %></td><td class="muted"><%= fmtDateTime(g.recorded_at) %></td></tr>
         <% }) %>
       </table>
     </details>
@@ -117,7 +126,7 @@
         <figure class="photo">
           <a href="/uploads/<%= ph.filename %>" target="_blank"><img src="/uploads/<%= ph.filename %>" alt="<%= ph.caption || ph.original_name %>" loading="lazy"></a>
           <figcaption>
-            <span class="photo-stamp">📅 <%= ph.created_at %> UTC</span><br>
+            <span class="photo-stamp">📅 <%= fmtDateTime(ph.created_at) %></span><br>
             <% if (ph.caption) { %><%= ph.caption %> · <% } %><span class="muted">by <%= ph.uploader_name %></span>
           </figcaption>
         </figure>
@@ -139,12 +148,12 @@
     <% comments.forEach(c => { %>
       <div class="comment">
         <strong><%= c.author_name %></strong> <span class="tag tag-<%= c.author_role %>"><%= c.author_role %></span>
-        <span class="muted"><%= c.created_at %> UTC</span>
+        <span class="muted"><%= fmtDateTime(c.created_at) %></span>
         <p><%= c.body %></p>
         <% (photosByComment[c.id] || []).forEach(ph => { %>
           <figure class="photo comment-photo">
             <a href="/uploads/<%= ph.filename %>" target="_blank"><img src="/uploads/<%= ph.filename %>" alt="comment photo" loading="lazy"></a>
-            <figcaption><span class="photo-stamp">📅 <%= ph.created_at %> UTC</span></figcaption>
+            <figcaption><span class="photo-stamp">📅 <%= fmtDateTime(ph.created_at) %></span></figcaption>
           </figure>
         <% }) %>
       </div>

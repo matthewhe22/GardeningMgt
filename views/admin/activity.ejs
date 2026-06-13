@@ -3,10 +3,10 @@
 <p class="muted">Every change in the system is recorded here: who did what, and when.</p>
 <div class="card">
   <table class="table">
-    <tr><th>When (UTC)</th><th>Who</th><th>Action</th><th>Details</th></tr>
+    <tr><th>When</th><th>Who</th><th>Action</th><th>Details</th></tr>
     <% entries.forEach(e => { %>
     <tr>
-      <td class="muted"><%= e.created_at %></td>
+      <td class="muted"><%= fmtDateTime(e.created_at) %></td>
       <td><%= e.user_name || 'System' %></td>
       <td><code><%= e.action %></code></td>
       <td><%= e.details || '' %></td>

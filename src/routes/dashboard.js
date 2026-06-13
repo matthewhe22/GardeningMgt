@@ -2,11 +2,12 @@ const express = require('express');
 const { q } = require('../db');
 const { isStaff } = require('../auth');
 const { asyncHandler } = require('../asyncHandler');
+const { today: businessToday } = require('../time');
 
 const router = express.Router();
 
 router.get('/', asyncHandler(async (req, res) => {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = businessToday();
   const me = req.user;
   const staff = isStaff(me);
 

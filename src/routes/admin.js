@@ -7,6 +7,7 @@ const { requireRole } = require('../auth');
 const { logActivity } = require('../activity');
 const { sendRemindersForDate } = require('../reminders');
 const { asyncHandler } = require('../asyncHandler');
+const { today: businessToday } = require('../time');
 const { assertCsrf } = require('../csrf');
 
 const router = express.Router();
@@ -22,13 +23,13 @@ router.get('/activity', requireRole('supervisor'), asyncHandler(async (req, res)
 }));
 
 router.post('/reminders/bulk', requireRole('supervisor'), asyncHandler(async (req, res) => {
-  const date = req.body.date || new Date().toISOString().slice(0, 10);
+  const date = req.body.date || businessToday();
   const sent = await sendRemindersForDate(date, { actorId: req.user.id, force: req.body.force === 'on' });
   res.redirect(`/admin/reminders?date=${date}&sent=${sent}`);
 }));
 
 router.get('/reminders', requireRole('supervisor'), asyncHandler(async (req, res) => {
-  const date = req.query.date || new Date().toISOString().slice(0, 10);
+  const date = req.query.date || businessToday();
   const pending = await q(`
     SELECT v.*, p.name AS property_name, u.name AS gardener_name
     FROM visits v JOIN properties p ON p.id = v.property_id
