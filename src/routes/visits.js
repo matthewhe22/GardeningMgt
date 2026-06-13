@@ -8,6 +8,8 @@ const { loadReportData, renderReportHtml, archiveToOneDrive } = require('../repo
 const { renderMapSnapshot, externalMapUrl } = require('../mapSnapshot');
 const { asyncHandler } = require('../asyncHandler');
 const { assertCsrf } = require('../csrf');
+const { optimizeRoute } = require('../routeOptimizer');
+const { today } = require('../time');
 
 const router = express.Router();
 
@@ -36,16 +38,87 @@ router.get('/', asyncHandler(async (req, res) => {
   if (date) { args.push(date); where.push(`v.scheduled_date = $${args.length}`); }
   if (gardenerId) { args.push(Number(gardenerId)); where.push(`v.gardener_id = $${args.length}`); }
   const visits = await q(`
-    SELECT v.*, p.name AS property_name, p.address, u.name AS gardener_name
+    SELECT v.*, p.name AS property_name, p.address, p.lat, p.lng, u.name AS gardener_name
     FROM visits v
     JOIN properties p ON p.id = v.property_id
     LEFT JOIN users u ON u.id = v.gardener_id
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-    ORDER BY v.scheduled_date DESC, COALESCE(v.route_order, 999)
+    ORDER BY v.scheduled_date DESC, COALESCE(v.route_order, 999), v.id
     LIMIT 200`, args);
+  // Group consecutive visits by day so the list reads as a per-day route in
+  // visiting sequence (route_order). Reordering / optimizing is offered per day
+  // only when the list is scoped to a single gardener (one route to order).
+  const groups = [];
+  for (const v of visits) {
+    let g = groups[groups.length - 1];
+    if (!g || g.date !== v.scheduled_date) { g = { date: v.scheduled_date, items: [] }; groups.push(g); }
+    g.items.push(v);
+  }
   const gardeners = await q("SELECT id, name FROM users WHERE role = 'gardener' AND active");
   const properties = await q('SELECT id, name FROM properties ORDER BY name');
-  res.render('visits/index', { title: 'Visits / Jobs', visits, gardeners, properties, staff, date, gardenerId });
+  res.render('visits/index', {
+    title: 'Visits / Jobs', visits, groups, gardeners, properties, staff,
+    date, gardenerId, today: today(), canReorder: !!gardenerId,
+  });
+}));
+
+// --- Per-day route ordering, available right on the Jobs page ---------------
+// Scoped to one gardener + one day (a single route). Staff can order any
+// gardener's day; a gardener can order their own.
+
+function loadDayOrder(gardenerId, date) {
+  return q(`
+    SELECT v.id, p.lat, p.lng
+    FROM visits v JOIN properties p ON p.id = v.property_id
+    WHERE v.gardener_id = $1 AND v.scheduled_date = $2 AND v.status <> 'cancelled'
+    ORDER BY COALESCE(v.route_order, 999), v.id`, [gardenerId, date]);
+}
+
+async function applyRouteOrder(orderedIds) {
+  await withTransaction(async (tx) => {
+    for (let i = 0; i < orderedIds.length; i++) {
+      await tx.q('UPDATE visits SET route_order = $1 WHERE id = $2', [i + 1, orderedIds[i]]);
+    }
+  });
+}
+
+function backToList(date, gardenerId) {
+  const qs = new URLSearchParams();
+  if (date) qs.set('date', date);
+  if (gardenerId) qs.set('gardener_id', String(gardenerId));
+  return `/visits${qs.toString() ? '?' + qs.toString() : ''}`;
+}
+
+// Optimize one gardener's day with the routing function (nearest-neighbour + 2-opt).
+router.post('/optimize', asyncHandler(async (req, res) => {
+  const date = req.body.date;
+  const gardenerId = isStaff(req.user) ? Number(req.body.gardener_id) : req.user.id;
+  if (!gardenerId || !isValidDate(date)) return res.redirect('/visits');
+  const day = await loadDayOrder(gardenerId, date);
+  if (day.length) {
+    const { orderedIds, lengthKm } = optimizeRoute(day.map((v) => ({ id: v.id, lat: v.lat, lng: v.lng })));
+    await applyRouteOrder(orderedIds);
+    await logActivity(req.user.id, 'route.optimize', 'visit', null,
+      `Optimized route for gardener #${gardenerId} on ${date}: ${orderedIds.length} stops, ~${lengthKm.toFixed(1)} km`);
+  }
+  res.redirect(backToList(date, gardenerId));
+}));
+
+// Manually nudge a visit up/down within its day's visiting sequence.
+router.post('/:id/move', asyncHandler(async (req, res) => {
+  const visit = await getVisit(req.params.id);
+  if (!visit || !canSeeVisit(req.user, visit) || !visit.gardener_id) return res.redirect('/visits');
+  const day = await loadDayOrder(visit.gardener_id, visit.scheduled_date);
+  const ids = day.map((d) => d.id);
+  const idx = ids.indexOf(visit.id);
+  const swap = idx + (req.body.dir === 'up' ? -1 : 1);
+  if (idx >= 0 && swap >= 0 && swap < ids.length) {
+    [ids[idx], ids[swap]] = [ids[swap], ids[idx]];
+    await applyRouteOrder(ids);
+    await logActivity(req.user.id, 'route.reorder', 'visit', visit.id,
+      `Moved job #${visit.id} ${req.body.dir === 'up' ? 'earlier' : 'later'} in the ${visit.scheduled_date} route`);
+  }
+  res.redirect(backToList(visit.scheduled_date, visit.gardener_id) + `#v${visit.id}`);
 }));
 
 // Create (staff only)

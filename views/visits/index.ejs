@@ -1,10 +1,23 @@
 <%- include('../partials/header') %>
 <div class="page-head">
   <h1>Jobs</h1>
-  <p class="page-sub">Scheduled visits. Tap a job to start the timer, upload photos and complete it.</p>
+  <p class="page-sub">Scheduled visits, grouped by day in visiting order. Tap a job to start the timer, upload photos and complete it.</p>
 </div>
 
 <div class="card">
+  <%
+    const baseQs = (d) => {
+      const p = new URLSearchParams();
+      if (d) p.set('date', d);
+      if (gardenerId) p.set('gardener_id', String(gardenerId));
+      const s = p.toString();
+      return '/visits' + (s ? '?' + s : '');
+    };
+  %>
+  <div class="quick-filters">
+    <a class="chip quick-chip<%= date === today ? ' is-active' : '' %>" href="<%= baseQs(today) %>">📅 Today</a>
+    <a class="chip quick-chip<%= !date ? ' is-active' : '' %>" href="<%= baseQs('') %>">All dates</a>
+  </div>
   <form method="get" class="filter-row">
     <label>Date <input type="date" name="date" value="<%= date %>"></label>
     <% if (staff) { %>
@@ -19,6 +32,9 @@
     <% } %>
     <button class="btn">Filter</button>
   </form>
+  <% if (staff && !gardenerId) { %>
+    <p class="muted reorder-hint">Pick a single gardener to reorder or optimize their visiting sequence.</p>
+  <% } %>
 </div>
 
 <% if (staff) { %>
@@ -44,21 +60,52 @@
 </details>
 <% } %>
 
-<div class="job-list">
-  <% visits.forEach(v => { %>
-  <a class="job-row card" href="/visits/<%= v.id %>">
-    <span class="route-no"><%= v.route_order || '·' %></span>
-    <span class="job-row-main">
-      <strong><%= v.property_name %></strong>
-      <span class="muted"><%= v.address %></span>
-    </span>
-    <span class="job-row-meta">
-      <span class="muted"><%= v.scheduled_date %><% if (v.time_window) { %> · <%= v.time_window %><% } %></span>
-      <span class="muted">👤 <%= v.gardener_name || 'Unassigned' %><% if (v.duration_minutes) { %> · <%= v.duration_minutes %> min<% } %></span>
-    </span>
-    <span class="status status-<%= v.status %>"><%= v.status.replace('_',' ') %></span>
-  </a>
-  <% }) %>
-  <% if (!visits.length) { %><div class="card"><p class="muted">No visits match this filter.</p></div><% } %>
-</div>
+<% groups.forEach(group => { %>
+  <div class="day-group">
+    <div class="day-head">
+      <h2 class="day-title">
+        <%= group.date %>
+        <% if (group.date === today) { %><span class="status status-in_progress">Today</span><% } %>
+        <span class="muted">· <%= group.items.length %> stop<%= group.items.length === 1 ? '' : 's' %></span>
+      </h2>
+      <% if (canReorder && group.items.length > 1) { %>
+      <form method="post" action="/visits/optimize" class="inline">
+        <input type="hidden" name="date" value="<%= group.date %>">
+        <input type="hidden" name="gardener_id" value="<%= gardenerId %>">
+        <button class="btn btn-sm">⚡ Optimize route</button>
+      </form>
+      <% } %>
+    </div>
+
+    <div class="job-list">
+      <% group.items.forEach((v, i) => { %>
+      <div class="job-row card" id="v<%= v.id %>">
+        <span class="route-no"><%= v.route_order || '·' %></span>
+        <a class="job-row-main" href="/visits/<%= v.id %>">
+          <strong><%= v.property_name %></strong>
+          <span class="muted"><%= v.address %></span>
+        </a>
+        <span class="job-row-meta">
+          <span class="muted"><% if (v.time_window) { %><%= v.time_window %><% } %><% if (staff) { %> · 👤 <%= v.gardener_name || 'Unassigned' %><% } %><% if (v.duration_minutes) { %> · <%= v.duration_minutes %> min<% } %></span>
+          <span class="status status-<%= v.status %>"><%= v.status.replace('_',' ') %></span>
+        </span>
+        <% if (canReorder) { %>
+        <span class="reorder" aria-label="Reorder visit">
+          <form method="post" action="/visits/<%= v.id %>/move" class="inline">
+            <input type="hidden" name="dir" value="up">
+            <button class="reorder-btn" aria-label="Move earlier"<%= i === 0 ? ' disabled' : '' %>>▲</button>
+          </form>
+          <form method="post" action="/visits/<%= v.id %>/move" class="inline">
+            <input type="hidden" name="dir" value="down">
+            <button class="reorder-btn" aria-label="Move later"<%= i === group.items.length - 1 ? ' disabled' : '' %>>▼</button>
+          </form>
+        </span>
+        <% } %>
+      </div>
+      <% }) %>
+    </div>
+  </div>
+<% }) %>
+
+<% if (!visits.length) { %><div class="card"><p class="muted">No visits match this filter.</p></div><% } %>
 <%- include('../partials/footer') %>
