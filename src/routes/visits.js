@@ -5,6 +5,7 @@ const { logActivity } = require('../activity');
 const { upload, savePhoto } = require('../upload');
 const { nextOccurrenceAfter, isValidDate } = require('../recurrence');
 const { loadReportData, renderReportHtml, archiveToOneDrive } = require('../report');
+const { renderMapSnapshot, externalMapUrl } = require('../mapSnapshot');
 const { asyncHandler } = require('../asyncHandler');
 const { assertCsrf } = require('../csrf');
 
@@ -80,10 +81,14 @@ router.get('/:id', asyncHandler(async (req, res) => {
   const job = visit.job_id
     ? await q1('SELECT j.*, u.name AS default_gardener_name FROM jobs j LEFT JOIN users u ON u.id = j.gardener_id WHERE j.id = $1', [visit.job_id])
     : null;
+  // Location snapshot from the captured GPS (falls back to the site's stored
+  // coordinates), shown once the job is under way / completed.
+  const mapSvg = renderMapSnapshot(gpsPoints, visit);
+  const mapLink = externalMapUrl(gpsPoints, visit);
   res.render('visits/show', {
     title: `Job #${visit.id} — ${visit.property_name}`,
     visit, tasks, photos, comments, photosByComment, invoice, gardeners, gpsPoints, job,
-    staff: isStaff(req.user), flash: req.query.error || null,
+    mapSvg, mapLink, staff: isStaff(req.user), flash: req.query.error || null,
   });
 }));
 

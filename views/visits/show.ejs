@@ -64,6 +64,15 @@
       (if location access is allowed).</p>
   <% } %>
 
+  <% if (locals.mapSvg && (visit.started_at || gpsPoints.length)) { %>
+    <div class="map-snapshot">
+      <h3 class="map-snapshot-title">📍 Job location</h3>
+      <%- mapSvg %>
+      <p class="muted">From the GPS captured on this visit.<% if (locals.mapLink) { %>
+        · <a href="<%= mapLink %>" target="_blank" rel="noopener">Open in map ↗</a><% } %></p>
+    </div>
+  <% } %>
+
   <% if (gpsPoints.length) { %>
     <details><summary class="muted"><%= gpsPoints.length %> GPS point(s) recorded</summary>
       <table class="table">

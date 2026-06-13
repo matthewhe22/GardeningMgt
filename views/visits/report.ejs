@@ -21,6 +21,8 @@
   figcaption { font-size: 0.78rem; color: #707b72; margin-top: 4px; }
   .stamp { background: #14532d; color: #fff; padding: 1px 8px; border-radius: 4px; font-size: 0.74rem; }
   .comment { border-left: 3px solid #e6e4dc; padding: 4px 12px; margin: 8px 0; }
+  .map-snapshot { max-width: 600px; margin: 4px 0 8px; }
+  .map-snapshot svg { width: 100%; height: auto; }
   footer { margin-top: 40px; color: #707b72; font-size: 0.78rem; border-top: 1px solid #e6e4dc; padding-top: 12px; }
   @media print { .no-print { display: none; } }
 </style>
@@ -58,6 +60,13 @@
         <% if (t.description) { %> — <%= t.description %><% } %></td></tr>
     <% }) %>
   </table>
+  <% } %>
+
+  <% if (typeof mapSvg !== 'undefined' && mapSvg) { %>
+  <h2>Job location</h2>
+  <div class="map-snapshot"><%- mapSvg %></div>
+  <p class="meta">Captured from the gardener's GPS on this visit.<% if (mapLink) { %>
+    <a href="<%= mapLink %>" target="_blank" rel="noopener">Open in map ↗</a><% } %></p>
   <% } %>
 
   <% if (gpsPoints.length) { %>

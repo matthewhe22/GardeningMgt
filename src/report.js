@@ -3,12 +3,13 @@ const ejs = require('ejs');
 const { q, q1 } = require('./db');
 const { uploadFile } = require('./onedrive');
 const { logActivity } = require('./activity');
+const { renderMapSnapshot, externalMapUrl } = require('./mapSnapshot');
 
 /** Everything needed to render a job completion report. */
 async function loadReportData(visitId) {
   const visit = await q1(`
     SELECT v.*, p.name AS property_name, p.address, p.lots, p.contact_name,
-           u.name AS gardener_name
+           p.lat, p.lng, u.name AS gardener_name
     FROM visits v
     JOIN properties p ON p.id = v.property_id
     LEFT JOIN users u ON u.id = v.gardener_id
@@ -38,9 +39,14 @@ async function renderReportHtml(data, { inlinePhotos = false } = {}) {
     for (const r of rows) srcs[r.id] = `data:${r.mime};base64,${r.data.toString('base64')}`;
     photoSrc = (ph) => srcs[ph.id] || '';
   }
+  // Self-contained location snapshot (inline SVG) from the captured GPS — works
+  // offline inside the archived report.
+  const mapSvg = renderMapSnapshot(data.gpsPoints, data.visit);
+  const mapLink = externalMapUrl(data.gpsPoints, data.visit);
   return ejs.renderFile(
     path.join(__dirname, '..', 'views', 'visits', 'report.ejs'),
-    { ...data, photoSrc, generatedAt: new Date().toISOString().replace('T', ' ').slice(0, 19) }
+    { ...data, photoSrc, mapSvg, mapLink,
+      generatedAt: new Date().toISOString().replace('T', ' ').slice(0, 19) }
   );
 }
 

@@ -936,6 +936,9 @@ body.anon {
 .confirm-line input { width: 20px; height: 20px; }
 
 .timer-card details { margin-top: 12px; }
+.map-snapshot { margin: 14px 0; max-width: 600px; }
+.map-snapshot-title { font-size: 0.95rem; margin: 0 0 6px; }
+.map-snapshot svg { width: 100%; height: auto; }
 .manage-card summary { cursor: pointer; }
 .comment-photo { max-width: 140px; display: inline-block; margin-right: 8px; }
 
