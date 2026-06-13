@@ -984,3 +984,121 @@ body.anon {
 /* Bump default button/control min height to 44px for touch. */
 .btn, select, input[type="date"], input[type="text"], input[type="email"], input[type="password"], input[type="number"] { min-height: 44px; }
 .btn { display: inline-flex; align-items: center; justify-content: center; }
+
+/* ==========================================================================
+   Mobile-app experience (phones, iOS + Android)
+   A native-feeling layer: large tap targets, a thumb-reachable primary
+   action bar for starting/completing jobs, camera-first photo capture, and
+   an app-like comment composer. Layered on top of the responsive shell.
+   ========================================================================== */
+
+/* Camera-first photo capture: big side-by-side buttons that open the camera
+   or photo library. Works the same on desktop and mobile. */
+.photo-pick { cursor: pointer; }
+.photo-pick input[type="file"] { display: none; }
+
+.photo-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.photo-actions .photo-pick { flex: 1 1 160px; min-height: 48px; font-size: 0.95rem; }
+
+.upload-status {
+  margin: 4px 0 8px;
+  font-weight: 600;
+  color: var(--green-700);
+}
+
+.photo-upload .share-line { font-weight: 500; margin: 10px 0; }
+.photo-upload .btn-block { margin-top: 4px; }
+
+/* App-like comment composer */
+.comment-form textarea {
+  border-radius: 14px;
+  background: var(--bg);
+  border-color: var(--border);
+}
+.comment-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+.comment-actions .comment-send { margin-left: auto; }
+.comment-attach { background: var(--green-50); border-color: var(--green-100); color: var(--green-800); }
+
+/* Thumb-reachable sticky primary action on the job page (phones only).
+   On desktop these stay as normal in-card buttons. */
+.cta-spacer { display: none; }
+.cta-note { margin: 0 0 8px; }
+
+@media (max-width: 767px) {
+  .mobile-sticky-cta {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: calc(56px + env(safe-area-inset-bottom, 0px)); /* sit above the tab bar */
+    z-index: 35;
+    margin: 0;
+    padding: 12px 14px;
+    background: rgba(255, 255, 255, 0.97);
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+    border-top: 1px solid var(--border);
+    box-shadow: 0 -6px 20px rgba(20, 32, 24, 0.1);
+  }
+  .mobile-sticky-cta .btn-block {
+    margin: 0;
+    min-height: 54px;
+    font-size: 1.1rem;
+    border-radius: 14px;
+    box-shadow: 0 6px 16px rgba(20, 83, 45, 0.22);
+  }
+  .mobile-sticky-cta .btn-danger { box-shadow: 0 6px 16px rgba(192, 57, 43, 0.24); }
+  .mobile-sticky-cta .cta-note { font-size: 0.85rem; }
+  .mobile-sticky-cta .confirm-line { margin: 0 0 10px; font-size: 0.9rem; }
+
+  /* Reserve room so the fixed action bar never hides the last bit of content. */
+  .cta-spacer { display: block; height: 150px; }
+
+  /* Make the whole field workflow roomier and easier to tap on a phone. */
+  .photo-actions .photo-pick { min-height: 52px; }
+  .comment-form textarea { font-size: 1rem; min-height: 56px; }
+  .comment-send { min-width: 96px; }
+
+  /* App-style job list: clearer rows with a chevron affordance. */
+  .job-row { border-radius: 14px; padding: 16px; gap: 12px; position: relative; }
+  .job-row::after {
+    content: "";
+    width: 9px; height: 9px;
+    border-top: 2px solid var(--border-strong);
+    border-right: 2px solid var(--border-strong);
+    transform: rotate(45deg);
+    flex: none;
+    align-self: center;
+    margin-left: 2px;
+  }
+  .job-row-main strong { font-size: 1.05rem; }
+
+  /* Larger, friendlier headings and cards on small screens. */
+  h1 { font-size: 1.35rem; }
+  .timer-card .btn { min-width: 0; }
+}
+
+/* Native-app feel: no tap-highlight flash, no accidental text selection on
+   controls, and momentum scrolling. */
+a, button, .btn, .nav-item, .tab, .photo-pick, label.confirm-line {
+  -webkit-tap-highlight-color: transparent;
+}
+.btn, .nav-item, .tab, .photo-pick, .topbar-action, .route-no, .badge {
+  -webkit-user-select: none;
+  user-select: none;
+}
+body { overscroll-behavior-y: none; }
+
+/* Honour reduced-motion preferences. */
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; scroll-behavior: auto !important; }
+}

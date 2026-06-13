@@ -36,6 +36,35 @@ document.querySelectorAll('form.gps-form').forEach((form) => {
   );
 });
 
+// --- Photo capture feedback: show what's selected and enable Upload ---
+// Field gardeners tap "Take photo" / "Choose from library"; this confirms the
+// selection so they know the upload is ready before they submit.
+document.querySelectorAll('form[data-upload]').forEach((form) => {
+  const inputs = form.querySelectorAll('input[type="file"]');
+  const status = form.querySelector('[data-upload-status]');
+  const submit = form.querySelector('[data-upload-submit]');
+  const update = () => {
+    let names = [];
+    inputs.forEach((inp) => {
+      for (const f of inp.files || []) names.push(f.name);
+    });
+    if (status) {
+      if (names.length) {
+        status.hidden = false;
+        status.textContent = names.length === 1
+          ? `✓ ${names[0]}`
+          : `✓ ${names.length} photos ready to upload`;
+      } else {
+        status.hidden = true;
+        status.textContent = '';
+      }
+    }
+    if (submit) submit.disabled = names.length === 0;
+  };
+  inputs.forEach((inp) => inp.addEventListener('change', update));
+  update();
+});
+
 // Expose the token for any fetch()-based callers (e.g. GPS pings).
 window.CSRF_TOKEN = CSRF;
 

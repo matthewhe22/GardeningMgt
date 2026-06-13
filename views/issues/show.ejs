@@ -50,9 +50,19 @@
         </figure>
       <% }) %>
     </div>
-    <form method="post" action="/issues/<%= issue.id %>/photos" enctype="multipart/form-data" class="add-row">
-      <input type="file" name="photos" accept="image/*" multiple required>
-      <button class="btn">Upload</button>
+    <form method="post" action="/issues/<%= issue.id %>/photos" enctype="multipart/form-data" class="photo-upload" data-upload>
+      <div class="photo-actions">
+        <label class="btn btn-primary photo-pick" data-camera>
+          📷 Take photo
+          <input type="file" name="photos" accept="image/*" capture="environment" multiple hidden>
+        </label>
+        <label class="btn photo-pick" data-library>
+          🖼 Choose from library
+          <input type="file" name="photos" accept="image/*" multiple hidden>
+        </label>
+      </div>
+      <p class="upload-status muted" data-upload-status hidden></p>
+      <button class="btn btn-primary btn-block" type="submit" data-upload-submit disabled>Upload photos</button>
     </form>
   </section>
 
@@ -62,9 +72,11 @@
       <div class="comment"><strong><%= c.author_name %></strong> <span class="muted"><%= c.created_at %> UTC</span>
         <p><%= c.body %></p></div>
     <% }) %>
-    <form method="post" action="/issues/<%= issue.id %>/comments">
+    <form method="post" action="/issues/<%= issue.id %>/comments" class="comment-form">
       <textarea name="body" rows="2" placeholder="Add a comment…" required></textarea>
-      <button class="btn">Comment</button>
+      <div class="comment-actions">
+        <button class="btn btn-primary comment-send" type="submit">Send</button>
+      </div>
     </form>
   </section>
 </div>
