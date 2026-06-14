@@ -27,22 +27,38 @@ function canSeeVisit(user, visit) {
   return isStaff(user) || visit.gardener_id === user.id;
 }
 
-// List (staff see all; gardeners see their own). Filter by date / gardener.
+// List (staff see all; gardeners see their own). Three quick scopes:
+//   • upcoming (default): today onward, nearest first
+//   • today (upto=<today>): on or before today — includes delayed/overdue
+//   • all: full history + future (newest first so the future isn't buried)
+// plus an exact-day picker. Days are ordered nearest → future.
 router.get('/', asyncHandler(async (req, res) => {
   const staff = isStaff(req.user);
-  const date = req.query.date || '';
+  const todayStr = today();
+  const date = req.query.date || '';     // exact day (date picker)
+  const upto = req.query.upto || '';     // on/before this day (Today + overdue)
+  const showAll = req.query.all === '1'; // entire history + future
   const gardenerId = staff ? (req.query.gardener_id || '') : String(req.user.id);
   const where = [];
   const args = [];
-  if (date) { args.push(date); where.push(`v.scheduled_date = $${args.length}`); }
   if (gardenerId) { args.push(Number(gardenerId)); where.push(`v.gardener_id = $${args.length}`); }
+  if (date) {
+    args.push(date); where.push(`v.scheduled_date = $${args.length}`);
+  } else if (upto) {
+    args.push(upto); where.push(`v.scheduled_date <= $${args.length}`);
+  } else if (!showAll) {
+    args.push(todayStr); where.push(`v.scheduled_date >= $${args.length}`);
+  }
+  // Forward-looking views read nearest → future (ascending); the all-history
+  // view reads newest first so recent/future visits aren't cut off by the LIMIT.
+  const order = showAll ? 'DESC' : 'ASC';
   const visits = await q(`
     SELECT v.*, p.name AS property_name, p.address, p.lat, p.lng, u.name AS gardener_name
     FROM visits v
     JOIN properties p ON p.id = v.property_id
     LEFT JOIN users u ON u.id = v.gardener_id
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-    ORDER BY v.scheduled_date DESC, COALESCE(v.route_order, 999), v.id
+    ORDER BY v.scheduled_date ${order}, COALESCE(v.route_order, 999), v.id
     LIMIT 200`, args);
   // Group consecutive visits by day so the list reads as a per-day route in
   // visiting sequence (route_order). Reordering / optimizing is offered per day
@@ -57,7 +73,7 @@ router.get('/', asyncHandler(async (req, res) => {
   const properties = await q('SELECT id, name FROM properties ORDER BY name');
   res.render('visits/index', {
     title: 'Visits / Jobs', visits, groups, gardeners, properties, staff,
-    date, gardenerId, today: today(), canReorder: !!gardenerId,
+    date, upto, showAll, gardenerId, today: todayStr, canReorder: !!gardenerId,
   });
 }));
 

@@ -1,22 +1,28 @@
 <%- include('../partials/header') %>
 <div class="page-head">
   <h1>Jobs</h1>
-  <p class="page-sub">Scheduled visits, grouped by day in visiting order. Tap a job to start the timer, upload photos and complete it.</p>
+  <p class="page-sub">Visits grouped by day, nearest first. Tap a job to start the timer, upload photos and complete it.</p>
 </div>
 
 <div class="card">
   <%
-    const baseQs = (d) => {
+    // Build a /visits link that keeps the current gardener filter, with the
+    // given scope params merged in.
+    const vlink = (extra = {}) => {
       const p = new URLSearchParams();
-      if (d) p.set('date', d);
       if (gardenerId) p.set('gardener_id', String(gardenerId));
+      for (const k in extra) if (extra[k]) p.set(k, extra[k]);
       const s = p.toString();
       return '/visits' + (s ? '?' + s : '');
     };
+    const isToday = !date && upto === today;
+    const isAll = !date && !upto && showAll;
+    const isUpcoming = !date && !upto && !showAll;
   %>
   <div class="quick-filters">
-    <a class="chip quick-chip<%= date === today ? ' is-active' : '' %>" href="<%= baseQs(today) %>">📅 Today</a>
-    <a class="chip quick-chip<%= !date ? ' is-active' : '' %>" href="<%= baseQs('') %>">All dates</a>
+    <a class="chip quick-chip<%= isToday ? ' is-active' : '' %>" href="<%= vlink({ upto: today }) %>">📅 Today &amp; overdue</a>
+    <a class="chip quick-chip<%= isUpcoming ? ' is-active' : '' %>" href="<%= vlink() %>">Upcoming</a>
+    <a class="chip quick-chip<%= isAll ? ' is-active' : '' %>" href="<%= vlink({ all: '1' }) %>">All dates</a>
   </div>
   <form method="get" class="filter-row">
     <label>Date <input type="date" name="date" value="<%= date %>"></label>
@@ -65,7 +71,8 @@
     <div class="day-head">
       <h2 class="day-title">
         <%= group.date %>
-        <% if (group.date === today) { %><span class="status status-in_progress">Today</span><% } %>
+        <% if (group.date === today) { %><span class="status status-in_progress">Today</span>
+        <% } else if (group.date < today) { %><span class="status status-open">Delayed</span><% } %>
         <span class="muted">· <%= group.items.length %> stop<%= group.items.length === 1 ? '' : 's' %></span>
       </h2>
       <% if (canReorder && group.items.length > 1) { %>
