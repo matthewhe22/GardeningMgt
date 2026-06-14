@@ -59,19 +59,36 @@
   <% } %>
 </div>
 
-<div class="card">
-  <table class="table">
-    <tr><th>Site</th><th>Address</th><th>Lots</th><th>Contact</th><th>Coordinates</th></tr>
-    <% properties.forEach(p => { %>
-    <tr>
-      <td><strong><%= p.name %></strong></td>
-      <td><%= p.address %></td>
-      <td><%= p.lots != null ? p.lots : '—' %></td>
-      <td class="muted"><%= p.contact_name || '' %> <%= p.contact_phone || '' %></td>
-      <td class="muted"><%= p.lat != null ? p.lat.toFixed(4) + ', ' + p.lng.toFixed(4) : '⚠ none' %></td>
-    </tr>
-    <% }) %>
-  </table>
-  <% if (!properties.length) { %><p class="muted">No sites yet — import a spreadsheet or add one above.</p><% } %>
-</div>
+<h2><%= properties.length %> site<%= properties.length === 1 ? '' : 's' %></h2>
+<% if (!properties.length) { %>
+  <div class="card"><p class="muted">No sites yet — import a spreadsheet or add one above.</p></div>
+<% } %>
+<% properties.forEach(p => { %>
+<details class="card">
+  <summary>
+    <strong><%= p.name %></strong>
+    <span class="muted">· <%= p.address %></span>
+    <% if (p.lat != null && p.lng != null) { %>
+      <span class="status status-completed"><%= p.lat.toFixed(4) %>, <%= p.lng.toFixed(4) %></span>
+    <% } else { %>
+      <span class="status status-open">⚠ no coordinates</span>
+    <% } %>
+  </summary>
+  <form method="post" action="/admin/properties/<%= p.id %>/update" class="form-grid">
+    <label>Site name <input type="text" name="name" value="<%= p.name %>" required></label>
+    <label>Address <input type="text" name="address" value="<%= p.address %>" required></label>
+    <label>Contact name <input type="text" name="contact_name" value="<%= p.contact_name || '' %>"></label>
+    <label>Contact phone <input type="text" name="contact_phone" value="<%= p.contact_phone || '' %>"></label>
+    <label># of lots <input type="number" name="lots" min="0" value="<%= p.lots != null ? p.lots : '' %>"></label>
+    <label class="span2">&nbsp;</label>
+    <label>Latitude <input type="number" name="lat" step="any" value="<%= p.lat != null ? p.lat : '' %>"></label>
+    <label>Longitude <input type="number" name="lng" step="any" value="<%= p.lng != null ? p.lng : '' %>"></label>
+    <label class="span2 confirm-line"><input type="checkbox" name="regeocode">
+      ↻ Re-detect coordinates from the address (overrides the lat/lng above)</label>
+    <label class="span2">Notes <input type="text" name="notes" value="<%= p.notes || '' %>"></label>
+    <button class="btn btn-primary">Save changes</button>
+  </form>
+  <p class="muted">Changed the address? Tick “Re-detect” (or clear lat/lng) and save to look up new coordinates.</p>
+</details>
+<% }) %>
 <%- include('../partials/footer') %>
