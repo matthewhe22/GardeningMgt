@@ -11,7 +11,7 @@ normal Node.js server.
 | Daily tasks & job schedule | Dashboard, **Jobs**, **Tasks** |
 | Issue tracking (priority, status, comments, photos) | **Issues** |
 | Photo upload & team sharing, with timestamps on every photo | Job/issue pages, **Photos** gallery |
-| Route optimization per gardener per day (nearest-neighbour + 2-opt, no external API) | **Routes** |
+| Route optimization per gardener per day (nearest-neighbour + 2-opt; road distance via OSRM with a straight-line fallback) | **Routes** |
 | Automatic visit reminders (daily 06:00 cron → in-app notifications) | 🔔 Notifications |
 | Bulk visit reminders for any date | **Reminders** (staff) |
 | Activity log of every change | **Activity** (staff) |
@@ -76,7 +76,7 @@ Demo accounts (after seeding):
 | `CRON_SECRET` | unset | If set, `/cron/reminders` requires `Authorization: Bearer <secret>` |
 | `BOOTSTRAP_ADMIN_EMAIL/_PASSWORD` | admin@example.com / admin1234 | First admin on an empty database |
 | `HOURLY_RATE` | 50 | Default labour rate for invoices |
-| `OSRM_URL` | public demo server | Road-distance routing endpoint (OSRM). Falls back to straight-line if unreachable; self-host for production volume |
+| `OSRM_URL` | public demo server | Road-distance routing endpoint (OSRM). Falls back to straight-line if unreachable; self-host for production volume — see [docs/OSRM.md](docs/OSRM.md) |
 | `GEOCODER_URL` / `GEOCODER_EMAIL` | Nominatim | Address→coordinates geocoder (used by Sites) |
 | `PORT` | 3000 | HTTP port (non-Vercel) |
 
