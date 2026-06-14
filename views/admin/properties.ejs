@@ -7,6 +7,9 @@
 <% if (locals.importErrors) { %>
   <p class="alert alert-error">Some rows were skipped: <%= importErrors %></p>
 <% } %>
+<% if (locals.geocoded !== undefined && geocoded !== null) { %>
+  <p class="alert alert-ok">Found coordinates for <%= geocoded %> site(s)<% if (Number(geoFailed) > 0) { %> · <%= geoFailed %> address(es) couldn't be matched<% } %><% if (Number(remaining) > 0) { %> · <strong><%= remaining %> still missing</strong> — click “Find missing coordinates” again to continue<% } else { %> · all sites now have coordinates 🎉<% } %>.</p>
+<% } %>
 
 <details class="card">
   <summary><strong>📥 Import sites from Excel / CSV</strong></summary>
@@ -29,13 +32,32 @@
     <label>Contact name <input type="text" name="contact_name"></label>
     <label>Contact phone <input type="text" name="contact_phone"></label>
     <label># of lots <input type="number" name="lots" min="0"></label>
-    <label>Latitude <input type="number" name="lat" step="any" placeholder="-36.8485"></label>
-    <label>Longitude <input type="number" name="lng" step="any" placeholder="174.7633"></label>
+    <label>Latitude <span class="muted">(optional)</span> <input type="number" name="lat" step="any" placeholder="auto from address"></label>
+    <label>Longitude <span class="muted">(optional)</span> <input type="number" name="lng" step="any" placeholder="auto from address"></label>
     <label class="span2">Notes <input type="text" name="notes"></label>
     <button class="btn btn-primary">Add site</button>
   </form>
-  <p class="muted">Latitude/longitude enable route optimization for visits to this site.</p>
+  <p class="muted">Coordinates enable route optimization. Leave latitude/longitude
+    blank and they'll be looked up from the address automatically on save.</p>
 </details>
+
+<div class="card">
+  <div class="card-head">
+    <h2>Coordinates</h2>
+    <% if (missingCoords > 0) { %>
+    <form method="post" action="/admin/properties/geocode" class="inline">
+      <button class="btn btn-primary">📍 Find missing coordinates</button>
+    </form>
+    <% } %>
+  </div>
+  <% if (missingCoords > 0) { %>
+    <p class="muted"><strong><%= missingCoords %></strong> site(s) have no coordinates and would be
+      dropped to the end of any optimized route. Click the button to look them up from their
+      addresses (processed in small batches — click again if any remain).</p>
+  <% } else { %>
+    <p class="muted">✓ Every site has coordinates — route optimization can use them all.</p>
+  <% } %>
+</div>
 
 <div class="card">
   <table class="table">

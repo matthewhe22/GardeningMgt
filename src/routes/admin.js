@@ -9,6 +9,11 @@ const { sendRemindersForDate } = require('../reminders');
 const { asyncHandler } = require('../asyncHandler');
 const { today: businessToday } = require('../time');
 const { assertCsrf } = require('../csrf');
+const { geocodeAddress, sleep } = require('../geocode');
+
+// Per-click cap on the backfill so the request stays under the serverless
+// time limit (Nominatim wants ~1 req/sec). Click again to continue.
+const GEOCODE_BATCH = Number(process.env.GEOCODE_BATCH || 5);
 
 const router = express.Router();
 
@@ -43,23 +48,68 @@ router.get('/reminders', requireRole('supervisor'), asyncHandler(async (req, res
 
 router.get('/properties', requireRole('supervisor'), asyncHandler(async (req, res) => {
   const properties = await q('SELECT * FROM properties ORDER BY name');
+  const missingCoords = properties.filter((p) => p.lat == null || p.lng == null).length;
   res.render('admin/properties', {
-    title: 'Properties', properties,
+    title: 'Properties', properties, missingCoords,
     imported: req.query.imported, importErrors: req.query.errors,
+    geocoded: req.query.geocoded, geoFailed: req.query.failed, remaining: req.query.remaining,
   });
 }));
 
 router.post('/properties', requireRole('supervisor'), asyncHandler(async (req, res) => {
   const { name, address, contact_name, contact_phone, lat, lng, lots, notes } = req.body;
   if (!(name || '').trim() || !(address || '').trim()) return res.redirect('/admin/properties');
+  // Coordinates power route optimization. If they weren't entered, derive them
+  // from the address automatically (best-effort — a save never fails on this).
+  let latN = lat ? Number(lat) : null;
+  let lngN = lng ? Number(lng) : null;
+  if ((latN == null || lngN == null)) {
+    try {
+      const geo = await geocodeAddress(address.trim());
+      if (geo) { latN = geo.lat; lngN = geo.lng; }
+    } catch (e) { console.error('[geocode] create lookup failed:', e.message); }
+  }
   const { id } = await q1(`
     INSERT INTO properties (name, address, contact_name, contact_phone, lat, lng, lots, notes)
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
     [name.trim(), address.trim(), contact_name || null, contact_phone || null,
-      lat ? Number(lat) : null, lng ? Number(lng) : null,
-      lots ? Math.round(Number(lots)) : null, notes || null]);
+      latN, lngN, lots ? Math.round(Number(lots)) : null, notes || null]);
   await logActivity(req.user.id, 'property.create', 'property', id, `Added site "${name.trim()}"`);
   res.redirect('/admin/properties');
+}));
+
+// Backfill coordinates for sites that don't have them yet, from their address.
+// Processes a small batch per click (Nominatim ~1 req/sec) and reports how many
+// still remain so the button can be clicked again until it's done.
+router.post('/properties/geocode', requireRole('supervisor'), asyncHandler(async (req, res) => {
+  const missing = await q(
+    `SELECT id, name, address FROM properties
+     WHERE (lat IS NULL OR lng IS NULL) AND COALESCE(TRIM(address), '') <> ''
+     ORDER BY id LIMIT $1`, [GEOCODE_BATCH]);
+  let done = 0;
+  let failed = 0;
+  for (let i = 0; i < missing.length; i++) {
+    const p = missing[i];
+    try {
+      const geo = await geocodeAddress(p.address);
+      if (geo) {
+        await q('UPDATE properties SET lat = $1, lng = $2 WHERE id = $3', [geo.lat, geo.lng, p.id]);
+        done++;
+      } else { failed++; }
+    } catch (e) {
+      console.error(`[geocode] site #${p.id} failed:`, e.message);
+      failed++;
+    }
+    if (i < missing.length - 1) await sleep(1100); // stay under ~1 req/sec
+  }
+  const { c: remaining } = await q1(
+    `SELECT COUNT(*)::int AS c FROM properties WHERE lat IS NULL OR lng IS NULL`);
+  if (done) {
+    await logActivity(req.user.id, 'property.geocode', 'property', null,
+      `Geocoded ${done} site(s) from address`);
+  }
+  const params = new URLSearchParams({ geocoded: String(done), failed: String(failed), remaining: String(remaining) });
+  res.redirect(`/admin/properties?${params}`);
 }));
 
 // Bulk import sites from an Excel (.xlsx) or CSV upload.
