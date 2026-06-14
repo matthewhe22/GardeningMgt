@@ -22,6 +22,7 @@ if (!SESSION_SECRET && (process.env.VERCEL || process.env.NODE_ENV === 'producti
 
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, '..', 'views'));
+app.set('view cache', true); // compile each template once, not on every render
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
 
@@ -91,7 +92,9 @@ app.get('/uploads/:filename', requireLogin, asyncHandler(async (req, res) => {
   const photo = await q1('SELECT mime, data FROM photos WHERE filename = $1', [req.params.filename]);
   if (!photo) return res.status(404).end();
   res.set('Content-Type', photo.mime);
-  res.set('Cache-Control', 'private, max-age=86400');
+  // Filenames are unique, immutable content keys, so the browser can keep them
+  // for a long time and never re-fetch — repeat photo views become instant.
+  res.set('Cache-Control', 'private, max-age=31536000, immutable');
   res.send(photo.data);
 }));
 

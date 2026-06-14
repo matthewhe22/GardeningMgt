@@ -1,7 +1,7 @@
 const path = require('path');
 const ejs = require('ejs');
 const { q, q1 } = require('./db');
-const { uploadFile } = require('./onedrive');
+const { uploadFile, getConfig } = require('./onedrive');
 const { logActivity } = require('./activity');
 const { renderMapSnapshot, externalMapUrl } = require('./mapSnapshot');
 const { fmtDateTime } = require('./time');
@@ -16,13 +16,15 @@ async function loadReportData(visitId) {
     LEFT JOIN users u ON u.id = v.gardener_id
     WHERE v.id = $1`, [visitId]);
   if (!visit) return null;
-  const job = visit.job_id
-    ? await q1('SELECT j.*, u.name AS default_gardener_name FROM jobs j LEFT JOIN users u ON u.id = j.gardener_id WHERE j.id = $1', [visit.job_id])
-    : null;
-  const tasks = await q('SELECT t.*, u.name AS assignee_name FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id WHERE t.visit_id = $1 ORDER BY t.id', [visitId]);
-  const comments = await q('SELECT c.*, u.name AS author_name, u.role AS author_role FROM visit_comments c LEFT JOIN users u ON u.id = c.user_id WHERE c.visit_id = $1 ORDER BY c.created_at', [visitId]);
-  const photos = await q('SELECT ph.id, ph.filename, ph.mime, ph.caption, ph.created_at, u.name AS uploader_name FROM photos ph LEFT JOIN users u ON u.id = ph.uploaded_by WHERE ph.visit_id = $1 ORDER BY ph.created_at', [visitId]);
-  const gpsPoints = await q('SELECT * FROM gps_points WHERE visit_id = $1 ORDER BY recorded_at', [visitId]);
+  const [job, tasks, comments, photos, gpsPoints] = await Promise.all([
+    visit.job_id
+      ? q1('SELECT j.*, u.name AS default_gardener_name FROM jobs j LEFT JOIN users u ON u.id = j.gardener_id WHERE j.id = $1', [visit.job_id])
+      : Promise.resolve(null),
+    q('SELECT t.*, u.name AS assignee_name FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id WHERE t.visit_id = $1 ORDER BY t.id', [visitId]),
+    q('SELECT c.*, u.name AS author_name, u.role AS author_role FROM visit_comments c LEFT JOIN users u ON u.id = c.user_id WHERE c.visit_id = $1 ORDER BY c.created_at', [visitId]),
+    q('SELECT ph.id, ph.filename, ph.mime, ph.caption, ph.created_at, u.name AS uploader_name FROM photos ph LEFT JOIN users u ON u.id = ph.uploaded_by WHERE ph.visit_id = $1 ORDER BY ph.created_at', [visitId]),
+    q('SELECT * FROM gps_points WHERE visit_id = $1 ORDER BY recorded_at', [visitId]),
+  ]);
   return { visit, job, tasks, comments, photos, gpsPoints };
 }
 
@@ -59,6 +61,10 @@ async function renderReportHtml(data, { inlinePhotos = false } = {}) {
  */
 async function archiveToOneDrive(visitId) {
   try {
+    // Cheap check first: if OneDrive isn't configured, skip immediately rather
+    // than loading the full report and base64-encoding every photo (which the
+    // user would otherwise wait on when completing a job).
+    if (!(await getConfig())) return;
     const data = await loadReportData(visitId);
     if (!data) return;
     const dir = `job-${visitId}-${data.visit.scheduled_date}`;
