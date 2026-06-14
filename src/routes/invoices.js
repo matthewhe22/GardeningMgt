@@ -15,16 +15,20 @@ async function nextInvoiceNumber() {
 }
 
 async function invoiceWithItems(id) {
-  const invoice = await q1(`
+  // Header and line items are both keyed by the same id — fetch concurrently.
+  const [invoice, items] = await Promise.all([
+    q1(`
     SELECT inv.*, v.scheduled_date, v.duration_minutes, p.name AS property_name, p.address,
            p.contact_name, u.name AS gardener_name
     FROM invoices inv
     JOIN visits v ON v.id = inv.visit_id
     JOIN properties p ON p.id = v.property_id
     LEFT JOIN users u ON u.id = v.gardener_id
-    WHERE inv.id = $1`, [id]);
+    WHERE inv.id = $1`, [id]),
+    q('SELECT * FROM invoice_items WHERE invoice_id = $1', [id]),
+  ]);
   if (!invoice) return null;
-  invoice.items = await q('SELECT * FROM invoice_items WHERE invoice_id = $1', [id]);
+  invoice.items = items;
   invoice.total = invoice.items.reduce((s, it) => s + it.quantity * it.unit_price, 0);
   return invoice;
 }

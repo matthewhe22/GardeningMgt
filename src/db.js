@@ -8,14 +8,22 @@ types.setTypeParser(1184, (v) => v.replace('T', ' ').slice(0, 19)); // timestamp
 types.setTypeParser(20, (v) => parseInt(v, 10));           // int8 (COUNT)
 types.setTypeParser(1700, (v) => parseFloat(v));           // numeric (SUM)
 
-const isLocal = /localhost|127\.0\.0\.1/.test(process.env.DATABASE_URL || 'localhost');
+const DB_URL = process.env.DATABASE_URL || 'postgresql://postgres@localhost:5433/gardeningmgt';
+const isLocal = /localhost|127\.0\.0\.1/.test(DB_URL);
+// A connection pooler (Supabase pgBouncer on :6543, or any "pooler" host) can
+// absorb more connections safely, so we open a few more per instance to get
+// more out of the parallel (Promise.all) page queries. On a direct connection
+// we stay conservative to avoid exhausting Postgres across serverless
+// instances. DB_POOL_MAX overrides explicitly.
+const usingPooler = /pgbouncer=true|:6543\b|pooler\./i.test(DB_URL);
 const pool = new Pool({
-  connectionString:
-    process.env.DATABASE_URL || 'postgresql://postgres@localhost:5433/gardeningmgt',
+  connectionString: DB_URL,
   // Verify the server certificate in production. Supabase presents a valid
   // public chain, so rejectUnauthorized can stay on; opt out with DB_INSECURE_TLS.
   ssl: isLocal ? false : { rejectUnauthorized: process.env.DB_INSECURE_TLS !== '1' },
-  max: process.env.VERCEL ? 3 : 10, // keep connections low per serverless instance
+  max: process.env.DB_POOL_MAX
+    ? Number(process.env.DB_POOL_MAX)
+    : (process.env.VERCEL ? (usingPooler ? 8 : 3) : 10),
 });
 
 /** All rows. */
