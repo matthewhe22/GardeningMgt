@@ -80,11 +80,13 @@ router.post('/properties', requireRole('supervisor'), asyncHandler(async (req, r
 // Backfill coordinates for sites that don't have them yet, from their address.
 // Processes a small batch per click (Nominatim ~1 req/sec) and reports how many
 // still remain so the button can be clicked again until it's done.
-router.post('/properties/geocode', requireRole('supervisor'), asyncHandler(async (req, res) => {
+// Geocode up to `limit` sites that are missing coordinates, from their address.
+// Shared by the "Find missing coordinates" button and the spreadsheet import.
+async function geocodeMissingBatch(limit) {
   const missing = await q(
-    `SELECT id, name, address FROM properties
+    `SELECT id, address FROM properties
      WHERE (lat IS NULL OR lng IS NULL) AND COALESCE(TRIM(address), '') <> ''
-     ORDER BY id LIMIT $1`, [GEOCODE_BATCH]);
+     ORDER BY id LIMIT $1`, [limit]);
   let done = 0;
   let failed = 0;
   for (let i = 0; i < missing.length; i++) {
@@ -103,6 +105,11 @@ router.post('/properties/geocode', requireRole('supervisor'), asyncHandler(async
   }
   const { c: remaining } = await q1(
     `SELECT COUNT(*)::int AS c FROM properties WHERE lat IS NULL OR lng IS NULL`);
+  return { done, failed, remaining };
+}
+
+router.post('/properties/geocode', requireRole('supervisor'), asyncHandler(async (req, res) => {
+  const { done, failed, remaining } = await geocodeMissingBatch(GEOCODE_BATCH);
   if (done) {
     await logActivity(req.user.id, 'property.geocode', 'property', null,
       `Geocoded ${done} site(s) from address`);
@@ -153,8 +160,43 @@ router.post('/properties/import', requireRole('supervisor'),
     }
     const params = new URLSearchParams({ imported: String(imported) });
     if (errors.length) params.set('errors', errors.slice(0, 10).join(' · '));
+    // Auto-fill coordinates for imported rows that had no Lat/Lng (a bounded
+    // batch so the request doesn't time out — the rest are caught by the
+    // "Find missing coordinates" button, which the banner points to).
+    if (imported) {
+      const geo = await geocodeMissingBatch(GEOCODE_BATCH);
+      params.set('geocoded', String(geo.done));
+      params.set('failed', String(geo.failed));
+      params.set('remaining', String(geo.remaining));
+    }
     res.redirect(`/admin/properties?${params}`);
   }));
+
+// Edit a site. Re-detects coordinates from the address when "Re-detect" is
+// ticked, or whenever latitude/longitude are left blank.
+router.post('/properties/:id/update', requireRole('supervisor'), asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  const existing = await q1('SELECT id FROM properties WHERE id = $1', [id]);
+  if (!existing) return res.redirect('/admin/properties');
+  const { name, address, contact_name, contact_phone, lat, lng, lots, notes } = req.body;
+  if (!(name || '').trim() || !(address || '').trim()) return res.redirect('/admin/properties');
+  const redetect = req.body.regeocode === 'on';
+  let latN = (!redetect && lat) ? Number(lat) : null;
+  let lngN = (!redetect && lng) ? Number(lng) : null;
+  if (redetect || latN == null || lngN == null) {
+    try {
+      const g = await geocodeAddress(address.trim());
+      if (g) { latN = g.lat; lngN = g.lng; }
+    } catch (e) { console.error('[geocode] update lookup failed:', e.message); }
+  }
+  await q(`
+    UPDATE properties SET name = $1, address = $2, contact_name = $3, contact_phone = $4,
+      lat = $5, lng = $6, lots = $7, notes = $8 WHERE id = $9`,
+    [name.trim(), address.trim(), contact_name || null, contact_phone || null,
+      latN, lngN, lots ? Math.round(Number(lots)) : null, notes || null, id]);
+  await logActivity(req.user.id, 'property.update', 'property', id, `Updated site "${name.trim()}"`);
+  res.redirect('/admin/properties');
+}));
 
 // --- User management: admin only ---
 
