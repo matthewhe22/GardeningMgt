@@ -363,7 +363,7 @@ body.authed main.container {
   .tabbar { display: block; }
 }
 
-@media (min-width: 768px) {
+@media (min-width: 768px) and (pointer: fine) {
   .sheet, .sheet-backdrop { display: none !important; }
 }
 
@@ -1174,4 +1174,25 @@ body { overscroll-behavior-y: none; }
 /* Honour reduced-motion preferences. */
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; scroll-behavior: auto !important; }
+}
+
+/* ==========================================================================
+   Touch-device shell fallback
+   Safari's "Request Desktop Website" (and similar desktop-mode toggles) make a
+   phone report a ~980px layout viewport, so the max-width:767px rules above
+   don't fire and the desktop sidebar shows shrunk to fit. Key the mobile app
+   shell off a coarse (touch) pointer as well, so phones/tablets always get the
+   app layout regardless of a spoofed width. Real mice (pointer: fine) keep the
+   desktop sidebar.
+   ========================================================================== */
+@media (pointer: coarse) and (max-width: 1024px) {
+  .sidebar { display: none !important; }
+  .topbar { display: flex !important; }
+  .tabbar { display: block !important; }
+  body.authed main.container {
+    margin-left: 0 !important;
+    max-width: none !important;
+    padding: 16px 14px calc(86px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+  body.authed { padding-top: 56px !important; } /* room for the fixed topbar */
 }
