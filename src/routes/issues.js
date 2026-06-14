@@ -10,7 +10,8 @@ const router = express.Router();
 
 router.get('/', asyncHandler(async (req, res) => {
   const status = req.query.status || '';
-  const issues = await q(`
+  const [issues, properties, users] = await Promise.all([
+    q(`
     SELECT i.*, p.name AS property_name, r.name AS reporter_name, a.name AS assignee_name
     FROM issues i
     LEFT JOIN properties p ON p.id = i.property_id
@@ -20,9 +21,10 @@ router.get('/', asyncHandler(async (req, res) => {
     ORDER BY (i.status IN ('resolved','closed')),
       CASE i.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
       i.created_at DESC
-    LIMIT 300`, status ? [status] : []);
-  const properties = await q('SELECT id, name FROM properties ORDER BY name');
-  const users = await q('SELECT id, name FROM users WHERE active ORDER BY name');
+    LIMIT 300`, status ? [status] : []),
+    q('SELECT id, name FROM properties ORDER BY name'),
+    q('SELECT id, name FROM users WHERE active ORDER BY name'),
+  ]);
   res.render('issues/index', { title: 'Issues', issues, properties, users, status, staff: isStaff(req.user) });
 }));
 
@@ -49,14 +51,16 @@ router.get('/:id', asyncHandler(async (req, res) => {
     LEFT JOIN users a ON a.id = i.assigned_to
     WHERE i.id = $1`, [req.params.id]);
   if (!issue) return res.status(404).render('error', { title: 'Not found', message: 'Issue not found.' });
-  const comments = await q(`
+  const [comments, photos, users] = await Promise.all([
+    q(`
     SELECT c.*, u.name AS author_name FROM issue_comments c
-    LEFT JOIN users u ON u.id = c.user_id WHERE c.issue_id = $1 ORDER BY c.created_at`, [issue.id]);
-  const photos = await q(`
+    LEFT JOIN users u ON u.id = c.user_id WHERE c.issue_id = $1 ORDER BY c.created_at`, [issue.id]),
+    q(`
     SELECT ph.id, ph.filename, ph.caption, ph.original_name, ph.created_at, u.name AS uploader_name
     FROM photos ph
-    LEFT JOIN users u ON u.id = ph.uploaded_by WHERE ph.issue_id = $1 ORDER BY ph.created_at DESC`, [issue.id]);
-  const users = await q('SELECT id, name FROM users WHERE active ORDER BY name');
+    LEFT JOIN users u ON u.id = ph.uploaded_by WHERE ph.issue_id = $1 ORDER BY ph.created_at DESC`, [issue.id]),
+    q('SELECT id, name FROM users WHERE active ORDER BY name'),
+  ]);
   res.render('issues/show', { title: `Issue #${issue.id}`, issue, comments, photos, users, staff: isStaff(req.user) });
 }));
 

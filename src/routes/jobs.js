@@ -18,7 +18,8 @@ const PREGENERATE = 12;
 router.get('/', asyncHandler(async (req, res) => {
   const staff = isStaff(req.user);
   const today = businessToday();
-  const jobs = await q(`
+  const [jobs, properties, gardeners] = await Promise.all([
+    q(`
     SELECT j.*, p.name AS property_name, p.address, p.lots, u.name AS gardener_name,
       (j.end_date < $1) AS expired,
       (SELECT MIN(v.scheduled_date) FROM visits v
@@ -31,9 +32,10 @@ router.get('/', asyncHandler(async (req, res) => {
     JOIN properties p ON p.id = j.property_id
     LEFT JOIN users u ON u.id = j.gardener_id
     ${staff ? '' : 'WHERE j.gardener_id = $2'}
-    ORDER BY j.active DESC, p.name`, staff ? [today] : [today, req.user.id]);
-  const properties = await q('SELECT id, name FROM properties ORDER BY name');
-  const gardeners = await q("SELECT id, name FROM users WHERE role = 'gardener' AND active");
+    ORDER BY j.active DESC, p.name`, staff ? [today] : [today, req.user.id]),
+    q('SELECT id, name FROM properties ORDER BY name'),
+    q("SELECT id, name FROM users WHERE role = 'gardener' AND active"),
+  ]);
   res.render('jobs/index', {
     title: 'Sites', jobs, properties, gardeners, staff, frequencies: FREQUENCIES,
     flash: req.query.error || null,
@@ -124,18 +126,20 @@ router.post('/:id/renew', requireRole('supervisor'), asyncHandler(async (req, re
 router.get('/site/:propertyId', requireRole('supervisor'), asyncHandler(async (req, res) => {
   const property = await q1('SELECT * FROM properties WHERE id = $1', [req.params.propertyId]);
   if (!property) return res.status(404).render('error', { title: 'Not found', message: 'Site not found.' });
-  const visits = await q(`
+  const [visits, totals, invoices] = await Promise.all([
+    q(`
     SELECT v.*, u.name AS gardener_name,
       (SELECT COUNT(*) FROM photos ph WHERE ph.visit_id = v.id) AS photo_count
     FROM visits v LEFT JOIN users u ON u.id = v.gardener_id
-    WHERE v.property_id = $1 ORDER BY v.scheduled_date DESC LIMIT 300`, [req.params.propertyId]);
-  const totals = await q1(`
+    WHERE v.property_id = $1 ORDER BY v.scheduled_date DESC LIMIT 300`, [req.params.propertyId]),
+    q1(`
     SELECT COUNT(*) FILTER (WHERE status = 'completed')::int AS completed,
            COALESCE(SUM(duration_minutes), 0)::int AS minutes
-    FROM visits WHERE property_id = $1`, [req.params.propertyId]);
-  const invoices = await q(`
+    FROM visits WHERE property_id = $1`, [req.params.propertyId]),
+    q(`
     SELECT inv.* FROM invoices inv JOIN visits v ON v.id = inv.visit_id
-    WHERE v.property_id = $1 ORDER BY inv.created_at DESC`, [req.params.propertyId]);
+    WHERE v.property_id = $1 ORDER BY inv.created_at DESC`, [req.params.propertyId]),
+  ]);
   res.render('jobs/site', { title: property.name, property, visits, totals, invoices });
 }));
 
