@@ -19,6 +19,11 @@
 </div>
 
 <% if (gardenerId) { %>
+<% if (locals.optimized === 'road') { %>
+  <p class="alert alert-ok">✓ Route optimized by driving distance (road network).</p>
+<% } else if (locals.optimized === 'straight') { %>
+  <p class="alert alert-error">Route optimized by straight-line distance — the road-distance service was unavailable, so this is an approximation.</p>
+<% } %>
 <div class="card">
   <div class="filter-row">
     <form method="post" action="/routes/optimize">

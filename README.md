@@ -76,6 +76,8 @@ Demo accounts (after seeding):
 | `CRON_SECRET` | unset | If set, `/cron/reminders` requires `Authorization: Bearer <secret>` |
 | `BOOTSTRAP_ADMIN_EMAIL/_PASSWORD` | admin@example.com / admin1234 | First admin on an empty database |
 | `HOURLY_RATE` | 50 | Default labour rate for invoices |
+| `OSRM_URL` | public demo server | Road-distance routing endpoint (OSRM). Falls back to straight-line if unreachable; self-host for production volume |
+| `GEOCODER_URL` / `GEOCODER_EMAIL` | Nominatim | Address→coordinates geocoder (used by Sites) |
 | `PORT` | 3000 | HTTP port (non-Vercel) |
 
 ## Mobile use
