@@ -7,7 +7,7 @@ const { nextOccurrenceAfter, isValidDate } = require('../recurrence');
 const { loadReportData, renderReportHtml, archiveToOneDrive } = require('../report');
 const { asyncHandler } = require('../asyncHandler');
 const { assertCsrf } = require('../csrf');
-const { optimizeRoute } = require('../routeOptimizer');
+const { optimizeRouteRoad } = require('../routeOptimizer');
 const { today } = require('../time');
 
 const router = express.Router();
@@ -110,10 +110,10 @@ router.post('/optimize', asyncHandler(async (req, res) => {
   if (!gardenerId || !isValidDate(date)) return res.redirect('/visits');
   const day = await loadDayOrder(gardenerId, date);
   if (day.length) {
-    const { orderedIds, lengthKm } = optimizeRoute(day.map((v) => ({ id: v.id, lat: v.lat, lng: v.lng })));
+    const { orderedIds, lengthKm, mode } = await optimizeRouteRoad(day.map((v) => ({ id: v.id, lat: v.lat, lng: v.lng })));
     await applyRouteOrder(orderedIds);
     await logActivity(req.user.id, 'route.optimize', 'visit', null,
-      `Optimized route for gardener #${gardenerId} on ${date}: ${orderedIds.length} stops, ~${lengthKm.toFixed(1)} km`);
+      `Optimized route (${mode === 'road' ? 'road distance' : 'straight-line'}) for gardener #${gardenerId} on ${date}: ${orderedIds.length} stops, ~${lengthKm.toFixed(1)} km`);
   }
   res.redirect(backToList(date, gardenerId));
 }));

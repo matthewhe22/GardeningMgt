@@ -2,7 +2,7 @@ const express = require('express');
 const { q, pool } = require('../db');
 const { requireRole, isStaff } = require('../auth');
 const { logActivity } = require('../activity');
-const { optimizeRoute, haversineKm } = require('../routeOptimizer');
+const { optimizeRouteRoad, haversineKm } = require('../routeOptimizer');
 const { asyncHandler } = require('../asyncHandler');
 const { today: businessToday } = require('../time');
 
@@ -46,7 +46,10 @@ router.get('/', asyncHandler(async (req, res) => {
     const b = visits[i];
     if (a.lat != null && b.lat != null) totalKm += haversineKm(a, b);
   }
-  res.render('routes/index', { title: 'Route planner', staff, date, gardenerId, gardeners, visits, totalKm });
+  res.render('routes/index', {
+    title: 'Route planner', staff, date, gardenerId, gardeners, visits, totalKm,
+    optimized: req.query.optimized || null,
+  });
 }));
 
 // Optimize a gardener's day (staff, or the gardener for their own day)
@@ -56,13 +59,13 @@ router.post('/optimize', asyncHandler(async (req, res) => {
   if (!gardenerId || !date) return res.redirect('/routes');
 
   const visits = await loadDayVisits(gardenerId, date);
-  const { orderedIds, lengthKm } = optimizeRoute(
+  const { orderedIds, lengthKm, mode } = await optimizeRouteRoad(
     visits.map((v) => ({ id: v.id, lat: v.lat, lng: v.lng }))
   );
   await applyOrder(orderedIds);
   await logActivity(req.user.id, 'route.optimize', 'visit', null,
-    `Optimized route for gardener #${gardenerId} on ${date}: ${orderedIds.length} stops, ~${lengthKm.toFixed(1)} km`);
-  res.redirect(`/routes?date=${date}&gardener_id=${gardenerId}`);
+    `Optimized route (${mode === 'road' ? 'road distance' : 'straight-line'}) for gardener #${gardenerId} on ${date}: ${orderedIds.length} stops, ~${lengthKm.toFixed(1)} km`);
+  res.redirect(`/routes?date=${date}&gardener_id=${gardenerId}&optimized=${mode}`);
 }));
 
 // Optimize all gardeners for a date in one go (staff)
@@ -70,16 +73,18 @@ router.post('/optimize-all', requireRole('supervisor'), asyncHandler(async (req,
   const date = req.body.date;
   const gardeners = await q("SELECT id FROM users WHERE role = 'gardener' AND active");
   let total = 0;
+  let mode = 'road';
   for (const g of gardeners) {
     const visits = await loadDayVisits(g.id, date);
     if (!visits.length) continue;
-    const { orderedIds } = optimizeRoute(visits.map((v) => ({ id: v.id, lat: v.lat, lng: v.lng })));
-    await applyOrder(orderedIds);
+    const r = await optimizeRouteRoad(visits.map((v) => ({ id: v.id, lat: v.lat, lng: v.lng })));
+    await applyOrder(r.orderedIds);
+    if (r.mode === 'straight') mode = 'straight'; // any fallback downgrades the summary
     total += visits.length;
   }
   await logActivity(req.user.id, 'route.optimize_all', 'visit', null,
-    `Optimized all routes for ${date} (${total} visits)`);
-  res.redirect(`/routes?date=${date}`);
+    `Optimized all routes (${mode === 'road' ? 'road distance' : 'straight-line'}) for ${date} (${total} visits)`);
+  res.redirect(`/routes?date=${date}&optimized=${mode}`);
 }));
 
 module.exports = router;
