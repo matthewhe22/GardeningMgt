@@ -141,18 +141,22 @@ router.get('/:id', asyncHandler(async (req, res) => {
   if (!canSeeVisit(req.user, visit)) {
     return res.status(403).render('error', { title: 'Forbidden', message: 'Not your visit.' });
   }
-  const tasks = await q('SELECT t.*, u.name AS assignee_name FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id WHERE t.visit_id = $1 ORDER BY t.id', [visit.id]);
-  const photos = await q('SELECT ph.id, ph.filename, ph.caption, ph.original_name, ph.created_at, u.name AS uploader_name FROM photos ph LEFT JOIN users u ON u.id = ph.uploaded_by WHERE ph.visit_id = $1 AND ph.visit_comment_id IS NULL ORDER BY ph.created_at DESC', [visit.id]);
-  const comments = await q('SELECT c.*, u.name AS author_name, u.role AS author_role FROM visit_comments c LEFT JOIN users u ON u.id = c.user_id WHERE c.visit_id = $1 ORDER BY c.created_at', [visit.id]);
-  const commentPhotos = await q('SELECT ph.visit_comment_id, ph.filename, ph.created_at FROM photos ph WHERE ph.visit_id = $1 AND ph.visit_comment_id IS NOT NULL ORDER BY ph.created_at', [visit.id]);
+  // All of these are independent of one another — fetch them concurrently so
+  // the page costs one round-trip's worth of latency instead of eight.
+  const [tasks, photos, comments, commentPhotos, invoice, gardeners, gpsPoints, job] = await Promise.all([
+    q('SELECT t.*, u.name AS assignee_name FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id WHERE t.visit_id = $1 ORDER BY t.id', [visit.id]),
+    q('SELECT ph.id, ph.filename, ph.caption, ph.original_name, ph.created_at, u.name AS uploader_name FROM photos ph LEFT JOIN users u ON u.id = ph.uploaded_by WHERE ph.visit_id = $1 AND ph.visit_comment_id IS NULL ORDER BY ph.created_at DESC', [visit.id]),
+    q('SELECT c.*, u.name AS author_name, u.role AS author_role FROM visit_comments c LEFT JOIN users u ON u.id = c.user_id WHERE c.visit_id = $1 ORDER BY c.created_at', [visit.id]),
+    q('SELECT ph.visit_comment_id, ph.filename, ph.created_at FROM photos ph WHERE ph.visit_id = $1 AND ph.visit_comment_id IS NOT NULL ORDER BY ph.created_at', [visit.id]),
+    q1('SELECT * FROM invoices WHERE visit_id = $1 ORDER BY id DESC LIMIT 1', [visit.id]),
+    q("SELECT id, name FROM users WHERE role = 'gardener' AND active"),
+    q('SELECT * FROM gps_points WHERE visit_id = $1 ORDER BY recorded_at', [visit.id]),
+    visit.job_id
+      ? q1('SELECT j.*, u.name AS default_gardener_name FROM jobs j LEFT JOIN users u ON u.id = j.gardener_id WHERE j.id = $1', [visit.job_id])
+      : Promise.resolve(null),
+  ]);
   const photosByComment = {};
   for (const ph of commentPhotos) (photosByComment[ph.visit_comment_id] ||= []).push(ph);
-  const invoice = await q1('SELECT * FROM invoices WHERE visit_id = $1 ORDER BY id DESC LIMIT 1', [visit.id]);
-  const gardeners = await q("SELECT id, name FROM users WHERE role = 'gardener' AND active");
-  const gpsPoints = await q('SELECT * FROM gps_points WHERE visit_id = $1 ORDER BY recorded_at', [visit.id]);
-  const job = visit.job_id
-    ? await q1('SELECT j.*, u.name AS default_gardener_name FROM jobs j LEFT JOIN users u ON u.id = j.gardener_id WHERE j.id = $1', [visit.job_id])
-    : null;
   res.render('visits/show', {
     title: `Job #${visit.id} — ${visit.property_name}`,
     visit, tasks, photos, comments, photosByComment, invoice, gardeners, gpsPoints, job,

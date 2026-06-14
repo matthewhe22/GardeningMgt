@@ -260,6 +260,9 @@ let readyPromise = null;
  * Called once per process before handling requests.
  */
 function ready() {
+  // Once the database is provisioned, set DB_SKIP_INIT=1 so serverless cold
+  // starts don't re-run the full schema DDL + migrations on the first request.
+  if (process.env.DB_SKIP_INIT === '1') return Promise.resolve();
   if (!readyPromise) {
     readyPromise = (async () => {
       await pool.query(SCHEMA);
