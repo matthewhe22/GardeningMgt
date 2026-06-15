@@ -46,6 +46,16 @@ realistic daily stop counts (≤30). Needs no API key or network. Stops without
 coordinates are appended to the end of the route. "Optimize all" loops every
 gardener for a date.
 
+**Portfolio routing by location** (`segmentByLocation` / `clusterByLocation`):
+across the whole portfolio, every site under an active contract is grouped by
+location with deterministic k-means over haversine distance (farthest-first
+seeding so day allocations are stable and testable), producing one
+geographically tight segment per service day. The preview at
+`/routes/portfolio` shows the day-by-day allocation; applying it moves a chosen
+week's scheduled visits onto the weekday assigned to their site and re-optimizes
+each affected gardener's day. Sites without coordinates are listed but not
+allocated.
+
 ### Reminders
 `src/reminders.js`: a single `sendRemindersForDate(date, {force})` function used by
 1) a cron job at 06:00 daily (automatic reminders for today's visits) and

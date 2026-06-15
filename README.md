@@ -12,6 +12,7 @@ normal Node.js server.
 | Issue tracking (priority, status, comments, photos) | **Issues** |
 | Photo upload & team sharing, with timestamps on every photo | Job/issue pages, **Photos** gallery |
 | Route optimization per gardener per day (nearest-neighbour + 2-opt, no external API) | **Routes** |
+| Portfolio routing: segment all sites by location and allocate nearby sites to the same service day | **Routes → Portfolio routing** |
 | Automatic visit reminders (daily 06:00 cron → in-app notifications) | 🔔 Notifications |
 | Bulk visit reminders for any date | **Reminders** (staff) |
 | Activity log of every change | **Activity** (staff) |

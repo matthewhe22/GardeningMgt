@@ -1,6 +1,13 @@
 <%- include('../partials/header') %>
 <h1>Route planner</h1>
 
+<% if (staff) { %>
+<div class="card">
+  <p>Plan the whole portfolio at once: segment every site by location and spread the groups across service days, so nearby sites are visited together.</p>
+  <a class="btn" href="/routes/portfolio?week=<%= date %>">🗺 Portfolio routing by location</a>
+</div>
+<% } %>
+
 <div class="card">
   <form method="get" class="filter-row">
     <label>Date <input type="date" name="date" value="<%= date %>"></label>

@@ -1,0 +1,63 @@
+<%- include('../partials/header') %>
+<h1>Portfolio routing</h1>
+<p class="page-sub">
+  Segments every site under an active contract into location-based groups —
+  one per service day — so sites close together are visited on the same day.
+  Preview the plan below, then apply it to a week's scheduled visits.
+</p>
+
+<% if (applied != null) { %>
+<div class="card"><p>✅ Re-allocated <strong><%= applied %></strong> visit(s) for the week of <%= week %> by location.</p></div>
+<% } %>
+
+<div class="card">
+  <form method="get" action="/routes/portfolio" class="filter-row">
+    <label>Week of <input type="date" name="week" value="<%= week %>"></label>
+    <label>Service days
+      <select name="days">
+        <% for (let d = 2; d <= 7; d++) { %>
+          <option value="<%= d %>" <%= d === dayCount ? 'selected' : '' %>><%= d %></option>
+        <% } %>
+      </select>
+    </label>
+    <button class="btn">Preview plan</button>
+  </form>
+  <p class="muted"><%= totalSites %> site(s) in the portfolio, segmented into <%= days.length %> day(s) of similar location.</p>
+
+  <form method="post" action="/routes/portfolio/apply" onsubmit="return confirm('Move this week\'s scheduled visits onto their location-based days?');">
+    <input type="hidden" name="week" value="<%= week %>">
+    <input type="hidden" name="days" value="<%= dayCount %>">
+    <button class="btn btn-primary">⚡ Apply allocation to week of <%= week %></button>
+  </form>
+</div>
+
+<% days.forEach(day => { %>
+<div class="card">
+  <h2><%= day.label %> <span class="muted">— <%= day.date %></span></h2>
+  <p class="muted"><%= day.sites.length %> site(s)<% if (day.lengthKm > 0) { %>, ~<%= day.lengthKm.toFixed(1) %> km straight-line<% } %></p>
+  <ol class="route-list">
+    <% day.sites.forEach(s => { %>
+    <li>
+      <a href="/jobs/site/<%= s.id %>"><strong><%= s.name %></strong></a>
+      — <%= s.address %>
+      <% if (s.gardener_name) { %><span class="muted">(<%= s.gardener_name %>)</span><% } %>
+    </li>
+    <% }) %>
+  </ol>
+</div>
+<% }) %>
+
+<% if (unlocated.length) { %>
+<div class="card">
+  <h2>No coordinates <span class="muted">— not allocated</span></h2>
+  <p class="muted">Add a location to these sites so they can be routed.</p>
+  <ul class="route-list">
+    <% unlocated.forEach(s => { %>
+    <li><a href="/jobs/site/<%= s.id %>"><strong><%= s.name %></strong></a> — <%= s.address %></li>
+    <% }) %>
+  </ul>
+</div>
+<% } %>
+
+<p><a href="/routes">← Back to route planner</a></p>
+<%- include('../partials/footer') %>
