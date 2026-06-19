@@ -50,15 +50,20 @@ router.get('/', asyncHandler(async (req, res) => {
     args.push(todayStr); where.push(`v.scheduled_date >= $${args.length}`);
   }
   // Every view reads nearest → future (ascending by date), then by visiting
-  // order within the day.
-  const visits = await q(`
+  // order within the day. The visit list and the filter dropdowns are
+  // independent, so fetch them in parallel to cut page latency.
+  const [visits, gardeners, properties] = await Promise.all([
+    q(`
     SELECT v.*, p.name AS property_name, p.address, p.lat, p.lng, u.name AS gardener_name
     FROM visits v
     JOIN properties p ON p.id = v.property_id
     LEFT JOIN users u ON u.id = v.gardener_id
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
     ORDER BY v.scheduled_date ASC, COALESCE(v.route_order, 999), v.id
-    LIMIT 200`, args);
+    LIMIT 200`, args),
+    q("SELECT id, name FROM users WHERE role = 'gardener' AND active"),
+    q('SELECT id, name FROM properties ORDER BY name'),
+  ]);
   // Group consecutive visits by day so the list reads as a per-day route in
   // visiting sequence (route_order). Reordering / optimizing is offered per day
   // only when the list is scoped to a single gardener (one route to order).
@@ -68,8 +73,6 @@ router.get('/', asyncHandler(async (req, res) => {
     if (!g || g.date !== v.scheduled_date) { g = { date: v.scheduled_date, items: [] }; groups.push(g); }
     g.items.push(v);
   }
-  const gardeners = await q("SELECT id, name FROM users WHERE role = 'gardener' AND active");
-  const properties = await q('SELECT id, name FROM properties ORDER BY name');
   res.render('visits/index', {
     title: 'Visits / Jobs', visits, groups, gardeners, properties, staff,
     date, upto, showAll, gardenerId, today: todayStr, canReorder: !!gardenerId,

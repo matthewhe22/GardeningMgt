@@ -1,4 +1,6 @@
-const ExcelJS = require('exceljs');
+// ExcelJS is a heavy (~20 MB) dependency only needed when an admin actually
+// uploads an .xlsx file. Loading it lazily keeps it out of the serverless
+// cold-start path, so ordinary page loads start much faster.
 
 // Accepted header spellings -> property field. Headers are matched
 // case-insensitively with spaces/punctuation stripped.
@@ -56,6 +58,7 @@ function validateSites(rawRows) {
 
 /** Parse an .xlsx upload (first worksheet, first row = headers). */
 async function parseXlsx(buffer) {
+  const ExcelJS = require('exceljs');
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(buffer);
   const sheet = workbook.worksheets[0];

@@ -13,6 +13,13 @@ const { today: businessToday, fmtDateTime, fmtDate } = require('./time');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// A per-deploy version string used to cache-bust the static asset URLs
+// (/css/style.css?v=…). It lets us cache those files aggressively in the
+// browser while still picking up CSS/JS changes immediately after a deploy.
+// Changes on every Vercel deploy (commit SHA) and on every local restart.
+const ASSET_VERSION = (process.env.VERCEL_GIT_COMMIT_SHA || String(Date.now())).slice(0, 12);
+app.locals.assetVersion = ASSET_VERSION;
+
 // Fail closed: never run with the placeholder session secret outside local dev.
 // A known secret lets anyone forge a signed admin cookie.
 const SESSION_SECRET = process.env.SESSION_SECRET;
@@ -42,7 +49,10 @@ app.use((req, res, next) => {
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
-app.use(express.static(path.join(__dirname, '..', 'public')));
+// Cache static assets in the browser for a week. CSS/JS are cache-busted by
+// the ?v=<assetVersion> query string, so a long lifetime never serves stale
+// files after a deploy; icons/manifest change rarely.
+app.use(express.static(path.join(__dirname, '..', 'public'), { maxAge: '7d' }));
 
 // Signed cookie sessions: no server-side store, so login survives
 // serverless cold starts and multiple instances.

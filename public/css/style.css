@@ -107,7 +107,7 @@ body.authed main.container {
 @media (max-width: 767px) {
   body.authed main.container {
     margin-left: 0;
-    padding: 16px 14px calc(86px + env(safe-area-inset-bottom, 0px));
+    padding: 16px 14px calc(92px + env(safe-area-inset-bottom, 0px));
   }
   body.authed { padding-top: 56px; } /* room for fixed mobile topbar */
 }
@@ -290,16 +290,16 @@ body.authed main.container {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  min-height: 56px;
-  padding: 6px 2px;
+  gap: 3px;
+  min-height: 62px;
+  padding: 7px 2px;
   color: var(--muted);
-  font-size: 0.66rem;
+  font-size: 0.72rem;
   font-weight: 600;
   text-decoration: none;
   position: relative;
 }
-.tab svg { width: 22px; height: 22px; }
+.tab svg { width: 26px; height: 26px; }
 .tab:hover { text-decoration: none; }
 .tab.active { color: var(--green-700); }
 .tab .badge { position: absolute; top: 4px; left: calc(50% + 4px); }
@@ -1116,7 +1116,7 @@ body.anon {
     position: fixed;
     left: 0;
     right: 0;
-    bottom: calc(56px + env(safe-area-inset-bottom, 0px)); /* sit above the tab bar */
+    bottom: calc(62px + env(safe-area-inset-bottom, 0px)); /* sit above the tab bar */
     z-index: 35;
     margin: 0;
     padding: 12px 14px;
@@ -1195,7 +1195,7 @@ body { overscroll-behavior-y: none; }
   body.authed main.container {
     margin-left: 0 !important;
     max-width: none !important;
-    padding: 16px 14px calc(86px + env(safe-area-inset-bottom, 0px)) !important;
+    padding: 16px 14px calc(92px + env(safe-area-inset-bottom, 0px)) !important;
   }
   body.authed { padding-top: 56px !important; } /* room for the fixed topbar */
 }
@@ -1256,4 +1256,31 @@ body { overscroll-behavior-y: none; }
   }
   /* Indent the pills to line up under the main text when a route badge leads. */
   .card .job-row > .route-no ~ .job-row-meta { padding-left: 38px; }
+}
+
+/* --------------------------------------------------------------------------
+   Mobile readability & top-of-page spacing
+   Phones reported the body text, the bottom tab bar and the filter controls as
+   too small / cramped. Bump the type, and stack the filter row into full-width
+   controls so the date picker, gardener select and button stop overlapping.
+   -------------------------------------------------------------------------- */
+@media (max-width: 767px) {
+  /* Larger, more legible type across the app. */
+  body { font-size: 16px; }
+  .page-sub { font-size: 0.95rem; }
+  .muted { font-size: 0.92em; }
+  .job-row-main strong { font-size: 1.08rem; }
+  .job-row-meta .muted, .job-row-meta .status { font-size: 0.92rem; }
+  .day-title { font-size: 1.05rem; }
+  .quick-chip { font-size: 0.95rem; }
+
+  /* 16px form controls stop iOS from auto-zooming (and shoving the layout)
+     when a field gains focus — a common cause of the "overlapping boxes" look. */
+  input, select, textarea, .btn { font-size: 16px; }
+
+  /* Stack the top filter controls into full-width rows instead of crowding the
+     date picker, gardener select and Filter button onto one cramped line. */
+  .filter-row { flex-direction: column; align-items: stretch; gap: 14px; }
+  .filter-row label { min-width: 0; width: 100%; }
+  .filter-row > button { width: 100%; }
 }
