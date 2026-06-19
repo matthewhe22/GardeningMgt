@@ -242,7 +242,12 @@ router.post('/:id/status', asyncHandler(async (req, res) => {
   const visit = await getVisit(req.params.id);
   if (!visit || !canSeeVisit(req.user, visit)) return res.redirect('/visits');
   const status = req.body.status;
-  if (!['scheduled', 'in_progress', 'skipped', 'cancelled'].includes(status)) {
+  // Staff may set any status; a gardener may only skip their own visit
+  // (cancelling/rescheduling contract work is a supervisor decision).
+  const allowed = isStaff(req.user)
+    ? ['scheduled', 'in_progress', 'skipped', 'cancelled']
+    : ['skipped'];
+  if (!allowed.includes(status)) {
     return res.redirect(`/visits/${visit.id}`);
   }
   if (status === visit.status) return res.redirect(`/visits/${visit.id}`);

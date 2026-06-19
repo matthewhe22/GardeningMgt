@@ -48,27 +48,27 @@
 <% } %>
 
 <div class="card">
-  <table class="table">
-    <tr><th>Site</th><th>Frequency</th><th>Contract</th><th>Gardener</th><th>Last completed</th><th>Next visit</th><% if (staff) { %><th></th><% } %></tr>
+  <table class="table table--stack">
+    <tr class="thead-row"><th>Site</th><th>Frequency</th><th>Contract</th><th>Gardener</th><th>Last completed</th><th>Next visit</th><% if (staff) { %><th>Manage</th><% } %></tr>
     <% jobs.forEach(j => { %>
     <tr>
-      <td><strong><% if (staff) { %><a href="/jobs/site/<%= j.property_id %>"><%= j.property_name %></a><% } else { %><%= j.property_name %><% } %></strong><br>
+      <td class="stack-main"><strong><% if (staff) { %><a href="/jobs/site/<%= j.property_id %>"><%= j.property_name %></a><% } else { %><%= j.property_name %><% } %></strong><br>
         <span class="muted"><%= j.address %><% if (j.lots != null) { %> · <%= j.lots %> lots<% } %></span>
         <% if (!j.active) { %><span class="status status-cancelled">inactive</span><% } %>
         <% if (j.expired) { %><span class="status status-open">expired — needs renewal</span><% } %>
       </td>
-      <td><span class="status status-scheduled"><%= j.frequency %></span></td>
-      <td class="muted"><%= j.contract_years %> yr<br><%= j.start_date %> → <%= j.end_date %></td>
-      <td><%= j.gardener_name || '⚠ Unassigned' %></td>
-      <td class="muted"><%= j.last_completed_at ? fmtDateTime(j.last_completed_at) : 'never' %></td>
-      <td>
+      <td data-label="Frequency"><span class="status status-scheduled"><%= j.frequency %></span></td>
+      <td class="muted" data-label="Contract"><%= j.contract_years %> yr<br><%= j.start_date %> → <%= j.end_date %></td>
+      <td data-label="Gardener"><%= j.gardener_name || '⚠ Unassigned' %></td>
+      <td class="muted" data-label="Last completed"><%= j.last_completed_at ? fmtDateTime(j.last_completed_at) : 'never' %></td>
+      <td data-label="Next visit">
         <% if (j.next_visit_date) { %>
           <a href="/visits/<%= j.next_visit_id %>"><%= j.next_visit_date %></a>
           <% if (j.upcoming_count > 1) { %><br><span class="muted"><%= j.upcoming_count %> upcoming</span><% } %>
         <% } else { %><span class="muted">none scheduled</span><% } %>
       </td>
       <% if (staff) { %>
-      <td>
+      <td class="stack-main">
         <% if (j.expired) { %>
         <form method="post" action="/jobs/<%= j.id %>/renew" class="add-row" style="margin-bottom:6px">
           <select name="contract_years"><option value="1">1 yr</option><option value="2">2 yr</option></select>

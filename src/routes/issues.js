@@ -85,25 +85,33 @@ router.post('/:id/update', requireRole('supervisor'), asyncHandler(async (req, r
 }));
 
 router.post('/:id/comments', asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(404).render('error', { title: 'Not found', message: 'Issue not found.' });
+  const issue = await q1('SELECT id FROM issues WHERE id = $1', [id]);
+  if (!issue) return res.status(404).render('error', { title: 'Not found', message: 'Issue not found.' });
   const body = (req.body.body || '').trim();
   if (body) {
     await q('INSERT INTO issue_comments (issue_id, user_id, body) VALUES ($1, $2, $3)',
-      [req.params.id, req.user.id, body]);
-    await logActivity(req.user.id, 'issue.comment', 'issue', Number(req.params.id), `Commented on issue #${req.params.id}`);
+      [id, req.user.id, body]);
+    await logActivity(req.user.id, 'issue.comment', 'issue', id, `Commented on issue #${id}`);
   }
-  res.redirect(`/issues/${req.params.id}#comments`);
+  res.redirect(`/issues/${id}#comments`);
 }));
 
 router.post('/:id/photos', upload.array('photos', 10), asyncHandler(async (req, res) => {
   assertCsrf(req);
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(404).render('error', { title: 'Not found', message: 'Issue not found.' });
+  const issue = await q1('SELECT id FROM issues WHERE id = $1', [id]);
+  if (!issue) return res.status(404).render('error', { title: 'Not found', message: 'Issue not found.' });
   for (const f of req.files || []) {
-    await savePhoto(f, { caption: req.body.caption || null, issueId: Number(req.params.id), userId: req.user.id });
+    await savePhoto(f, { caption: req.body.caption || null, issueId: id, userId: req.user.id });
   }
   if ((req.files || []).length) {
-    await logActivity(req.user.id, 'photo.upload', 'issue', Number(req.params.id),
-      `Uploaded ${req.files.length} photo(s) to issue #${req.params.id}`);
+    await logActivity(req.user.id, 'photo.upload', 'issue', id,
+      `Uploaded ${req.files.length} photo(s) to issue #${id}`);
   }
-  res.redirect(`/issues/${req.params.id}#photos`);
+  res.redirect(`/issues/${id}#photos`);
 }));
 
 module.exports = router;

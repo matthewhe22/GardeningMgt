@@ -9,24 +9,24 @@
 </p>
 
 <div class="card">
-  <table class="table">
-    <tr><th>Description</th><th>Qty</th><th>Unit price</th><th>Amount</th><th></th></tr>
+  <table class="table table--stack">
+    <tr class="thead-row"><th>Description</th><th>Qty</th><th>Unit price</th><th>Amount</th><th>Remove</th></tr>
     <% invoice.items.forEach(it => { %>
     <tr>
-      <td><%= it.description %></td>
-      <td><%= it.quantity %></td>
-      <td>$<%= it.unit_price.toFixed(2) %></td>
-      <td>$<%= (it.quantity * it.unit_price).toFixed(2) %></td>
-      <td>
+      <td class="stack-main"><%= it.description %></td>
+      <td data-label="Qty"><%= it.quantity %></td>
+      <td data-label="Unit price">$<%= it.unit_price.toFixed(2) %></td>
+      <td data-label="Amount">$<%= (it.quantity * it.unit_price).toFixed(2) %></td>
+      <td data-label="Remove">
         <% if (invoice.status === 'draft') { %>
-        <form method="post" action="/invoices/<%= invoice.id %>/items/<%= it.id %>/delete" class="inline">
+        <form method="post" action="/invoices/<%= invoice.id %>/items/<%= it.id %>/delete" class="inline" data-confirm="Remove this line item?">
           <button class="link-btn">✕</button>
         </form>
         <% } %>
       </td>
     </tr>
     <% }) %>
-    <tr><td colspan="3"><strong>Total</strong></td><td><strong>$<%= invoice.total.toFixed(2) %></strong></td><td></td></tr>
+    <tr><td colspan="3" class="stack-main"><strong>Total</strong></td><td data-label="Total"><strong>$<%= invoice.total.toFixed(2) %></strong></td><td></td></tr>
   </table>
 
   <% if (invoice.status === 'draft') { %>
@@ -38,7 +38,7 @@
   </form>
   <% } %>
 
-  <form method="post" action="/invoices/<%= invoice.id %>/status" class="filter-row">
+  <form method="post" action="/invoices/<%= invoice.id %>/status" class="filter-row" data-confirm="Update this invoice's status?">
     <label>Status
       <select name="status">
         <% ['draft','sent','paid','void'].forEach(s => { %>

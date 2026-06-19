@@ -50,7 +50,7 @@
     <div class="btn-row">
       <a class="btn btn-primary" href="/visits/<%= visit.id %>/report" target="_blank">📄 View report</a>
       <a class="btn" href="/visits/<%= visit.id %>/report?download=1">⬇ Download PDF</a>
-      <form method="post" action="/visits/<%= visit.id %>/timer/start" class="gps-form inline">
+      <form method="post" action="/visits/<%= visit.id %>/timer/start" class="gps-form inline" data-confirm="Restart the timer? This clears the recorded completion time and reopens the job.">
         <input type="hidden" name="lat"><input type="hidden" name="lng">
         <button class="btn">↻ Restart timer</button>
       </form>

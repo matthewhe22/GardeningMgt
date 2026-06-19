@@ -742,11 +742,11 @@ select {
 .status-in_progress, .status-sent { background: var(--warn-bg); color: var(--warn); }
 .status-completed, .status-done, .status-resolved, .status-paid { background: var(--ok-bg); color: var(--ok); }
 .status-skipped, .status-blocked, .status-cancelled, .status-closed, .status-void { background: #ecebe5; color: #6d7570; }
-.status-open { background: #fdeaf0; color: #b0265c; }
+.status-open { background: #fdeaf0; color: #8e1f4b; }
 
 .prio-low { background: #ecebe5; color: #6d7570; }
 .prio-medium { background: var(--info-bg); color: var(--info); }
-.prio-high { background: #ffedd9; color: #c2570a; }
+.prio-high { background: #ffedd9; color: #9a4408; }
 .prio-urgent { background: var(--danger-bg); color: var(--danger); font-weight: 700; }
 
 .tag-admin { background: #efe9fb; color: #5b34b1; }
@@ -1009,7 +1009,10 @@ body.anon {
 /* Tables: never clip columns on small screens — scroll horizontally instead. */
 .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 @media (max-width: 640px) {
-  .card > .table, .table-wrap > .table { display: block; overflow-x: auto; white-space: nowrap; }
+  /* Plain tables scroll sideways; tables opted into .table--stack collapse into
+     labelled card rows instead (see the .table--stack rules above). */
+  .card > .table:not(.table--stack),
+  .table-wrap > .table:not(.table--stack) { display: block; overflow-x: auto; white-space: nowrap; }
 }
 
 .chip-link { color: var(--green-700); border-color: var(--green-100); background: var(--green-50); font-weight: 600; }

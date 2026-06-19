@@ -4,7 +4,7 @@ const express = require('express');
 const cookieSession = require('cookie-session');
 
 const { q1, ready } = require('./db');
-const { currentUser, requireLogin } = require('./auth');
+const { currentUser, requireLogin, isStaff } = require('./auth');
 const { sendRemindersForDate } = require('./reminders');
 const { asyncHandler } = require('./asyncHandler');
 const { csrfProtection } = require('./csrf');
@@ -103,9 +103,20 @@ app.get('/cron/reminders', asyncHandler(async (req, res) => {
 app.use(csrfProtection);
 
 // Photos are stored in the database; stream them out by filename key.
+// Access mirrors the gallery's visibility rules so a gardener can't read
+// another gardener's private visit photos by guessing the filename: staff see
+// everything; everyone else sees shared photos, their own uploads, photos on a
+// visit assigned to them, and any issue photo (issues are team-wide).
 app.get('/uploads/:filename', requireLogin, asyncHandler(async (req, res) => {
-  const photo = await q1('SELECT mime, data FROM photos WHERE filename = $1', [req.params.filename]);
+  const photo = await q1(`
+    SELECT ph.mime, ph.data, ph.shared, ph.uploaded_by, ph.issue_id, v.gardener_id
+    FROM photos ph LEFT JOIN visits v ON v.id = ph.visit_id
+    WHERE ph.filename = $1`, [req.params.filename]);
   if (!photo) return res.status(404).end();
+  const u = res.locals.user;
+  const allowed = isStaff(u) || photo.shared || photo.uploaded_by === u.id
+    || photo.gardener_id === u.id || photo.issue_id != null;
+  if (!allowed) return res.status(404).end();
   res.set('Content-Type', photo.mime);
   // Filenames are unique, immutable content keys, so the browser can keep them
   // for a long time and never re-fetch — repeat photo views become instant.

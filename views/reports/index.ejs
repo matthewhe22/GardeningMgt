@@ -27,11 +27,11 @@
 
   <section class="card">
     <h2>Per gardener</h2>
-    <table class="table">
-      <tr><th>Gardener</th><th>Visits</th><th>Completed</th><th>Hours</th></tr>
+    <table class="table table--stack">
+      <tr class="thead-row"><th>Gardener</th><th>Visits</th><th>Completed</th><th>Hours</th></tr>
       <% perGardener.forEach(g => { %>
-        <tr><td><%= g.name %></td><td><%= g.visits %></td><td><%= g.completed %></td>
-          <td><%= (g.minutes / 60).toFixed(1) %></td></tr>
+        <tr><td class="stack-main"><%= g.name %></td><td data-label="Visits"><%= g.visits %></td><td data-label="Completed"><%= g.completed %></td>
+          <td data-label="Hours"><%= (g.minutes / 60).toFixed(1) %></td></tr>
       <% }) %>
     </table>
   </section>
@@ -48,11 +48,11 @@
 
   <section class="card">
     <h2>Invoicing</h2>
-    <table class="table">
-      <tr><th>Status</th><th>Count</th><th>Total</th></tr>
+    <table class="table table--stack">
+      <tr class="thead-row"><th>Status</th><th>Count</th><th>Total</th></tr>
       <% invoiceStats.forEach(s => { %>
-        <tr><td><span class="status status-<%= s.status %>"><%= s.status %></span></td>
-          <td><%= s.count %></td><td>$<%= s.total.toFixed(2) %></td></tr>
+        <tr><td class="stack-main"><span class="status status-<%= s.status %>"><%= s.status %></span></td>
+          <td data-label="Count"><%= s.count %></td><td data-label="Total">$<%= s.total.toFixed(2) %></td></tr>
       <% }) %>
     </table>
     <p class="muted">Photos uploaded in range: <%= photoCount %></p>

@@ -46,16 +46,16 @@
 </details>
 
 <div class="card">
-  <table class="table">
-    <tr><th>Issue</th><th>Property</th><th>Priority</th><th>Status</th><th>Assignee</th><th>Reported</th></tr>
+  <table class="table table--stack">
+    <tr class="thead-row"><th>Issue</th><th>Property</th><th>Priority</th><th>Status</th><th>Assignee</th><th>Reported</th></tr>
     <% issues.forEach(i => { %>
     <tr>
-      <td><a href="/issues/<%= i.id %>"><strong><%= i.title %></strong></a></td>
-      <td class="muted"><%= i.property_name || '—' %></td>
-      <td><span class="prio prio-<%= i.priority %>"><%= i.priority %></span></td>
-      <td><span class="status status-<%= i.status %>"><%= i.status.replace('_',' ') %></span></td>
-      <td><%= i.assignee_name || '—' %></td>
-      <td class="muted"><%= fmtDateTime(i.created_at) %> · <%= i.reporter_name || '' %></td>
+      <td class="stack-main"><a href="/issues/<%= i.id %>"><strong><%= i.title %></strong></a></td>
+      <td class="muted" data-label="Property"><%= i.property_name || '—' %></td>
+      <td data-label="Priority"><span class="prio prio-<%= i.priority %>"><%= i.priority %></span></td>
+      <td data-label="Status"><span class="status status-<%= i.status %>"><%= i.status.replace('_',' ') %></span></td>
+      <td data-label="Assignee"><%= i.assignee_name || '—' %></td>
+      <td class="muted" data-label="Reported"><%= fmtDateTime(i.created_at) %> · <%= i.reporter_name || '' %></td>
     </tr>
     <% }) %>
   </table>

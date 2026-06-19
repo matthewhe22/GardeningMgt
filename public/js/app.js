@@ -10,9 +10,19 @@ document.querySelectorAll('form').forEach((form) => {
   form.appendChild(i);
 });
 
+// --- Confirm destructive actions (forms/links marked data-confirm) ---
+// Registered before the double-submit guard so a cancelled confirm also
+// prevents the button from being disabled.
+document.querySelectorAll('[data-confirm]').forEach((el) => {
+  const msg = el.getAttribute('data-confirm') || 'Are you sure?';
+  const evt = el.tagName === 'FORM' ? 'submit' : 'click';
+  el.addEventListener(evt, (e) => { if (!window.confirm(msg)) e.preventDefault(); });
+});
+
 // --- Prevent double-submit: disable submit buttons once a form is submitted ---
 document.querySelectorAll('form').forEach((form) => {
-  form.addEventListener('submit', () => {
+  form.addEventListener('submit', (e) => {
+    if (e.defaultPrevented) return; // e.g. a confirm() was cancelled
     const btn = form.querySelector('button[type="submit"], button:not([type])');
     if (btn) {
       // Let the value still post, just block repeat taps.
@@ -108,7 +118,9 @@ function showNet() {
       bar = document.createElement('div');
       bar.id = 'net-offline';
       bar.textContent = '⚠ Offline — changes won’t save until you reconnect';
-      bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:60;background:#855600;color:#fff;text-align:center;padding:8px;font-size:0.85rem';
+      // Sit above the bottom tab bar (and the iOS home indicator) so it never
+      // hides navigation while a field user is offline.
+      bar.style.cssText = 'position:fixed;left:0;right:0;bottom:calc(62px + env(safe-area-inset-bottom,0px));z-index:39;background:#855600;color:#fff;text-align:center;padding:8px;font-size:0.85rem';
       document.body.appendChild(bar);
     }
   } else if (bar) {
