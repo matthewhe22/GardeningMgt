@@ -4,7 +4,7 @@ const { requireRole, isStaff } = require('../auth');
 const { logActivity } = require('../activity');
 const { upload, savePhoto } = require('../upload');
 const { nextOccurrenceAfter, isValidDate } = require('../recurrence');
-const { loadReportData, renderReportHtml, archiveToOneDrive } = require('../report');
+const { loadReportData, renderReportHtml, renderReportPdf, archiveToOneDrive } = require('../report');
 const { asyncHandler } = require('../asyncHandler');
 const { assertCsrf } = require('../csrf');
 const { optimizeRouteRoad } = require('../routeOptimizer');
@@ -332,15 +332,17 @@ router.get('/:id/report', asyncHandler(async (req, res) => {
     return res.status(404).render('error', { title: 'Not found', message: 'Report not found.' });
   }
   const data = await loadReportData(visit.id);
-  const html = await renderReportHtml(data);
-  // ?download=1 saves the report as a file instead of opening it in the tab.
+  const slug = String(visit.property_name || 'job')
+    .replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'job';
+  // ?download=1 returns a PDF file; otherwise the report opens as HTML in the tab.
   if (req.query.download === '1') {
-    const slug = String(visit.property_name || 'job')
-      .replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'job';
+    const pdf = await renderReportPdf(data);
+    res.set('Content-Type', 'application/pdf');
     res.set('Content-Disposition',
-      `attachment; filename="completion-report-${slug}-${visit.scheduled_date}.html"`);
+      `attachment; filename="completion-report-${slug}-${visit.scheduled_date}.pdf"`);
+    return res.send(pdf);
   }
-  res.type('html').send(html);
+  res.type('html').send(await renderReportHtml(data));
 }));
 
 /**

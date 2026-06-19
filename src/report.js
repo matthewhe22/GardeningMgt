@@ -88,4 +88,141 @@ async function archiveToOneDrive(visitId) {
   }
 }
 
-module.exports = { loadReportData, renderReportHtml, archiveToOneDrive };
+/**
+ * Render the job completion report as a real PDF (Buffer). Uses pdfkit — pure
+ * JS, no headless browser — so it stays light on serverless cold starts
+ * (pdfkit is required lazily, only when a PDF is actually generated). Photos
+ * are embedded; the SVG map is summarised as GPS coordinates plus a map link.
+ */
+async function renderReportPdf(data) {
+  const PDFDocument = require('pdfkit');
+  const { visit, job, tasks, comments, gpsPoints, photos } = data;
+
+  // pdfkit's built-in fonts are Latin-1 only: strip emoji / exotic glyphs so
+  // user-entered text never renders as boxes or breaks encoding.
+  const clean = (s) => String(s == null ? '' : s).replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF]/g, '').trim();
+
+  // Photo bytes (only JPEG/PNG can be embedded by pdfkit) in one query.
+  const photoBytes = {};
+  if (photos.length) {
+    const rows = await q('SELECT id, data, mime FROM photos WHERE id = ANY($1)', [photos.map((p) => p.id)]);
+    for (const r of rows) photoBytes[r.id] = r;
+  }
+  const mapLink = externalMapUrl(gpsPoints, visit);
+
+  return await new Promise((resolve, reject) => {
+    const doc = new PDFDocument({
+      size: 'A4', margin: 48,
+      info: { Title: `Job completion report #${visit.id} - ${clean(visit.property_name)}`, Author: 'GardeningMgt' },
+    });
+    const chunks = [];
+    doc.on('data', (c) => chunks.push(c));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+
+    const GREEN = '#14532d', MUTED = '#707b72', INK = '#1d2620';
+    const left = doc.page.margins.left;
+    const cw = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+    const bottom = () => doc.page.height - doc.page.margins.bottom;
+    const ensure = (h) => { if (doc.y + h > bottom()) doc.addPage(); };
+
+    const heading = (t) => {
+      ensure(46);
+      doc.moveDown(0.8);
+      doc.fillColor(GREEN).font('Helvetica-Bold').fontSize(13).text(clean(t));
+      doc.moveTo(left, doc.y + 2).lineTo(left + cw, doc.y + 2).lineWidth(1).strokeColor('#e6e4dc').stroke();
+      doc.moveDown(0.4).fillColor(INK).font('Helvetica').fontSize(10);
+    };
+    const row = (label, value) => {
+      const v = clean(value);
+      if (v === '') return;
+      const labelW = 150;
+      ensure(20);
+      const y = doc.y;
+      doc.fillColor(MUTED).font('Helvetica-Bold').fontSize(9).text(clean(label), left, y, { width: labelW });
+      doc.fillColor(INK).font('Helvetica').fontSize(10).text(v, left + labelW, y, { width: cw - labelW });
+      doc.y = Math.max(doc.y, y) ; doc.moveDown(0.2);
+    };
+
+    // Header
+    doc.fillColor(GREEN).font('Helvetica-Bold').fontSize(18).text(`Job completion report  #${visit.id}`);
+    doc.fillColor(MUTED).font('Helvetica').fontSize(10)
+      .text(`${clean(visit.property_name)}, ${clean(visit.address)}  -  ${visit.scheduled_date}`);
+    doc.moveTo(left, doc.y + 4).lineTo(left + cw, doc.y + 4).lineWidth(2).strokeColor(GREEN).stroke();
+    doc.lineWidth(1).moveDown(0.6);
+
+    // Job details
+    heading('Job details');
+    row('Site', `${clean(visit.property_name)} - ${clean(visit.address)}${visit.lots != null ? ` (${visit.lots} lots)` : ''}`);
+    if (visit.contact_name) row('Site contact', visit.contact_name);
+    row('Gardener', visit.gardener_name || 'Unassigned');
+    row('Status', visit.status.replace('_', ' '));
+    row('Scheduled date', `${visit.scheduled_date}${visit.time_window ? ` - ${visit.time_window}` : ''}`);
+    if (visit.started_at) row('Started', fmtDateTime(visit.started_at));
+    if (visit.finished_at) row('Completed', fmtDateTime(visit.finished_at));
+    if (visit.duration_minutes != null) row('Time on site', `${visit.duration_minutes} minutes`);
+    if (visit.notes) row('Notes', visit.notes);
+    if (job) row('Recurring schedule', `${job.frequency} - ${job.contract_years}-year contract (${job.start_date} to ${job.end_date}) - default gardener: ${job.default_gardener_name || '-'}`);
+
+    // Tasks
+    if (tasks.length) {
+      heading(`Tasks (${tasks.filter((t) => t.status === 'done').length}/${tasks.length} done)`);
+      tasks.forEach((t) => row(t.title, `${t.status.replace('_', ' ')}${t.description ? ` - ${t.description}` : ''}`));
+    }
+
+    // GPS + map link
+    if (gpsPoints.length) {
+      heading('GPS log');
+      gpsPoints.forEach((g) => row(g.kind, `${g.lat.toFixed(5)}, ${g.lng.toFixed(5)}  -  ${fmtDateTime(g.recorded_at)}`));
+      if (mapLink) {
+        ensure(16);
+        doc.fillColor(GREEN).font('Helvetica').fontSize(9).text('View job location on map', { link: mapLink, underline: true });
+        doc.fillColor(INK);
+      }
+    }
+
+    // Comments
+    if (comments.length) {
+      heading('Comments');
+      comments.forEach((c) => {
+        ensure(34);
+        doc.fillColor(INK).font('Helvetica-Bold').fontSize(10).text(clean(c.author_name), { continued: true })
+          .font('Helvetica').fillColor(MUTED).fontSize(9).text(`  (${clean(c.author_role)}) - ${fmtDateTime(c.created_at)}`);
+        doc.fillColor(INK).font('Helvetica').fontSize(10).text(clean(c.body));
+        doc.moveDown(0.3);
+      });
+    }
+
+    // Photos
+    heading(`Photos (${photos.length})`);
+    if (!photos.length) {
+      doc.fillColor(MUTED).font('Helvetica').fontSize(10).text('No photos were uploaded for this job.');
+    } else {
+      photos.forEach((ph) => {
+        const rec = photoBytes[ph.id];
+        const caption = `${fmtDateTime(ph.created_at)}${ph.caption ? ` - ${clean(ph.caption)}` : ''} - by ${clean(ph.uploader_name) || 'unknown'}`;
+        if (rec && /jpe?g|png/i.test(rec.mime)) {
+          ensure(250);
+          try {
+            doc.image(rec.data, left, doc.y, { fit: [Math.min(340, cw), 230] });
+            doc.y += 236;
+          } catch (e) {
+            ensure(16);
+            doc.fillColor(MUTED).font('Helvetica').fontSize(9).text(`[Could not render image ${clean(ph.filename)}]`);
+          }
+        } else {
+          ensure(16);
+          doc.fillColor(MUTED).font('Helvetica').fontSize(9).text(`[Photo ${clean(ph.filename)}${rec ? ` - ${rec.mime}` : ''} - not embeddable]`);
+        }
+        doc.fillColor(MUTED).font('Helvetica').fontSize(8).text(caption, { width: cw });
+        doc.moveDown(0.5);
+      });
+    }
+
+    doc.moveDown(1);
+    doc.fillColor(MUTED).font('Helvetica').fontSize(8).text(`Generated by GardeningMgt on ${fmtDateTime(new Date())}.`);
+    doc.end();
+  });
+}
+
+module.exports = { loadReportData, renderReportHtml, renderReportPdf, archiveToOneDrive };

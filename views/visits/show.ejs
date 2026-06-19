@@ -49,7 +49,7 @@
       (<%= fmtDateTime(visit.started_at) %> → <%= fmtDateTime(visit.finished_at) %>).</p>
     <div class="btn-row">
       <a class="btn btn-primary" href="/visits/<%= visit.id %>/report" target="_blank">📄 View report</a>
-      <a class="btn" href="/visits/<%= visit.id %>/report?download=1">⬇ Download report</a>
+      <a class="btn" href="/visits/<%= visit.id %>/report?download=1">⬇ Download PDF</a>
       <form method="post" action="/visits/<%= visit.id %>/timer/start" class="gps-form inline">
         <input type="hidden" name="lat"><input type="hidden" name="lng">
         <button class="btn">↻ Restart timer</button>
