@@ -38,11 +38,21 @@ router.get('/', asyncHandler(async (req, res) => {
   const date = req.query.date || '';     // exact day (date picker)
   const upto = req.query.upto || '';     // on/before this day (Today + overdue)
   const showAll = req.query.all === '1'; // entire history + future
+  // Drill-down filters (used by the Reports "visits by status" links): an
+  // exact status and/or a from–to date window.
+  const status = VISIT_STATUSES.includes(req.query.status) ? req.query.status : '';
+  const from = req.query.from || '';
+  const to = req.query.to || '';
   const gardenerId = staff ? (req.query.gardener_id || '') : String(req.user.id);
   const where = [];
   const args = [];
   if (gardenerId) { args.push(Number(gardenerId)); where.push(`v.gardener_id = $${args.length}`); }
-  if (date) {
+  if (status) { args.push(status); where.push(`v.status = $${args.length}`); }
+  if (from || to) {
+    // A from–to window takes precedence over the quick scopes.
+    if (from) { args.push(from); where.push(`v.scheduled_date >= $${args.length}`); }
+    if (to) { args.push(to); where.push(`v.scheduled_date <= $${args.length}`); }
+  } else if (date) {
     args.push(date); where.push(`v.scheduled_date = $${args.length}`);
   } else if (upto) {
     args.push(upto); where.push(`v.scheduled_date <= $${args.length}`);
@@ -73,9 +83,13 @@ router.get('/', asyncHandler(async (req, res) => {
     if (!g || g.date !== v.scheduled_date) { g = { date: v.scheduled_date, items: [] }; groups.push(g); }
     g.items.push(v);
   }
+  // Reordering only makes sense for a single gardener's plain day view, not a
+  // status / date-range drill-down that can span many days.
+  const filtered = !!(status || from || to);
   res.render('visits/index', {
     title: 'Visits / Jobs', visits, groups, gardeners, properties, staff,
-    date, upto, showAll, gardenerId, today: todayStr, canReorder: !!gardenerId,
+    date, upto, showAll, status, from, to, gardenerId, today: todayStr,
+    canReorder: !!gardenerId && !filtered,
   });
 }));
 
@@ -318,7 +332,15 @@ router.get('/:id/report', asyncHandler(async (req, res) => {
     return res.status(404).render('error', { title: 'Not found', message: 'Report not found.' });
   }
   const data = await loadReportData(visit.id);
-  res.send(await renderReportHtml(data));
+  const html = await renderReportHtml(data);
+  // ?download=1 saves the report as a file instead of opening it in the tab.
+  if (req.query.download === '1') {
+    const slug = String(visit.property_name || 'job')
+      .replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'job';
+    res.set('Content-Disposition',
+      `attachment; filename="completion-report-${slug}-${visit.scheduled_date}.html"`);
+  }
+  res.type('html').send(html);
 }));
 
 /**

@@ -66,6 +66,17 @@
 </details>
 <% } %>
 
+<% if (status || from || to) { %>
+<div class="card filter-active">
+  <div>Showing
+    <% if (status) { %><span class="status status-<%= status %>"><%= status.replace('_',' ') %></span> <% } %>
+    visits<% if (from || to) { %> · <%= from || '…' %> → <%= to || '…' %><% } %>
+    · <strong><%= visits.length %></strong> found
+  </div>
+  <a class="btn btn-sm" href="/visits">✕ Clear filter</a>
+</div>
+<% } %>
+
 <% groups.forEach(group => { %>
   <div class="day-group">
     <div class="day-head">

@@ -1284,3 +1284,13 @@ body { overscroll-behavior-y: none; }
   .filter-row label { min-width: 0; width: 100%; }
   .filter-row > button { width: 100%; }
 }
+
+/* Active drill-down filter banner on the Jobs list. */
+.filter-active {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.filter-active > div { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
