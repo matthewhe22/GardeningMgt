@@ -44,6 +44,11 @@ app.use((req, res, next) => {
     "style-src 'self' 'unsafe-inline'; " +
     "script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'self'");
   if (process.env.VERCEL) res.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  // Rendered HTML pages must always be revalidated so a deploy shows up
+  // immediately instead of being served stale from the browser cache. Static
+  // assets (served later by express.static) and /uploads override this with
+  // their own long-lived caching.
+  res.set('Cache-Control', 'no-cache');
   next();
 });
 

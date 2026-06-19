@@ -1,8 +1,8 @@
 // GardeningMgt service worker: app-shell + static caching so the UI loads
 // offline, with a friendly offline fallback for navigations. (Form POSTs are
 // not queued — they require connectivity; the offline page tells the user.)
-const CACHE = 'gmgt-v2';
-const STATIC = ['/css/style.css', '/js/app.js', '/manifest.json', '/icon.svg', '/offline.html'];
+const CACHE = 'gmgt-v3';
+const STATIC = ['/manifest.json', '/icon.svg', '/offline.html'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(STATIC)).then(() => self.skipWaiting()));
@@ -20,10 +20,26 @@ self.addEventListener('fetch', (e) => {
   if (request.method !== 'GET') return; // never cache mutations
 
   const url = new URL(request.url);
-  // Static assets: stale-while-revalidate — serve fast from cache but always
-  // refresh in the background so CSS/JS updates roll out on the next load
-  // (cache-first used to pin users to a stale app.js after a deploy).
-  if (STATIC.includes(url.pathname) || url.pathname.startsWith('/css/') || url.pathname.startsWith('/js/')) {
+  // CSS/JS are network-first: always take the freshly deployed file when online
+  // (the ?v=<deploy> query also makes each deploy a new URL), and fall back to
+  // the cached copy only when offline. This guarantees a deploy is never masked
+  // by a stale cached asset.
+  if (url.pathname.startsWith('/css/') || url.pathname.startsWith('/js/')) {
+    e.respondWith(
+      fetch(request)
+        .then((res) => {
+          if (res && res.ok) {
+            const copy = res.clone();
+            caches.open(CACHE).then((cache) => cache.put(request, copy));
+          }
+          return res;
+        })
+        .catch(() => caches.match(request))
+    );
+    return;
+  }
+  // Other static assets (manifest, icon, offline page): stale-while-revalidate.
+  if (STATIC.includes(url.pathname)) {
     e.respondWith(
       caches.open(CACHE).then((cache) =>
         cache.match(request).then((hit) => {
