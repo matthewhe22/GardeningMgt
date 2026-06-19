@@ -984,3 +984,61 @@ body.anon {
 /* Bump default button/control min height to 44px for touch. */
 .btn, select, input[type="date"], input[type="text"], input[type="email"], input[type="password"], input[type="number"] { min-height: 44px; }
 .btn { display: inline-flex; align-items: center; justify-content: center; }
+
+/* --------------------------------------------------------------------------
+   Dashboard lists — reuse .job-row flex rows for the visit/task/issue cards.
+   Tables collapsed too narrowly on phones (per-word address wrapping); the
+   stacked flex-row pattern reads cleanly from ~370px up through desktop.
+   -------------------------------------------------------------------------- */
+
+.card .job-list { gap: 0; margin: 4px 0 12px; }
+.card .job-list:last-child { margin-bottom: 0; }
+
+/* Compact rows with light dividers instead of the lifted standalone card look. */
+.card .job-row {
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 4px;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+}
+.card .job-list .job-row:first-child { padding-top: 4px; }
+.card .job-list .job-row:last-child { border-bottom: 0; padding-bottom: 4px; }
+.card .job-row:hover { box-shadow: none; transform: none; background: #fbfaf7; }
+.card .job-row--static { cursor: default; }
+.card .job-row--static:hover { background: transparent; }
+
+/* The route badge sits centred against the first text line. */
+.card .job-row > .route-no { margin-top: 1px; }
+
+/* Main column: let the property/address wrap as normal multi-word text —
+   never collapse to one word per line, never force a single clipped line. */
+.card .job-row-main { gap: 1px; }
+.card .job-row-main strong { line-height: 1.35; overflow-wrap: anywhere; }
+.card .job-row-main .muted {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+}
+
+/* Meta column: pills aligned to the top-right, wrapping gracefully if needed. */
+.card .job-row-meta { align-items: flex-end; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+
+/* Phone: keep the route badge + main text on one row, pills drop beneath and
+   align under the text (no awkward fixed indent). */
+@media (max-width: 600px) {
+  .card .job-row { flex-wrap: wrap; }
+  .card .job-row-meta {
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    width: 100%;
+    order: 4;
+    gap: 8px;
+    margin-top: 2px;
+  }
+  /* Indent the pills to line up under the main text when a route badge leads. */
+  .card .job-row > .route-no ~ .job-row-meta { padding-left: 38px; }
+}

@@ -4,54 +4,74 @@
 <div class="grid">
   <section class="card">
     <h2>Today's visits<% if (staff) { %> (all gardeners)<% } %></h2>
-    <% if (!todayVisits.length) { %><p class="muted">No visits scheduled for today.</p><% } %>
-    <table class="table">
+    <% if (!todayVisits.length) { %>
+      <p class="muted">No visits scheduled for today.</p>
+    <% } else { %>
+    <div class="job-list">
       <% todayVisits.forEach(v => { %>
-      <tr>
-        <td><span class="route-no"><%= v.route_order || '–' %></span></td>
-        <td>
-          <a href="/visits/<%= v.id %>"><strong><%= v.property_name %></strong></a><br>
+      <a class="job-row" href="/visits/<%= v.id %>">
+        <span class="route-no"><%= v.route_order || '–' %></span>
+        <span class="job-row-main">
+          <strong><%= v.property_name %></strong>
           <span class="muted"><%= v.address %><% if (v.time_window) { %> · <%= v.time_window %><% } %></span>
-        </td>
-        <% if (staff) { %><td><%= v.gardener_name || 'Unassigned' %></td><% } %>
-        <td><span class="status status-<%= v.status %>"><%= v.status.replace('_',' ') %></span></td>
-      </tr>
+          <% if (staff) { %><span class="muted"><%= v.gardener_name || 'Unassigned' %></span><% } %>
+        </span>
+        <span class="job-row-meta">
+          <span class="status status-<%= v.status %>"><%= v.status.replace('_',' ') %></span>
+        </span>
+      </a>
       <% }) %>
-    </table>
+    </div>
+    <% } %>
   </section>
 
   <section class="card">
     <h2>Open tasks</h2>
-    <% if (!myTasks.length) { %><p class="muted">Nothing pending. 🎉</p><% } %>
-    <table class="table">
+    <% if (!myTasks.length) { %>
+      <p class="muted">Nothing pending. 🎉</p>
+    <% } else { %>
+    <div class="job-list">
       <% myTasks.forEach(t => { %>
-      <tr>
-        <td>
-          <% if (t.visit_id) { %><a href="/visits/<%= t.visit_id %>"><%= t.title %></a>
-          <% } else { %><%= t.title %><% } %>
-          <% if (t.property_name) { %><br><span class="muted"><%= t.property_name %></span><% } %>
-        </td>
-        <td class="muted"><%= t.due_date || t.scheduled_date || '' %></td>
-        <td><span class="status status-<%= t.status %>"><%= t.status.replace('_',' ') %></span></td>
-      </tr>
+      <% if (t.visit_id) { %>
+      <a class="job-row" href="/visits/<%= t.visit_id %>">
+      <% } else { %>
+      <div class="job-row job-row--static">
+      <% } %>
+        <span class="job-row-main">
+          <strong><%= t.title %></strong>
+          <% if (t.property_name) { %><span class="muted"><%= t.property_name %></span><% } %>
+          <% if (t.due_date || t.scheduled_date) { %><span class="muted"><%= t.due_date || t.scheduled_date %></span><% } %>
+        </span>
+        <span class="job-row-meta">
+          <span class="status status-<%= t.status %>"><%= t.status.replace('_',' ') %></span>
+        </span>
+      <% if (t.visit_id) { %></a><% } else { %></div><% } %>
       <% }) %>
-    </table>
+    </div>
+    <% } %>
     <a class="btn" href="/tasks">All tasks →</a>
   </section>
 
   <section class="card">
     <h2>Open issues</h2>
-    <% if (!openIssues.length) { %><p class="muted">No open issues.</p><% } %>
-    <table class="table">
+    <% if (!openIssues.length) { %>
+      <p class="muted">No open issues.</p>
+    <% } else { %>
+    <div class="job-list">
       <% openIssues.forEach(i => { %>
-      <tr>
-        <td><a href="/issues/<%= i.id %>"><%= i.title %></a>
-          <% if (i.property_name) { %><br><span class="muted"><%= i.property_name %></span><% } %></td>
-        <td><span class="prio prio-<%= i.priority %>"><%= i.priority %></span></td>
-        <td><span class="status status-<%= i.status %>"><%= i.status.replace('_',' ') %></span></td>
-      </tr>
+      <a class="job-row" href="/issues/<%= i.id %>">
+        <span class="job-row-main">
+          <strong><%= i.title %></strong>
+          <% if (i.property_name) { %><span class="muted"><%= i.property_name %></span><% } %>
+        </span>
+        <span class="job-row-meta">
+          <span class="prio prio-<%= i.priority %>"><%= i.priority %></span>
+          <span class="status status-<%= i.status %>"><%= i.status.replace('_',' ') %></span>
+        </span>
+      </a>
       <% }) %>
-    </table>
+    </div>
+    <% } %>
     <a class="btn" href="/issues">All issues →</a>
   </section>
 </div>
