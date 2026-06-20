@@ -8,6 +8,7 @@ const { currentUser, requireLogin, isStaff } = require('./auth');
 const { sendRemindersForDate } = require('./reminders');
 const { asyncHandler } = require('./asyncHandler');
 const { csrfProtection } = require('./csrf');
+const storage = require('./storage');
 const { today: businessToday, fmtDateTime, fmtDate } = require('./time');
 
 const app = express();
@@ -121,6 +122,18 @@ app.get('/uploads/:filename', requireLogin, asyncHandler(async (req, res) => {
   // Filenames are unique, immutable content keys, so the browser can keep them
   // for a long time and never re-fetch — repeat photo views become instant.
   res.set('Cache-Control', 'private, max-age=31536000, immutable');
+  // Photos stored in object storage keep an empty `data` buffer — stream those
+  // from the bucket (through the function, so the auth check above still gates
+  // access); inline bytes are sent directly.
+  if (storage.enabled() && photo.data && photo.data.length === 0) {
+    try {
+      const body = await storage.getObjectStream(req.params.filename);
+      body.on('error', () => { if (!res.headersSent) res.status(502).end(); });
+      return body.pipe(res);
+    } catch (e) {
+      return res.status(404).end();
+    }
+  }
   res.send(photo.data);
 }));
 

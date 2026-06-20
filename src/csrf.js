@@ -18,17 +18,18 @@ function csrfProtection(req, res, next) {
   // Background JSON GPS pings carry no form and are same-user low-risk; the
   // cron endpoint is authenticated by its bearer secret instead.
   if (/\/gps$/.test(req.path) || req.path.startsWith('/cron/')) return next();
-  // Multipart bodies aren't parsed yet here — those routes call assertCsrf()
-  // after multer has populated req.body._csrf.
-  if ((req.get('content-type') || '').startsWith('multipart/form-data')) return next();
-
+  // Multipart bodies aren't parsed yet here, so the token rides in the query
+  // string (app.js appends ?_csrf=… to multipart form actions). Validating it
+  // now rejects forged cross-site uploads BEFORE multer buffers megabytes of
+  // files into memory.
+  // (Routes still call assertCsrf() after multer as defence in depth.)
   try { assertCsrf(req); return next(); }
   catch (err) { return next(err); }
 }
 
-/** Throw EBADCSRFTOKEN unless req carries a valid token (body/header). */
+/** Throw EBADCSRFTOKEN unless req carries a valid token (body/query/header). */
 function assertCsrf(req) {
-  const sent = req.body?._csrf || req.get('X-CSRF-Token');
+  const sent = req.body?._csrf || req.query?._csrf || req.get('X-CSRF-Token');
   if (sent && typeof sent === 'string' && req.session?.csrf && safeEqual(sent, req.session.csrf)) return;
   const err = new Error('Invalid CSRF token');
   err.code = 'EBADCSRFTOKEN';

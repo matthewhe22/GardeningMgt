@@ -195,7 +195,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
   res.render('visits/show', {
     title: `Job #${visit.id} — ${visit.property_name}`,
     visit, tasks, photos, comments, photosByComment, invoice, gardeners, gpsPoints, job,
-    staff: isStaff(req.user), flash: req.query.error || null,
+    staff: isStaff(req.user), flash: req.query.error || null, warning: req.query.warning || null,
   });
 }));
 
@@ -223,20 +223,35 @@ router.post('/:id/update', requireRole('supervisor'), asyncHandler(async (req, r
   if (['completed', 'skipped', 'cancelled'].includes(status) && status !== visit.status) {
     await advanceRecurringJob(visit, req.user.id, status === 'completed');
   }
-  res.redirect(`/visits/${visit.id}`);
+  const busy = status === 'scheduled'
+    ? await dayConflicts(gardener_id ? Number(gardener_id) : null, scheduled_date, visit.id) : 0;
+  res.redirect(`/visits/${visit.id}${busy ? '?warning=busy' : ''}`);
 }));
+
+// How many *other* scheduled visits a gardener already has on a day — used to
+// warn (not block) about double-booking when reassigning or rescheduling.
+async function dayConflicts(gardenerId, date, exceptVisitId) {
+  if (!gardenerId || !date) return 0;
+  const { c } = await q1(
+    `SELECT COUNT(*)::int AS c FROM visits
+     WHERE gardener_id = $1 AND scheduled_date = $2 AND status = 'scheduled' AND id <> $3`,
+    [gardenerId, date, exceptVisitId]);
+  return c;
+}
 
 // Reschedule: the assigned gardener (or staff) can set the date of a visit.
 router.post('/:id/reschedule', asyncHandler(async (req, res) => {
   const visit = await getVisit(req.params.id);
   if (!visit || !canSeeVisit(req.user, visit)) return res.redirect('/visits');
   const date = req.body.scheduled_date;
+  let busy = 0;
   if (isValidDate(date)) {
     await q('UPDATE visits SET scheduled_date = $1, route_order = NULL WHERE id = $2', [date, visit.id]);
     await logActivity(req.user.id, 'visit.reschedule', 'visit', visit.id,
       `Moved job #${visit.id} from ${visit.scheduled_date} to ${date}`);
+    busy = await dayConflicts(visit.gardener_id, date, visit.id);
   }
-  res.redirect(`/visits/${visit.id}`);
+  res.redirect(`/visits/${visit.id}${busy ? '?warning=busy' : ''}`);
 }));
 
 // Status shortcut (gardeners: skip; staff: any). Advances the contract on a

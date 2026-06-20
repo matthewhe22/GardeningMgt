@@ -52,7 +52,27 @@ normal Node.js server.
    (20:00 UTC → `/cron/reminders`, ≈ 06:00 Melbourne / 07:00 during daylight saving;
    Vercel cron is UTC-only so the local time drifts ±1h across DST).
 
-Photos are stored in PostgreSQL (`bytea`), so no blob storage setup is needed.
+Photos are stored in PostgreSQL (`bytea`) by default, so no blob storage setup
+is needed to get started.
+
+### Optional: store photos in object storage (recommended at scale)
+
+Keeping image bytes in Postgres bloats the database and meters egress on every
+view. To offload them to any S3-compatible bucket (Cloudflare R2, AWS S3,
+Supabase Storage, MinIO), set these env vars — when `S3_BUCKET` is present the
+app stores new uploads in the bucket automatically (nothing changes until it
+is set):
+
+| Variable | Notes |
+|---|---|
+| `S3_BUCKET` | bucket name (enables object storage) |
+| `S3_REGION` | region (default `us-east-1`; R2 uses `auto`) |
+| `S3_ENDPOINT` | custom endpoint for R2/Supabase/MinIO (omit for AWS) |
+| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | credentials |
+| `S3_PREFIX` | optional key prefix (default `photos/`) |
+
+To move photos already in the database into the bucket, run once after
+configuring the vars: `npm run migrate:photos`.
 
 ## Run locally / on a normal server
 

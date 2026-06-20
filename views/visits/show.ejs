@@ -12,6 +12,9 @@
       <span class="status status-in_progress">replacement for <%= job.default_gardener_name %></span>
     <% } %>
   </div>
+  <% if (locals.warning === 'busy') { %>
+    <p class="alert alert-error">⚠ Heads up: this gardener already has other visits scheduled that day — check for a clash.</p>
+  <% } %>
   <% if (locals.flash === 'photos') { %>
     <p class="alert alert-error">⚠ Add at least one photo for this site before completing the job.</p>
   <% } else if (locals.flash === 'confirm') { %>

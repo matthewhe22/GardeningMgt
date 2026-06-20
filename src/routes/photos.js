@@ -3,6 +3,7 @@ const { q, q1 } = require('../db');
 const { isStaff } = require('../auth');
 const { logActivity } = require('../activity');
 const { asyncHandler } = require('../asyncHandler');
+const storage = require('../storage');
 
 const router = express.Router();
 
@@ -11,12 +12,16 @@ const router = express.Router();
 router.post('/:id/delete', asyncHandler(async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) return res.redirect('/photos');
-  const photo = await q1('SELECT id, uploaded_by, visit_id, issue_id FROM photos WHERE id = $1', [id]);
+  const photo = await q1('SELECT id, filename, uploaded_by, visit_id, issue_id, octet_length(data) AS dlen FROM photos WHERE id = $1', [id]);
   if (!photo) return res.redirect('/photos');
   if (!isStaff(req.user) && photo.uploaded_by !== req.user.id) {
     return res.status(403).render('error', { title: 'Forbidden', message: 'You can only delete your own photos.' });
   }
   await q('DELETE FROM photos WHERE id = $1', [id]);
+  // Best-effort: drop the bucket object too when this photo lived in storage.
+  if (storage.enabled() && photo.dlen === 0) {
+    try { await storage.deleteObject(photo.filename); } catch (_) { /* best-effort */ }
+  }
   await logActivity(req.user.id, 'photo.delete', photo.visit_id ? 'visit' : 'issue',
     photo.visit_id || photo.issue_id || null, `Deleted photo #${id}`);
   if (photo.visit_id) return res.redirect(`/visits/${photo.visit_id}#photos`);

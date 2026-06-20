@@ -2,12 +2,23 @@
 const CSRF = document.querySelector('meta[name="csrf-token"]')?.content || '';
 document.querySelectorAll('form').forEach((form) => {
   if ((form.method || '').toLowerCase() !== 'post') return;
-  if (form.querySelector('input[name="_csrf"]')) return;
-  const i = document.createElement('input');
-  i.type = 'hidden';
-  i.name = '_csrf';
-  i.value = CSRF;
-  form.appendChild(i);
+  if (!form.querySelector('input[name="_csrf"]')) {
+    const i = document.createElement('input');
+    i.type = 'hidden';
+    i.name = '_csrf';
+    i.value = CSRF;
+    form.appendChild(i);
+  }
+  // Multipart uploads: the hidden field lands in the (unparsed) body, so also
+  // carry the token in the query string where it can be checked before multer
+  // buffers the files.
+  if ((form.enctype || '').includes('multipart')) {
+    try {
+      const u = new URL(form.getAttribute('action') || location.href, location.origin);
+      u.searchParams.set('_csrf', CSRF);
+      form.setAttribute('action', u.pathname + u.search);
+    } catch (_) { /* leave action as-is */ }
+  }
 });
 
 // --- Confirm destructive actions (forms/links marked data-confirm) ---
