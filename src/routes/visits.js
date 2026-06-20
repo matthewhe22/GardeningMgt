@@ -8,6 +8,7 @@ const { loadReportData, renderReportHtml, renderReportPdf, archiveToOneDrive } =
 const { asyncHandler } = require('../asyncHandler');
 const { assertCsrf } = require('../csrf');
 const { optimizeRouteRoad } = require('../routeOptimizer');
+const { runInBackground } = require('../background');
 const { today } = require('../time');
 
 const router = express.Router();
@@ -325,8 +326,10 @@ router.post('/:id/timer/stop', asyncHandler(async (req, res) => {
     [visit.id, summary]);
 
   await advanceRecurringJob(visit, req.user.id, true);
-  // Archive report + photos to OneDrive (best-effort; never blocks completion).
-  await archiveToOneDrive(visit.id);
+  // Archive report + photos to OneDrive in the background (best-effort) so the
+  // gardener's "complete job" tap returns immediately instead of waiting on the
+  // report render + sequential Graph uploads.
+  runInBackground(() => archiveToOneDrive(visit.id), `onedrive archive #${visit.id}`);
   res.redirect(`/visits/${visit.id}`);
 }));
 

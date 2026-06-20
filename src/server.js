@@ -74,11 +74,9 @@ app.use(cookieSession({
 // unread notification count for every request.
 app.use(asyncHandler(async (req, res, next) => {
   await ready();
-  res.locals.user = await currentUser(req);
-  res.locals.unreadCount = res.locals.user
-    ? (await q1('SELECT COUNT(*)::int AS c FROM notifications WHERE user_id = $1 AND read_at IS NULL',
-        [res.locals.user.id])).c
-    : 0;
+  const user = await currentUser(req);
+  res.locals.user = user;
+  res.locals.unreadCount = user ? user.unread_count : 0;
   res.locals.currentPath = req.path;
   // Timestamp formatters for views (render every time in the business timezone).
   res.locals.fmtDateTime = fmtDateTime;
@@ -89,6 +87,8 @@ app.use(asyncHandler(async (req, res, next) => {
 // Vercel Cron (or any scheduler) hits this daily; Vercel sends
 // "Authorization: Bearer $CRON_SECRET" automatically when the env var is set.
 // Fail closed: without a configured secret the endpoint is disabled.
+// Scheduled at 20:00 UTC (vercel.json) ≈ 06:00 Melbourne (AEST) / 07:00 (AEDT);
+// Vercel cron is UTC-only, so the exact local time drifts ±1h across DST.
 app.get('/cron/reminders', asyncHandler(async (req, res) => {
   const secret = process.env.CRON_SECRET;
   if (!secret || req.headers.authorization !== `Bearer ${secret}`) {

@@ -15,25 +15,33 @@ const { sendSms, sendEmail } = require('./notify');
  */
 async function sendRemindersForDate(date, opts = {}) {
   const { actorId = null, force = false } = opts;
+  // Join the gardener's contact details into the claim so there's no per-visit
+  // user lookup (was an N+1) when sending SMS/email.
   const claimed = await q(
     `UPDATE visits v SET reminder_sent_at = now()
-     FROM properties p
-     WHERE v.property_id = p.id
+     FROM properties p, users u
+     WHERE v.property_id = p.id AND u.id = v.gardener_id
        AND v.scheduled_date = $1 AND v.status = 'scheduled' AND v.gardener_id IS NOT NULL
        AND ($2 OR v.reminder_sent_at IS NULL)
-     RETURNING v.id, v.gardener_id, v.time_window, p.name AS property_name, p.address`,
+     RETURNING v.id, v.gardener_id, v.time_window, p.name AS property_name, p.address,
+       u.phone AS gardener_phone, u.email AS gardener_email`,
     [date, force]
   );
   if (!claimed.length) return 0;
 
-  const insert = `INSERT INTO notifications (user_id, visit_id, type, message) VALUES ($1, $2, 'reminder', $3)`;
+  const msgFor = (v) =>
+    `Reminder: visit ${v.property_name}, ${v.address} on ${date}${v.time_window ? ` (${v.time_window})` : ''}`;
+
+  // One multi-row insert for all in-app notifications instead of N inserts.
+  const values = claimed.map((_, i) => `($${i * 3 + 1}, $${i * 3 + 2}, 'reminder', $${i * 3 + 3})`).join(', ');
+  const params = claimed.flatMap((v) => [v.gardener_id, v.id, msgFor(v)]);
+  await pool.query(`INSERT INTO notifications (user_id, visit_id, type, message) VALUES ${values}`, params);
+
+  // Best-effort external delivery; no-ops unless a provider is configured.
   for (const v of claimed) {
-    const when = v.time_window ? ` (${v.time_window})` : '';
-    const msg = `Reminder: visit ${v.property_name}, ${v.address} on ${date}${when}`;
-    await pool.query(insert, [v.gardener_id, v.id, msg]);
-    // Best-effort external delivery; no-ops unless a provider is configured.
-    const u = await q1('SELECT phone, email FROM users WHERE id = $1', [v.gardener_id]);
-    if (u) { await sendSms(u.phone, msg); await sendEmail(u.email, 'Visit reminder', msg); }
+    const msg = msgFor(v);
+    await sendSms(v.gardener_phone, msg);
+    await sendEmail(v.gardener_email, 'Visit reminder', msg);
   }
   await logActivity(actorId, actorId ? 'reminder.bulk' : 'reminder.auto', 'visit', null,
     `Sent ${claimed.length} visit reminder(s) for ${date}`);

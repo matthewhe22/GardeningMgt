@@ -33,6 +33,15 @@ const pool = new Pool({
     : (process.env.VERCEL ? (usingPooler ? 8 : 3) : 10),
 });
 
+// On serverless, many concurrent instances each holding direct connections can
+// exhaust Postgres' connection slots. Warn loudly if we're on Vercel without a
+// pooler so this scaling cliff shows up in the logs rather than as random 500s.
+if (process.env.VERCEL && !usingPooler && !isLocal) {
+  console.warn('[db] WARNING: running on Vercel with a direct (non-pooler) DATABASE_URL. ' +
+    'Use the connection pooler to avoid exhausting Postgres connections under serverless ' +
+    'concurrency (e.g. Supabase port 6543 with ?pgbouncer=true, or a host containing "pooler").');
+}
+
 /** All rows. */
 const q = async (sql, params = []) => (await pool.query(sql, params)).rows;
 /** First row or null. */

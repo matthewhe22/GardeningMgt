@@ -30,21 +30,27 @@ normal Node.js server.
 ## Deploy to Vercel (with Supabase Postgres)
 
 1. **Database**: create a [Supabase](https://supabase.com) project (free tier works) and
-   copy the *direct connection string*. If the password contains special characters
-   (`@`, `#`, …) they must be URL-encoded (`@` → `%40`).
+   copy the **connection-pooler** string (Supabase → Database → Connection pooling,
+   port `6543`). Serverless functions spin up many concurrent instances, so a
+   pooler is strongly recommended — a direct (`5432`) connection can exhaust
+   Postgres' connection slots under load (the app logs a warning if it detects this
+   on Vercel). If the password contains special characters (`@`, `#`, …) they must be
+   URL-encoded (`@` → `%40`).
 2. **Import the repo** at [vercel.com/new](https://vercel.com/new) (framework preset:
    *Other*; no build command needed).
 3. **Environment variables** (Project → Settings → Environment Variables):
    | Variable | Value |
    |---|---|
-   | `DATABASE_URL` | `postgresql://postgres:PASSWORD@db.xxxx.supabase.co:5432/postgres` |
+   | `DATABASE_URL` | pooler URL, e.g. `postgresql://postgres.xxxx:PASSWORD@aws-0-REGION.pooler.supabase.com:6543/postgres?pgbouncer=true` |
+   | `DB_SKIP_INIT` | `1` once the schema exists, so cold starts skip the schema/migration check |
    | `SESSION_SECRET` | a long random string |
    | `CRON_SECRET` | a long random string (protects the reminder cron endpoint) |
 4. **Deploy.** On the first request the app creates all tables and a bootstrap
    admin: **admin@example.com / admin1234** — sign in and change it immediately
    (or set `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` before deploying).
 5. Daily reminders run automatically via the Vercel Cron entry in `vercel.json`
-   (06:00 UTC → `/cron/reminders`).
+   (20:00 UTC → `/cron/reminders`, ≈ 06:00 Melbourne / 07:00 during daylight saving;
+   Vercel cron is UTC-only so the local time drifts ±1h across DST).
 
 Photos are stored in PostgreSQL (`bytea`), so no blob storage setup is needed.
 
