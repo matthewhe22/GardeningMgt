@@ -6,6 +6,7 @@
     <label>From <input type="date" name="from" value="<%= from %>"></label>
     <label>To <input type="date" name="to" value="<%= to %>"></label>
     <button class="btn">Run report</button>
+    <a class="btn" href="/reports/export.csv?from=<%= from %>&to=<%= to %>">⬇ Download CSV</a>
   </form>
 </div>
 

@@ -47,4 +47,32 @@ router.get('/', asyncHandler(async (req, res) => {
   });
 }));
 
+// CSV export of the visits in the selected range (one row per visit).
+router.get('/export.csv', asyncHandler(async (req, res) => {
+  const todayStr = businessToday();
+  const [y, m, d] = todayStr.split('-').map(Number);
+  const defaultFrom = new Date(Date.UTC(y, m - 1, d - 29)).toISOString().slice(0, 10);
+  const from = req.query.from || defaultFrom;
+  const to = req.query.to || todayStr;
+  const rows = await q(`
+    SELECT v.scheduled_date, p.name AS property, p.address, u.name AS gardener,
+           v.status, v.duration_minutes, v.time_window
+    FROM visits v
+    JOIN properties p ON p.id = v.property_id
+    LEFT JOIN users u ON u.id = v.gardener_id
+    WHERE v.scheduled_date BETWEEN $1 AND $2
+    ORDER BY v.scheduled_date, p.name`, [from, to]);
+  // Minimal RFC-4180 quoting: wrap every field, double internal quotes.
+  const esc = (val) => `"${String(val == null ? '' : val).replace(/"/g, '""')}"`;
+  const header = ['Date', 'Property', 'Address', 'Gardener', 'Status', 'Minutes', 'Time window'];
+  const lines = [header.map(esc).join(',')];
+  for (const r of rows) {
+    lines.push([r.scheduled_date, r.property, r.address, r.gardener || 'Unassigned',
+      r.status, r.duration_minutes == null ? '' : r.duration_minutes, r.time_window || ''].map(esc).join(','));
+  }
+  res.set('Content-Type', 'text/csv; charset=utf-8');
+  res.set('Content-Disposition', `attachment; filename="report-${from}_to_${to}.csv"`);
+  res.send(lines.join('\r\n'));
+}));
+
 module.exports = router;

@@ -77,6 +77,7 @@
   <% if (gpsPoints.length) { %>
     <details><summary class="muted"><%= gpsPoints.length %> GPS point(s) recorded</summary>
       <table class="table">
+        <tr><th>Kind</th><th>Coordinates</th><th>Recorded</th></tr>
         <% gpsPoints.forEach(g => { %>
           <tr><td><%= g.kind %></td><td><%= g.lat.toFixed(5) %>, <%= g.lng.toFixed(5) %></td><td class="muted"><%= fmtDateTime(g.recorded_at) %></td></tr>
         <% }) %>
@@ -129,6 +130,9 @@
           <figcaption>
             <span class="photo-stamp">📅 <%= fmtDateTime(ph.created_at) %></span><br>
             <% if (ph.caption) { %><%= ph.caption %> · <% } %><span class="muted">by <%= ph.uploader_name %></span>
+            <% if (staff || ph.uploaded_by === user.id) { %>
+              <form method="post" action="/photos/<%= ph.id %>/delete" class="inline" data-confirm="Delete this photo?"><button class="link-btn">Delete</button></form>
+            <% } %>
           </figcaption>
         </figure>
       <% }) %>

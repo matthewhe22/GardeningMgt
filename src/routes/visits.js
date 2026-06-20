@@ -45,10 +45,12 @@ router.get('/', asyncHandler(async (req, res) => {
   const from = req.query.from || '';
   const to = req.query.to || '';
   const gardenerId = staff ? (req.query.gardener_id || '') : String(req.user.id);
+  const search = (req.query.search || '').trim();
   const where = [];
   const args = [];
   if (gardenerId) { args.push(Number(gardenerId)); where.push(`v.gardener_id = $${args.length}`); }
   if (status) { args.push(status); where.push(`v.status = $${args.length}`); }
+  if (search) { args.push(`%${search}%`); where.push(`(p.name ILIKE $${args.length} OR p.address ILIKE $${args.length})`); }
   if (from || to) {
     // A from–to window takes precedence over the quick scopes.
     if (from) { args.push(from); where.push(`v.scheduled_date >= $${args.length}`); }
@@ -89,7 +91,7 @@ router.get('/', asyncHandler(async (req, res) => {
   const filtered = !!(status || from || to);
   res.render('visits/index', {
     title: 'Visits / Jobs', visits, groups, gardeners, properties, staff,
-    date, upto, showAll, status, from, to, gardenerId, today: todayStr,
+    date, upto, showAll, status, from, to, search, gardenerId, today: todayStr,
     canReorder: !!gardenerId && !filtered,
   });
 }));
@@ -178,7 +180,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
   // the page costs one round-trip's worth of latency instead of eight.
   const [tasks, photos, comments, commentPhotos, invoice, gardeners, gpsPoints, job] = await Promise.all([
     q('SELECT t.*, u.name AS assignee_name FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id WHERE t.visit_id = $1 ORDER BY t.id', [visit.id]),
-    q('SELECT ph.id, ph.filename, ph.caption, ph.original_name, ph.created_at, u.name AS uploader_name FROM photos ph LEFT JOIN users u ON u.id = ph.uploaded_by WHERE ph.visit_id = $1 AND ph.visit_comment_id IS NULL ORDER BY ph.created_at DESC', [visit.id]),
+    q('SELECT ph.id, ph.filename, ph.caption, ph.original_name, ph.created_at, ph.uploaded_by, u.name AS uploader_name FROM photos ph LEFT JOIN users u ON u.id = ph.uploaded_by WHERE ph.visit_id = $1 AND ph.visit_comment_id IS NULL ORDER BY ph.created_at DESC', [visit.id]),
     q('SELECT c.*, u.name AS author_name, u.role AS author_role FROM visit_comments c LEFT JOIN users u ON u.id = c.user_id WHERE c.visit_id = $1 ORDER BY c.created_at', [visit.id]),
     q('SELECT ph.visit_comment_id, ph.filename, ph.created_at FROM photos ph WHERE ph.visit_id = $1 AND ph.visit_comment_id IS NOT NULL ORDER BY ph.created_at', [visit.id]),
     q1('SELECT * FROM invoices WHERE visit_id = $1 ORDER BY id DESC LIMIT 1', [visit.id]),
@@ -214,7 +216,7 @@ router.post('/:id/update', requireRole('supervisor'), asyncHandler(async (req, r
       finished_at = CASE WHEN $4 = 'completed' AND finished_at IS NULL THEN now() ELSE finished_at END
     WHERE id = $7`,
     [gardener_id || null, scheduled_date, time_window || null, status, notes || null,
-      duration_minutes ? Number(duration_minutes) : visit.duration_minutes, visit.id]);
+      duration_minutes ? Math.max(0, Number(duration_minutes) || 0) : visit.duration_minutes, visit.id]);
   await logActivity(req.user.id, 'visit.update', 'visit', visit.id,
     `Updated visit #${visit.id} (status: ${visit.status} -> ${status})`);
   // Advance the recurring contract when this occurrence reaches a terminal state.

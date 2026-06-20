@@ -24,7 +24,11 @@
   .map-snapshot { max-width: 600px; margin: 4px 0 8px; }
   .map-snapshot svg { width: 100%; height: auto; }
   footer { margin-top: 40px; color: #707b72; font-size: 0.78rem; border-top: 1px solid #e6e4dc; padding-top: 12px; }
-  @media print { .no-print { display: none; } }
+  @media print {
+    .no-print { display: none; }
+    h2 { break-after: avoid; }
+    figure, .comment, table { break-inside: avoid; }
+  }
 </style>
 </head>
 <body>

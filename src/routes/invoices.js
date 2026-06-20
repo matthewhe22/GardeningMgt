@@ -38,21 +38,30 @@ async function invoiceWithItems(id) {
 router.use(requireRole('supervisor'));
 
 router.get('/', asyncHandler(async (req, res) => {
+  const search = (req.query.search || '').trim();
+  const args = [];
+  let cond = '';
+  if (search) { args.push(`%${search}%`); cond = `WHERE inv.number ILIKE $1 OR p.name ILIKE $1`; }
   const invoices = await q(`
     SELECT inv.*, p.name AS property_name, v.scheduled_date,
       (SELECT COALESCE(SUM(quantity * unit_price), 0) FROM invoice_items WHERE invoice_id = inv.id) AS total
     FROM invoices inv
     JOIN visits v ON v.id = inv.visit_id
     JOIN properties p ON p.id = v.property_id
-    ORDER BY inv.created_at DESC LIMIT 200`);
-  res.render('invoices/index', { title: 'Invoices', invoices });
+    ${cond}
+    ORDER BY inv.created_at DESC LIMIT 200`, args);
+  res.render('invoices/index', { title: 'Invoices', invoices, search });
 }));
 
 // Create an invoice for a job, pre-filled with a labour line from the timer.
 router.post('/', asyncHandler(async (req, res) => {
   const visitId = Number(req.body.visit_id);
+  if (!Number.isInteger(visitId)) return res.redirect('/invoices');
   const visit = await q1('SELECT * FROM visits WHERE id = $1', [visitId]);
   if (!visit) return res.redirect('/invoices');
+  // Don't create a second live invoice for the same job (voided ones don't count).
+  const existing = await q1("SELECT id FROM invoices WHERE visit_id = $1 AND status <> 'void' LIMIT 1", [visitId]);
+  if (existing) return res.redirect(`/invoices/${existing.id}`);
   const number = await nextInvoiceNumber();
   const { id: invoiceId } = await q1(
     'INSERT INTO invoices (visit_id, number, created_by) VALUES ($1, $2, $3) RETURNING id',
@@ -76,8 +85,11 @@ router.get('/:id', asyncHandler(async (req, res) => {
 router.post('/:id/items', asyncHandler(async (req, res) => {
   const { description, quantity, unit_price } = req.body;
   if ((description || '').trim()) {
+    // Clamp to non-negative so a stray '-5' can't create negative money.
+    const qty = Math.max(0, Number(quantity) || 1);
+    const price = Math.max(0, Number(unit_price) || 0);
     await q('INSERT INTO invoice_items (invoice_id, description, quantity, unit_price) VALUES ($1, $2, $3, $4)',
-      [req.params.id, description.trim(), Number(quantity) || 1, Number(unit_price) || 0]);
+      [req.params.id, description.trim(), qty, price]);
     await logActivity(req.user.id, 'invoice.item.add', 'invoice', Number(req.params.id),
       `Added line "${description.trim()}" to invoice #${req.params.id}`);
   }

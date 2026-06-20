@@ -10,6 +10,11 @@ const router = express.Router();
 
 router.get('/', asyncHandler(async (req, res) => {
   const status = req.query.status || '';
+  const search = (req.query.search || '').trim();
+  const cond = [];
+  const args = [];
+  if (status) { args.push(status); cond.push(`i.status = $${args.length}`); }
+  if (search) { args.push(`%${search}%`); cond.push(`(i.title ILIKE $${args.length} OR p.name ILIKE $${args.length})`); }
   const [issues, properties, users] = await Promise.all([
     q(`
     SELECT i.*, p.name AS property_name, r.name AS reporter_name, a.name AS assignee_name
@@ -17,15 +22,15 @@ router.get('/', asyncHandler(async (req, res) => {
     LEFT JOIN properties p ON p.id = i.property_id
     LEFT JOIN users r ON r.id = i.reported_by
     LEFT JOIN users a ON a.id = i.assigned_to
-    ${status ? 'WHERE i.status = $1' : ''}
+    ${cond.length ? 'WHERE ' + cond.join(' AND ') : ''}
     ORDER BY (i.status IN ('resolved','closed')),
       CASE i.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
       i.created_at DESC
-    LIMIT 300`, status ? [status] : []),
+    LIMIT 300`, args),
     q('SELECT id, name FROM properties ORDER BY name'),
     q('SELECT id, name FROM users WHERE active ORDER BY name'),
   ]);
-  res.render('issues/index', { title: 'Issues', issues, properties, users, status, staff: isStaff(req.user) });
+  res.render('issues/index', { title: 'Issues', issues, properties, users, status, search, staff: isStaff(req.user) });
 }));
 
 // Anyone can report an issue
@@ -56,7 +61,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
     SELECT c.*, u.name AS author_name FROM issue_comments c
     LEFT JOIN users u ON u.id = c.user_id WHERE c.issue_id = $1 ORDER BY c.created_at`, [issue.id]),
     q(`
-    SELECT ph.id, ph.filename, ph.caption, ph.original_name, ph.created_at, u.name AS uploader_name
+    SELECT ph.id, ph.filename, ph.caption, ph.original_name, ph.created_at, ph.uploaded_by, u.name AS uploader_name
     FROM photos ph
     LEFT JOIN users u ON u.id = ph.uploaded_by WHERE ph.issue_id = $1 ORDER BY ph.created_at DESC`, [issue.id]),
     q('SELECT id, name FROM users WHERE active ORDER BY name'),

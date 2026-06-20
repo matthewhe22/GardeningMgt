@@ -31,9 +31,9 @@
 
   <% if (invoice.status === 'draft') { %>
   <form method="post" action="/invoices/<%= invoice.id %>/items" class="filter-row">
-    <input type="text" name="description" placeholder="Description" required>
-    <input type="number" name="quantity" placeholder="Qty" step="0.01" value="1" required>
-    <input type="number" name="unit_price" placeholder="Unit price" step="0.01" required>
+    <label>Description <input type="text" name="description" placeholder="e.g. Mulch supply" required></label>
+    <label>Qty <input type="number" name="quantity" step="0.01" min="0" value="1" required></label>
+    <label>Unit price <input type="number" name="unit_price" step="0.01" min="0" required></label>
     <button class="btn">Add line</button>
   </form>
   <% } %>

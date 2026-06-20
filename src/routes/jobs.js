@@ -18,6 +18,11 @@ const PREGENERATE = 12;
 router.get('/', asyncHandler(async (req, res) => {
   const staff = isStaff(req.user);
   const today = businessToday();
+  const search = (req.query.search || '').trim();
+  const cond = [];
+  const args = [today];
+  if (!staff) { args.push(req.user.id); cond.push(`j.gardener_id = $${args.length}`); }
+  if (search) { args.push(`%${search}%`); cond.push(`(p.name ILIKE $${args.length} OR p.address ILIKE $${args.length})`); }
   const [jobs, properties, gardeners] = await Promise.all([
     q(`
     SELECT j.*, p.name AS property_name, p.address, p.lots, u.name AS gardener_name,
@@ -31,13 +36,13 @@ router.get('/', asyncHandler(async (req, res) => {
     FROM jobs j
     JOIN properties p ON p.id = j.property_id
     LEFT JOIN users u ON u.id = j.gardener_id
-    ${staff ? '' : 'WHERE j.gardener_id = $2'}
-    ORDER BY j.active DESC, p.name`, staff ? [today] : [today, req.user.id]),
+    ${cond.length ? 'WHERE ' + cond.join(' AND ') : ''}
+    ORDER BY j.active DESC, p.name`, args),
     q('SELECT id, name FROM properties ORDER BY name'),
     q("SELECT id, name FROM users WHERE role = 'gardener' AND active"),
   ]);
   res.render('jobs/index', {
-    title: 'Sites', jobs, properties, gardeners, staff, frequencies: FREQUENCIES,
+    title: 'Sites', jobs, properties, gardeners, staff, search, frequencies: FREQUENCIES,
     flash: req.query.error || null,
   });
 }));

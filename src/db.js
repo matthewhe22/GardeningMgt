@@ -267,6 +267,12 @@ CREATE INDEX IF NOT EXISTS idx_issue_comments_issue ON issue_comments (issue_id)
 CREATE INDEX IF NOT EXISTS idx_invoices_visit ON invoices (visit_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_property ON jobs (property_id);
 
+-- Indexes for hot list/report query shapes (issues board, photo gallery,
+-- date-range reports that aren't scoped to a single gardener).
+CREATE INDEX IF NOT EXISTS idx_issues_status_priority ON issues (status, priority);
+CREATE INDEX IF NOT EXISTS idx_photos_created ON photos (created_at);
+CREATE INDEX IF NOT EXISTS idx_visits_scheduled ON visits (scheduled_date);
+
 -- Prevent duplicate future occurrences of the same job on the same day
 -- (closes the check-then-insert race in rollRecurringJob).
 CREATE UNIQUE INDEX IF NOT EXISTS uq_visits_job_day_scheduled

@@ -46,7 +46,10 @@
         <figure class="photo">
           <a href="/uploads/<%= ph.filename %>" target="_blank"><img src="/uploads/<%= ph.filename %>" alt="<%= ph.caption || ph.original_name %>" loading="lazy"></a>
           <figcaption><span class="photo-stamp">📅 <%= fmtDateTime(ph.created_at) %></span><br>
-            <span class="muted">by <%= ph.uploader_name %></span></figcaption>
+            <span class="muted">by <%= ph.uploader_name %></span>
+            <% if (staff || ph.uploaded_by === user.id) { %>
+              <form method="post" action="/photos/<%= ph.id %>/delete" class="inline" data-confirm="Delete this photo?"><button class="link-btn">Delete</button></form>
+            <% } %></figcaption>
         </figure>
       <% }) %>
     </div>

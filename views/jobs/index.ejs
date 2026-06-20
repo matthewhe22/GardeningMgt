@@ -14,6 +14,13 @@
   </p>
 <% } %>
 
+<div class="card">
+  <form method="get" class="filter-row">
+    <label>Search <input type="text" name="search" value="<%= search %>" placeholder="Site or address"></label>
+    <button class="btn">Search</button>
+  </form>
+</div>
+
 <% if (staff) { %>
 <details class="card">
   <summary><strong>＋ New site</strong></summary>
