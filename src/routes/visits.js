@@ -10,6 +10,7 @@ const { assertCsrf } = require('../csrf');
 const { optimizeRouteRoad } = require('../routeOptimizer');
 const { runInBackground } = require('../background');
 const { today } = require('../time');
+const { pageParam, paginate } = require('../pagination');
 
 const router = express.Router();
 
@@ -62,21 +63,23 @@ router.get('/', asyncHandler(async (req, res) => {
   } else if (!showAll) {
     args.push(todayStr); where.push(`v.scheduled_date >= $${args.length}`);
   }
-  // Every view reads nearest → future (ascending by date), then by visiting
-  // order within the day. The visit list and the filter dropdowns are
-  // independent, so fetch them in parallel to cut page latency.
-  const [visits, gardeners, properties] = await Promise.all([
-    q(`
+  const page = pageParam(req);
+  const visitsSql = `
     SELECT v.*, p.name AS property_name, p.address, p.lat, p.lng, u.name AS gardener_name
     FROM visits v
     JOIN properties p ON p.id = v.property_id
     LEFT JOIN users u ON u.id = v.gardener_id
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-    ORDER BY v.scheduled_date ASC, COALESCE(v.route_order, 999), v.id
-    LIMIT 200`, args),
+    ORDER BY v.scheduled_date ASC, COALESCE(v.route_order, 999), v.id`;
+  // Every view reads nearest → future (ascending by date), then by visiting
+  // order within the day. The visit list and the filter dropdowns are
+  // independent, so fetch them in parallel to cut page latency.
+  const [visitsPage, gardeners, properties] = await Promise.all([
+    paginate(q, visitsSql, args, page),
     q("SELECT id, name FROM users WHERE role = 'gardener' AND active"),
     q('SELECT id, name FROM properties ORDER BY name'),
   ]);
+  const { rows: visits, total, totalPages } = visitsPage;
   // Group consecutive visits by day so the list reads as a per-day route in
   // visiting sequence (route_order). Reordering / optimizing is offered per day
   // only when the list is scoped to a single gardener (one route to order).
@@ -92,7 +95,7 @@ router.get('/', asyncHandler(async (req, res) => {
   res.render('visits/index', {
     title: 'Visits / Jobs', visits, groups, gardeners, properties, staff,
     date, upto, showAll, status, from, to, search, gardenerId, today: todayStr,
-    canReorder: !!gardenerId && !filtered,
+    canReorder: !!gardenerId && !filtered, page, total, totalPages,
   });
 }));
 

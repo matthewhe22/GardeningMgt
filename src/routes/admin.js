@@ -10,6 +10,7 @@ const { asyncHandler } = require('../asyncHandler');
 const { today: businessToday } = require('../time');
 const { assertCsrf } = require('../csrf');
 const { geocodeAddress, sleep } = require('../geocode');
+const { pageParam, paginate } = require('../pagination');
 
 // Per-click cap on the backfill so the request stays under the serverless
 // time limit (Nominatim wants ~1 req/sec). Click again to continue.
@@ -20,11 +21,13 @@ const router = express.Router();
 // --- Activity log & bulk reminders: supervisors and admins ---
 
 router.get('/activity', requireRole('supervisor'), asyncHandler(async (req, res) => {
-  const entries = await q(`
+  const page = pageParam(req);
+  const activitySql = `
     SELECT a.*, u.name AS user_name FROM activity_log a
     LEFT JOIN users u ON u.id = a.user_id
-    ORDER BY a.created_at DESC, a.id DESC LIMIT 300`);
-  res.render('admin/activity', { title: 'Activity log', entries });
+    ORDER BY a.created_at DESC, a.id DESC`;
+  const { rows: entries, total, totalPages } = await paginate(q, activitySql, [], page);
+  res.render('admin/activity', { title: 'Activity log', entries, page, total, totalPages });
 }));
 
 router.post('/reminders/bulk', requireRole('supervisor'), asyncHandler(async (req, res) => {

@@ -3,6 +3,7 @@ const { q, q1 } = require('../db');
 const { requireRole, isStaff } = require('../auth');
 const { logActivity } = require('../activity');
 const { asyncHandler } = require('../asyncHandler');
+const { pageParam, paginate } = require('../pagination');
 
 const router = express.Router();
 
@@ -13,17 +14,18 @@ router.get('/', asyncHandler(async (req, res) => {
   const args = [];
   if (status) { args.push(status); where.push(`t.status = $${args.length}`); }
   if (!staff) { args.push(req.user.id); where.push(`(t.assignee_id = $${args.length} OR v.gardener_id = $${args.length})`); }
-  const tasks = await q(`
+  const page = pageParam(req);
+  const tasksSql = `
     SELECT t.*, u.name AS assignee_name, v.scheduled_date, p.name AS property_name, v.id AS visit_ref
     FROM tasks t
     LEFT JOIN users u ON u.id = t.assignee_id
     LEFT JOIN visits v ON v.id = t.visit_id
     LEFT JOIN properties p ON p.id = v.property_id
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-    ORDER BY (t.status = 'done'), COALESCE(t.due_date, v.scheduled_date, '9999-12-31')
-    LIMIT 300`, args);
+    ORDER BY (t.status = 'done'), COALESCE(t.due_date, v.scheduled_date, '9999-12-31')`;
+  const { rows: tasks, total, totalPages } = await paginate(q, tasksSql, args, page);
   const gardeners = await q("SELECT id, name FROM users WHERE role = 'gardener' AND active");
-  res.render('tasks/index', { title: 'Tasks', tasks, gardeners, staff, status });
+  res.render('tasks/index', { title: 'Tasks', tasks, gardeners, staff, status, page, total, totalPages });
 }));
 
 // Standalone task (not tied to a visit)

@@ -85,6 +85,15 @@ app.use(asyncHandler(async (req, res, next) => {
   // Timestamp formatters for views (render every time in the business timezone).
   res.locals.fmtDateTime = fmtDateTime;
   res.locals.fmtDate = fmtDate;
+  // Build a link to another page of the current list, keeping every other
+  // filter/search query param as-is — used by the shared pagination partial.
+  // req.path is relative to the mounting router (e.g. "/" for GET /visits),
+  // so use originalUrl's pathname to get the real route path.
+  res.locals.pageUrl = (page) => {
+    const params = new URLSearchParams(req.query);
+    params.set('page', String(page));
+    return `${req.originalUrl.split('?')[0]}?${params.toString()}`;
+  };
   next();
 }));
 

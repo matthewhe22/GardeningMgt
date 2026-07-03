@@ -1004,6 +1004,13 @@ body.anon {
 
 .btn-sm { min-height: 36px; padding: 6px 12px; font-size: 0.82rem; box-shadow: none; }
 
+.pagination {
+  display: flex; align-items: center; justify-content: center; gap: 14px;
+  margin: 16px 0 4px;
+}
+.pagination [aria-disabled="true"] { opacity: 0.4; pointer-events: none; }
+.pagination-info { font-size: 0.85rem; white-space: nowrap; }
+
 @media (max-width: 600px) {
   .job-row { flex-wrap: wrap; }
   .job-row-meta { align-items: flex-start; flex-direction: row; gap: 10px; width: 100%; order: 4; padding-left: 38px; }

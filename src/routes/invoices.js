@@ -4,6 +4,7 @@ const { requireRole } = require('../auth');
 const { logActivity } = require('../activity');
 const { asyncHandler } = require('../asyncHandler');
 const { year: businessYear } = require('../time');
+const { pageParam, paginate } = require('../pagination');
 
 const router = express.Router();
 
@@ -42,15 +43,17 @@ router.get('/', asyncHandler(async (req, res) => {
   const args = [];
   let cond = '';
   if (search) { args.push(`%${search}%`); cond = `WHERE inv.number ILIKE $1 OR p.name ILIKE $1`; }
-  const invoices = await q(`
+  const page = pageParam(req);
+  const invoicesSql = `
     SELECT inv.*, p.name AS property_name, v.scheduled_date,
       (SELECT COALESCE(SUM(quantity * unit_price), 0) FROM invoice_items WHERE invoice_id = inv.id) AS total
     FROM invoices inv
     JOIN visits v ON v.id = inv.visit_id
     JOIN properties p ON p.id = v.property_id
     ${cond}
-    ORDER BY inv.created_at DESC LIMIT 200`, args);
-  res.render('invoices/index', { title: 'Invoices', invoices, search });
+    ORDER BY inv.created_at DESC`;
+  const { rows: invoices, total, totalPages } = await paginate(q, invoicesSql, args, page);
+  res.render('invoices/index', { title: 'Invoices', invoices, search, page, total, totalPages });
 }));
 
 // Create an invoice for a job, pre-filled with a labour line from the timer.
