@@ -27,6 +27,9 @@ const SESSION_SECRET = process.env.SESSION_SECRET;
 if (!SESSION_SECRET && (process.env.VERCEL || process.env.NODE_ENV === 'production')) {
   throw new Error('SESSION_SECRET must be set in production — refusing to start with a default secret.');
 }
+// Any production deploy serves HTTPS-only, not just Vercel's — used to lock
+// the session cookie and HSTS to HTTPS regardless of host.
+const isProdHttps = process.env.NODE_ENV === 'production' || !!process.env.VERCEL;
 
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, '..', 'views'));
@@ -44,7 +47,7 @@ app.use((req, res, next) => {
     "default-src 'self'; img-src 'self' data: blob: https://tile.openstreetmap.org; " +
     "style-src 'self' 'unsafe-inline'; " +
     "script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'self'");
-  if (process.env.VERCEL) res.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  if (isProdHttps) res.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   // Rendered HTML pages must always be revalidated so a deploy shows up
   // immediately instead of being served stale from the browser cache. Static
   // assets (served later by express.static) and /uploads override this with
@@ -67,7 +70,7 @@ app.use(cookieSession({
   secret: SESSION_SECRET || 'dev-only-insecure-secret',
   httpOnly: true,
   sameSite: 'lax',
-  secure: !!process.env.VERCEL,
+  secure: isProdHttps,
   maxAge: 14 * 24 * 60 * 60 * 1000,
 }));
 

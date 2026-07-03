@@ -280,6 +280,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_visits_job_day_scheduled
 
 -- Per-year gapless invoice numbers without racing on COUNT(*).
 CREATE SEQUENCE IF NOT EXISTS invoice_seq;
+
+-- Login brute-force throttle, keyed by "ip|email". Backed by the DB (rather
+-- than an in-process Map) so the limit actually holds across the many
+-- concurrent serverless instances a single deploy can scale out to.
+CREATE TABLE IF NOT EXISTS login_attempts (
+  key      TEXT PRIMARY KEY,
+  count    INTEGER NOT NULL DEFAULT 1,
+  first_at TIMESTAMP NOT NULL DEFAULT now()
+);
+
+-- One invoice per visit, and one active job per property: closes the
+-- check-then-insert races in POST /invoices and POST /jobs.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_invoices_visit_open
+  ON invoices (visit_id) WHERE status <> 'void';
+CREATE UNIQUE INDEX IF NOT EXISTS uq_jobs_property_active
+  ON jobs (property_id) WHERE active;
 `;
 
 let readyPromise = null;

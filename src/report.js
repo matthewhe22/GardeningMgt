@@ -1,7 +1,7 @@
 const path = require('path');
 const ejs = require('ejs');
 const { q, q1 } = require('./db');
-const { uploadFile, getConfig } = require('./onedrive');
+const { uploadFile, getConfig, getAccessToken } = require('./onedrive');
 const { logActivity } = require('./activity');
 const { renderMapSnapshot, externalMapUrl } = require('./mapSnapshot');
 const { fmtDateTime } = require('./time');
@@ -64,18 +64,23 @@ async function archiveToOneDrive(visitId) {
     // Cheap check first: if OneDrive isn't configured, skip immediately rather
     // than loading the full report and base64-encoding every photo (which the
     // user would otherwise wait on when completing a job).
-    if (!(await getConfig())) return;
+    const cfg = await getConfig();
+    if (!cfg) return;
     const data = await loadReportData(visitId);
     if (!data) return;
     const dir = `job-${visitId}-${data.visit.scheduled_date}`;
     const html = await renderReportHtml(data, { inlinePhotos: true });
-    const result = await uploadFile(`${dir}/report.html`, html, 'text/html');
+    // Fetch the OAuth token once and reuse it for every file in this archive
+    // batch instead of once per file (was 1 + N Graph token requests).
+    const token = await getAccessToken(cfg);
+    const ctx = { cfg, token };
+    const result = await uploadFile(`${dir}/report.html`, html, 'text/html', ctx);
     if (result.skipped) return; // OneDrive not configured
     const ids = data.photos.map((p) => p.id);
     const rows = ids.length
       ? await q('SELECT id, filename, data, mime FROM photos WHERE id = ANY($1)', [ids]) : [];
     for (const row of rows) {
-      await uploadFile(`${dir}/${row.filename}`, row.data, row.mime);
+      await uploadFile(`${dir}/${row.filename}`, row.data, row.mime, ctx);
     }
     await logActivity(null, 'report.archive', 'visit', visitId,
       `Archived job #${visitId} report and ${data.photos.length} photo(s) to OneDrive`);

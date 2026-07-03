@@ -1,30 +1,43 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const { q1 } = require('../db');
+const { q, q1 } = require('../db');
 const { logActivity } = require('../activity');
 const { asyncHandler } = require('../asyncHandler');
 
 const router = express.Router();
 
-// In-memory login throttle: max 8 failures per IP+email per 15 min window.
-// Good enough for a single-region deploy; swap for a store-backed limiter at scale.
-const attempts = new Map();
+// Login throttle: max 8 failures per IP+email per 15 min window, backed by
+// the login_attempts table (not an in-process Map) so the limit actually
+// holds across the many concurrent serverless instances a deploy scales to.
 const WINDOW_MS = 15 * 60 * 1000;
 const MAX_FAILS = 8;
 function throttleKey(req, email) {
   return `${req.ip}|${email}`;
 }
-function tooMany(key) {
-  const rec = attempts.get(key);
+async function tooMany(key) {
+  const rec = await q1('SELECT count, first_at FROM login_attempts WHERE key = $1', [key]);
   if (!rec) return false;
-  if (Date.now() - rec.first > WINDOW_MS) { attempts.delete(key); return false; }
+  if (Date.now() - new Date(rec.first_at).getTime() > WINDOW_MS) return false;
   return rec.count >= MAX_FAILS;
 }
-function recordFail(key) {
-  const rec = attempts.get(key);
-  if (!rec || Date.now() - rec.first > WINDOW_MS) attempts.set(key, { first: Date.now(), count: 1 });
-  else rec.count += 1;
+async function recordFail(key) {
+  await q(`
+    INSERT INTO login_attempts (key, count, first_at) VALUES ($1, 1, now())
+    ON CONFLICT (key) DO UPDATE SET
+      count    = CASE WHEN now() - login_attempts.first_at > interval '${WINDOW_MS} milliseconds'
+                       THEN 1 ELSE login_attempts.count + 1 END,
+      first_at = CASE WHEN now() - login_attempts.first_at > interval '${WINDOW_MS} milliseconds'
+                       THEN now() ELSE login_attempts.first_at END
+  `, [key]);
 }
+async function clearAttempts(key) {
+  await q('DELETE FROM login_attempts WHERE key = $1', [key]);
+}
+
+// A bcrypt hash of no real password, compared against on every login attempt
+// for an email that doesn't exist — so failed logins cost the same either
+// way and response timing can't be used to enumerate registered emails.
+const DUMMY_HASH = bcrypt.hashSync('no-such-account', 10);
 
 router.get('/login', (req, res) => {
   if (res.locals.user) return res.redirect('/');
@@ -35,16 +48,17 @@ router.post('/login', asyncHandler(async (req, res) => {
   const { email, password } = req.body;
   const normEmail = (email || '').trim().toLowerCase();
   const key = throttleKey(req, normEmail);
-  if (tooMany(key)) {
+  if (await tooMany(key)) {
     return res.status(429).render('login',
       { title: 'Sign in', error: 'Too many attempts. Please wait a few minutes and try again.' });
   }
   const user = await q1('SELECT * FROM users WHERE email = $1 AND active', [normEmail]);
-  if (!user || !bcrypt.compareSync(password || '', user.password_hash)) {
-    recordFail(key);
+  const passwordOk = bcrypt.compareSync(password || '', user ? user.password_hash : DUMMY_HASH);
+  if (!user || !passwordOk) {
+    await recordFail(key);
     return res.status(401).render('login', { title: 'Sign in', error: 'Invalid email or password.' });
   }
-  attempts.delete(key);
+  await clearAttempts(key);
   // Rotate session on login to prevent fixation.
   req.session = { userId: user.id };
   await logActivity(user.id, 'auth.login', 'user', user.id, `${user.name} signed in`);

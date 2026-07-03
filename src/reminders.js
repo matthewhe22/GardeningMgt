@@ -55,7 +55,7 @@ async function sendRemindersForDate(date, opts = {}) {
  * Returns the number of visits created.
  */
 async function backfillSchedules() {
-  const { occurrence, nextOccurrenceAfter } = require('./recurrence');
+  const { nextOccurrenceOnOrAfter } = require('./recurrence');
   const today = businessToday();
   const jobs = await q(`
     SELECT j.* FROM jobs j
@@ -67,8 +67,7 @@ async function backfillSchedules() {
   let created = 0;
   for (const job of jobs) {
     // Next occurrence on/after today, anchored to the contract start.
-    let next = job.start_date >= today ? job.start_date : nextOccurrenceAfter(job.start_date, job.frequency, today);
-    if (next < today) next = occurrence(job.start_date, job.frequency, 0);
+    const next = nextOccurrenceOnOrAfter(job.start_date, job.frequency, today);
     if (next > job.end_date) continue;
     const ins = await q1(`
       INSERT INTO visits (job_id, property_id, gardener_id, scheduled_date, time_window, created_by)

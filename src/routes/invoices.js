@@ -1,5 +1,5 @@
 const express = require('express');
-const { q, q1 } = require('../db');
+const { q, q1, withTransaction } = require('../db');
 const { requireRole } = require('../auth');
 const { logActivity } = require('../activity');
 const { asyncHandler } = require('../asyncHandler');
@@ -60,17 +60,33 @@ router.post('/', asyncHandler(async (req, res) => {
   const visit = await q1('SELECT * FROM visits WHERE id = $1', [visitId]);
   if (!visit) return res.redirect('/invoices');
   // Don't create a second live invoice for the same job (voided ones don't count).
+  // This check-then-insert still has a race window, closed below by the
+  // uq_invoices_visit_open unique index + a 23505 catch.
   const existing = await q1("SELECT id FROM invoices WHERE visit_id = $1 AND status <> 'void' LIMIT 1", [visitId]);
   if (existing) return res.redirect(`/invoices/${existing.id}`);
   const number = await nextInvoiceNumber();
-  const { id: invoiceId } = await q1(
-    'INSERT INTO invoices (visit_id, number, created_by) VALUES ($1, $2, $3) RETURNING id',
-    [visitId, number, req.user.id]);
-  if (visit.duration_minutes) {
-    const hourlyRate = Number(process.env.HOURLY_RATE || 50);
-    await q('INSERT INTO invoice_items (invoice_id, description, quantity, unit_price) VALUES ($1, $2, $3, $4)',
-      [invoiceId, `Gardening labour (${visit.duration_minutes} min)`,
-        Math.round((visit.duration_minutes / 60) * 100) / 100, hourlyRate]);
+  let invoiceId;
+  try {
+    // Invoice + its labour line are one unit: a failure partway through must
+    // not leave a live invoice with zero line items.
+    invoiceId = await withTransaction(async (tx) => {
+      const { id } = await tx.q1(
+        'INSERT INTO invoices (visit_id, number, created_by) VALUES ($1, $2, $3) RETURNING id',
+        [visitId, number, req.user.id]);
+      if (visit.duration_minutes) {
+        const hourlyRate = Number(process.env.HOURLY_RATE || 50);
+        await tx.q('INSERT INTO invoice_items (invoice_id, description, quantity, unit_price) VALUES ($1, $2, $3, $4)',
+          [id, `Gardening labour (${visit.duration_minutes} min)`,
+            Math.round((visit.duration_minutes / 60) * 100) / 100, hourlyRate]);
+      }
+      return id;
+    });
+  } catch (e) {
+    if (e.code === '23505') { // unique_violation: lost the race to a concurrent create
+      const winner = await q1("SELECT id FROM invoices WHERE visit_id = $1 AND status <> 'void' LIMIT 1", [visitId]);
+      if (winner) return res.redirect(`/invoices/${winner.id}`);
+    }
+    throw e;
   }
   await logActivity(req.user.id, 'invoice.create', 'invoice', invoiceId, `Created invoice ${number} for job #${visitId}`);
   res.redirect(`/invoices/${invoiceId}`);

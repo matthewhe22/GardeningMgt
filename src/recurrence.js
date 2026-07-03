@@ -44,6 +44,17 @@ function nextOccurrenceAfter(anchor, frequency, afterDate) {
 }
 
 /**
+ * The next occurrence on/after `date` (inclusive), anchored to `anchor`.
+ * Unlike nextOccurrenceAfter, this correctly returns `date` itself when it
+ * lands exactly on an occurrence, instead of skipping ahead a full cycle.
+ */
+function nextOccurrenceOnOrAfter(anchor, frequency, date) {
+  if (anchor >= date) return anchor;
+  const dayBefore = fmt(new Date(toUTC(date).getTime() - 86400000));
+  return nextOccurrenceAfter(anchor, frequency, dayBefore);
+}
+
+/**
  * Backwards-compatible single-step helper (still anchored-safe for weekly/
  * fortnightly; monthly now derives from the given date treated as anchor).
  */
@@ -75,6 +86,6 @@ function isValidDate(s) {
 }
 
 module.exports = {
-  nextDate, occurrence, nextOccurrenceAfter, occurrencesBetween,
+  nextDate, occurrence, nextOccurrenceAfter, nextOccurrenceOnOrAfter, occurrencesBetween,
   contractEnd, isValidDate, FREQUENCIES,
 };

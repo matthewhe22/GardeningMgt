@@ -60,7 +60,9 @@ router.post('/', requireRole('supervisor'), asyncHandler(async (req, res) => {
     if (!g) return res.redirect('/jobs?error=gardener');
     gardener = g.id;
   }
-  // One active contract per site.
+  // One active contract per site. This check-then-insert still has a race
+  // window, closed below by the uq_jobs_property_active unique index + a
+  // 23505 catch.
   const dup = await q1('SELECT id FROM jobs WHERE property_id = $1 AND active', [Number(property_id)]);
   if (dup) return res.redirect('/jobs?error=duplicate');
 
@@ -68,23 +70,28 @@ router.post('/', requireRole('supervisor'), asyncHandler(async (req, res) => {
   const endDate = contractEnd(start_date, years);
   const dates = occurrencesBetween(start_date, frequency, endDate).slice(0, PREGENERATE);
 
-  await withTransaction(async (tx) => {
-    const job = await tx.q1(`
-      INSERT INTO jobs (property_id, gardener_id, frequency, contract_years, start_date, end_date, time_window, created_by)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [Number(property_id), gardener, frequency, years, start_date, endDate, time_window || null, req.user.id]);
-    for (const d of dates) {
-      await tx.q(`
-        INSERT INTO visits (job_id, property_id, gardener_id, scheduled_date, time_window, created_by)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        ON CONFLICT (job_id, scheduled_date) WHERE status = 'scheduled' AND job_id IS NOT NULL DO NOTHING`,
-        [job.id, job.property_id, gardener, d, time_window || null, req.user.id]);
-    }
-    await tx.q(`INSERT INTO activity_log (user_id, action, entity_type, entity_id, details)
-      VALUES ($1, 'job.create', 'job', $2, $3)`,
-      [req.user.id, job.id,
-        `Created ${frequency} job for site #${property_id} (${years}-yr from ${start_date}, ${dates.length} visits scheduled)`]);
-  });
+  try {
+    await withTransaction(async (tx) => {
+      const job = await tx.q1(`
+        INSERT INTO jobs (property_id, gardener_id, frequency, contract_years, start_date, end_date, time_window, created_by)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        [Number(property_id), gardener, frequency, years, start_date, endDate, time_window || null, req.user.id]);
+      for (const d of dates) {
+        await tx.q(`
+          INSERT INTO visits (job_id, property_id, gardener_id, scheduled_date, time_window, created_by)
+          VALUES ($1, $2, $3, $4, $5, $6)
+          ON CONFLICT (job_id, scheduled_date) WHERE status = 'scheduled' AND job_id IS NOT NULL DO NOTHING`,
+          [job.id, job.property_id, gardener, d, time_window || null, req.user.id]);
+      }
+      await tx.q(`INSERT INTO activity_log (user_id, action, entity_type, entity_id, details)
+        VALUES ($1, 'job.create', 'job', $2, $3)`,
+        [req.user.id, job.id,
+          `Created ${frequency} job for site #${property_id} (${years}-yr from ${start_date}, ${dates.length} visits scheduled)`]);
+    });
+  } catch (e) {
+    if (e.code === '23505') return res.redirect('/jobs?error=duplicate'); // lost the race to a concurrent create
+    throw e;
+  }
   res.redirect('/jobs');
 }));
 
