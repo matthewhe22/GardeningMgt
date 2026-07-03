@@ -38,11 +38,14 @@ async function sendRemindersForDate(date, opts = {}) {
   await pool.query(`INSERT INTO notifications (user_id, visit_id, type, message) VALUES ${values}`, params);
 
   // Best-effort external delivery; no-ops unless a provider is configured.
-  for (const v of claimed) {
+  // Every send is independent (and each already swallows its own errors), so
+  // fire them all concurrently instead of one gardener at a time — a busy
+  // day's worth of visits was otherwise slow enough to risk a serverless
+  // request timeout partway through.
+  await Promise.all(claimed.flatMap((v) => {
     const msg = msgFor(v);
-    await sendSms(v.gardener_phone, msg);
-    await sendEmail(v.gardener_email, 'Visit reminder', msg);
-  }
+    return [sendSms(v.gardener_phone, msg), sendEmail(v.gardener_email, 'Visit reminder', msg)];
+  }));
   await logActivity(actorId, actorId ? 'reminder.bulk' : 'reminder.auto', 'visit', null,
     `Sent ${claimed.length} visit reminder(s) for ${date}`);
   return claimed.length;

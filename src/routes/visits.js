@@ -329,20 +329,25 @@ router.post('/:id/timer/stop', asyncHandler(async (req, res) => {
     RETURNING id, duration_minutes`, [visit.id]);
   if (!gate) return res.redirect(`/visits/${visit.id}`); // already completed — no double side effects
 
-  await recordGps(visit.id, req.user.id, req.body, 'finish');
-  await logActivity(req.user.id, 'visit.timer.stop', 'visit', visit.id,
-    `Finished job #${visit.id} in ${gate.duration_minutes} min`);
-
-  const { dc } = await q1("SELECT COUNT(*)::int AS dc FROM tasks WHERE visit_id = $1 AND status = 'done'", [visit.id]);
-  const { tc } = await q1('SELECT COUNT(*)::int AS tc FROM tasks WHERE visit_id = $1', [visit.id]);
+  // These three don't depend on each other's result — run them together
+  // instead of one round-trip at a time on the gardener's "complete job" tap.
+  const [, , { dc, tc }] = await Promise.all([
+    recordGps(visit.id, req.user.id, req.body, 'finish'),
+    logActivity(req.user.id, 'visit.timer.stop', 'visit', visit.id,
+      `Finished job #${visit.id} in ${gate.duration_minutes} min`),
+    q1("SELECT COUNT(*) FILTER (WHERE status = 'done')::int AS dc, COUNT(*)::int AS tc FROM tasks WHERE visit_id = $1",
+      [visit.id]),
+  ]);
   const summary = `Job #${visit.id} completed by ${req.user.name} at ${visit.property_name}: ` +
     `${gate.duration_minutes} min, tasks ${dc}/${tc} done, ${pc} photo(s).`;
-  await pool.query(`
-    INSERT INTO notifications (user_id, visit_id, type, message)
-    SELECT id, $1, 'job_summary', $2 FROM users WHERE role IN ('admin','supervisor') AND active`,
-    [visit.id, summary]);
-
-  await advanceRecurringJob(visit, req.user.id, true);
+  // Notifying staff and advancing the recurring contract are independent too.
+  await Promise.all([
+    pool.query(`
+      INSERT INTO notifications (user_id, visit_id, type, message)
+      SELECT id, $1, 'job_summary', $2 FROM users WHERE role IN ('admin','supervisor') AND active`,
+      [visit.id, summary]),
+    advanceRecurringJob(visit, req.user.id, true),
+  ]);
   // Archive report + photos to OneDrive in the background (best-effort) so the
   // gardener's "complete job" tap returns immediately instead of waiting on the
   // report render + sequential Graph uploads.
