@@ -109,7 +109,10 @@ body.authed main.container {
     margin-left: 0;
     padding: 16px 14px calc(92px + env(safe-area-inset-bottom, 0px));
   }
-  body.authed { padding-top: 56px; } /* room for fixed mobile topbar */
+  body.authed { padding-top: calc(56px + env(safe-area-inset-top, 0px)); } /* room for fixed mobile topbar */
+
+  body.authed h1 { font-size: 1.9rem; }
+  body.authed h1 .muted { font-size: 0.55em; }
 }
 
 /* ----- Sidebar (desktop) ----- */
@@ -231,40 +234,41 @@ body.authed main.container {
   display: none;
   position: fixed;
   top: 0; left: 0; right: 0;
-  height: 56px;
+  height: calc(56px + env(safe-area-inset-top, 0px));
   z-index: 40;
   background: var(--green-900);
   color: #fff;
   align-items: center;
   gap: 8px;
-  padding: 0 8px 0 14px;
+  padding: env(safe-area-inset-top, 0px) 10px 0 16px;
 }
 
 .topbar-brand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   color: #fff;
   font-weight: 700;
   text-decoration: none;
-  font-size: 1rem;
+  font-size: 1.3rem;
+  letter-spacing: -0.01em;
   margin-right: auto;
 }
 .topbar-brand:hover { text-decoration: none; }
-.topbar-brand .brand-mark { width: 30px; height: 30px; font-size: 15px; }
+.topbar-brand .brand-mark { width: 38px; height: 38px; font-size: 20px; border-radius: 11px; }
 
 .topbar-action {
   position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
+  width: 48px;
+  height: 48px;
   border-radius: 10px;
   color: rgba(230, 242, 234, 0.9);
   cursor: pointer;
 }
-.topbar-action svg { width: 22px; height: 22px; }
+.topbar-action svg { width: 26px; height: 26px; }
 .topbar-action:hover { background: rgba(255, 255, 255, 0.1); }
 .topbar-action .badge { position: absolute; top: 4px; right: 2px; }
 
@@ -1200,7 +1204,7 @@ body { overscroll-behavior-y: none; }
     max-width: none !important;
     padding: 16px 14px calc(92px + env(safe-area-inset-bottom, 0px)) !important;
   }
-  body.authed { padding-top: 56px !important; } /* room for the fixed topbar */
+  body.authed { padding-top: calc(56px + env(safe-area-inset-top, 0px)) !important; } /* room for the fixed topbar */
 }
 
 /* --------------------------------------------------------------------------
