@@ -5,6 +5,7 @@ const { logActivity } = require('../activity');
 const { optimizeRouteRoad, haversineKm } = require('../routeOptimizer');
 const { asyncHandler } = require('../asyncHandler');
 const { today: businessToday } = require('../time');
+const { mapWithConcurrency } = require('../concurrency');
 
 const router = express.Router();
 
@@ -68,24 +69,9 @@ router.post('/optimize', asyncHandler(async (req, res) => {
   res.redirect(`/routes?date=${date}&gardener_id=${gardenerId}&optimized=${mode}`);
 }));
 
-// Run async `fn` over `items` with at most `limit` in flight at once —
-// avoids both a fully-serial loop (slow, risks a serverless timeout with
-// many gardeners) and unbounded Promise.all (impolite to the shared public
-// OSRM demo server every gardener's request hits by default).
-async function mapWithConcurrency(items, limit, fn) {
-  const results = new Array(items.length);
-  let next = 0;
-  async function worker() {
-    while (next < items.length) {
-      const i = next++;
-      results[i] = await fn(items[i]);
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-  return results;
-}
-
-// Optimize all gardeners for a date in one go (staff)
+// Optimize all gardeners for a date in one go (staff). Bounded to 3 at a
+// time — being impolite to the shared public OSRM demo server every
+// gardener's request hits by default is the concern, not raw throughput.
 router.post('/optimize-all', requireRole('supervisor'), asyncHandler(async (req, res) => {
   const date = req.body.date;
   const gardeners = await q("SELECT id FROM users WHERE role = 'gardener' AND active");

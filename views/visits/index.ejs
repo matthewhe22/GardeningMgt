@@ -72,7 +72,7 @@
   <div>Showing
     <% if (status) { %><span class="status status-<%= status %>"><%= status.replace('_',' ') %></span> <% } %>
     visits<% if (from || to) { %> · <%= from || '…' %> → <%= to || '…' %><% } %>
-    · <strong><%= total %></strong> found
+    · <strong><%= totalVisits %></strong> found
   </div>
   <a class="btn btn-sm" href="/visits">✕ Clear filter</a>
 </div>

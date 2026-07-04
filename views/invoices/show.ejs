@@ -1,5 +1,8 @@
 <%- include('../partials/header') %>
 <h1><%= invoice.number %> <span class="status status-<%= invoice.status %>"><%= invoice.status %></span></h1>
+<% if (error === 'duplicate') { %>
+<p class="alert alert-error">Can't set that status: another live invoice already exists for this job. Void or update that one first.</p>
+<% } %>
 <p class="muted">
   <%= invoice.property_name %>, <%= invoice.address %> · Job on <%= invoice.scheduled_date %>
   (<a href="/visits/<%= invoice.visit_id %>">job #<%= invoice.visit_id %></a>)

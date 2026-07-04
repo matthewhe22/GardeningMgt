@@ -98,7 +98,7 @@ router.post('/', asyncHandler(async (req, res) => {
 router.get('/:id', asyncHandler(async (req, res) => {
   const invoice = await invoiceWithItems(req.params.id);
   if (!invoice) return res.status(404).render('error', { title: 'Not found', message: 'Invoice not found.' });
-  res.render('invoices/show', { title: invoice.number, invoice });
+  res.render('invoices/show', { title: invoice.number, invoice, error: req.query.error || null });
 }));
 
 router.post('/:id/items', asyncHandler(async (req, res) => {
@@ -125,11 +125,19 @@ router.post('/:id/items/:itemId/delete', asyncHandler(async (req, res) => {
 router.post('/:id/status', asyncHandler(async (req, res) => {
   const status = req.body.status;
   if (!['draft', 'sent', 'paid', 'void'].includes(status)) return res.redirect(`/invoices/${req.params.id}`);
-  await q(`
-    UPDATE invoices SET status = $1,
-      issued_at = CASE WHEN $1 = 'sent' AND issued_at IS NULL THEN now() ELSE issued_at END,
-      paid_at   = CASE WHEN $1 = 'paid' THEN now() ELSE paid_at END
-    WHERE id = $2`, [status, req.params.id]);
+  try {
+    await q(`
+      UPDATE invoices SET status = $1,
+        issued_at = CASE WHEN $1 = 'sent' AND issued_at IS NULL THEN now() ELSE issued_at END,
+        paid_at   = CASE WHEN $1 = 'paid' THEN now() ELSE paid_at END
+      WHERE id = $2`, [status, req.params.id]);
+  } catch (e) {
+    // Un-voiding this invoice while another live invoice already exists for
+    // the same visit (uq_invoices_visit_open) — send back a friendly error
+    // instead of a 500.
+    if (e.code === '23505') return res.redirect(`/invoices/${req.params.id}?error=duplicate`);
+    throw e;
+  }
   await logActivity(req.user.id, 'invoice.status', 'invoice', Number(req.params.id),
     `Invoice #${req.params.id} marked ${status}`);
   res.redirect(`/invoices/${req.params.id}`);

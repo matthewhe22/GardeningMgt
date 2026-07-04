@@ -64,22 +64,47 @@ router.get('/', asyncHandler(async (req, res) => {
     args.push(todayStr); where.push(`v.scheduled_date >= $${args.length}`);
   }
   const page = pageParam(req);
-  const visitsSql = `
+  const baseWhere = where.length ? 'WHERE ' + where.join(' AND ') : '';
+  // Paginate by DAY, not by row: the list groups visits by scheduled_date for
+  // display (route order within a day, per-day reorder/optimize controls), so
+  // slicing by a fixed row count could split one gardener's day across two
+  // pages — silently wrong stop counts and reorder buttons on both halves.
+  // Fetching a page of distinct dates first, then every visit on those dates,
+  // guarantees a page always contains whole days.
+  const DAYS_PER_PAGE = 20;
+  const dateSql = `
+    SELECT DISTINCT v.scheduled_date
+    FROM visits v
+    JOIN properties p ON p.id = v.property_id
+    LEFT JOIN users u ON u.id = v.gardener_id
+    ${baseWhere}
+    ORDER BY v.scheduled_date ASC`;
+  const totalVisitsSql = `
+    SELECT COUNT(*)::int AS c
+    FROM visits v
+    JOIN properties p ON p.id = v.property_id
+    LEFT JOIN users u ON u.id = v.gardener_id
+    ${baseWhere}`;
+  // The date page, the visit-count summary, and the filter dropdowns are all
+  // independent, so fetch them in parallel to cut page latency.
+  const [datesPage, totalVisitsRow, gardeners, properties] = await Promise.all([
+    paginate(q, dateSql, args, page, DAYS_PER_PAGE),
+    q(totalVisitsSql, args),
+    q("SELECT id, name FROM users WHERE role = 'gardener' AND active"),
+    q('SELECT id, name FROM properties ORDER BY name'),
+  ]);
+  const dates = datesPage.rows.map((r) => r.scheduled_date);
+  const dateArgs = [...args, dates];
+  const dateCond = `v.scheduled_date = ANY($${dateArgs.length})`;
+  const visits = dates.length ? await q(`
     SELECT v.*, p.name AS property_name, p.address, p.lat, p.lng, u.name AS gardener_name
     FROM visits v
     JOIN properties p ON p.id = v.property_id
     LEFT JOIN users u ON u.id = v.gardener_id
-    ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-    ORDER BY v.scheduled_date ASC, COALESCE(v.route_order, 999), v.id`;
-  // Every view reads nearest → future (ascending by date), then by visiting
-  // order within the day. The visit list and the filter dropdowns are
-  // independent, so fetch them in parallel to cut page latency.
-  const [visitsPage, gardeners, properties] = await Promise.all([
-    paginate(q, visitsSql, args, page),
-    q("SELECT id, name FROM users WHERE role = 'gardener' AND active"),
-    q('SELECT id, name FROM properties ORDER BY name'),
-  ]);
-  const { rows: visits, total, totalPages } = visitsPage;
+    ${where.length ? `${baseWhere} AND ${dateCond}` : `WHERE ${dateCond}`}
+    ORDER BY v.scheduled_date ASC, COALESCE(v.route_order, 999), v.id`, dateArgs) : [];
+  const totalVisits = totalVisitsRow[0].c;
+  const { total: totalDays, totalPages } = datesPage;
   // Group consecutive visits by day so the list reads as a per-day route in
   // visiting sequence (route_order). Reordering / optimizing is offered per day
   // only when the list is scoped to a single gardener (one route to order).
@@ -95,7 +120,8 @@ router.get('/', asyncHandler(async (req, res) => {
   res.render('visits/index', {
     title: 'Visits / Jobs', visits, groups, gardeners, properties, staff,
     date, upto, showAll, status, from, to, search, gardenerId, today: todayStr,
-    canReorder: !!gardenerId && !filtered, page, total, totalPages,
+    canReorder: !!gardenerId && !filtered, page, totalPages,
+    total: totalDays, totalLabel: totalDays === 1 ? 'day' : 'days', totalVisits,
   });
 }));
 
