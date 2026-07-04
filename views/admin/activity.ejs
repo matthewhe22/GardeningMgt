@@ -2,14 +2,14 @@
 <h1>Activity log</h1>
 <p class="muted">Every change in the system is recorded here: who did what, and when.</p>
 <div class="card">
-  <table class="table">
-    <tr><th>When</th><th>Who</th><th>Action</th><th>Details</th></tr>
+  <table class="table table--stack">
+    <tr class="thead-row"><th>When</th><th>Who</th><th>Action</th><th>Details</th></tr>
     <% entries.forEach(e => { %>
     <tr>
-      <td class="muted"><%= fmtDateTime(e.created_at) %></td>
-      <td><%= e.user_name || 'System' %></td>
-      <td><code><%= e.action %></code></td>
-      <td><%= e.details || '' %></td>
+      <td class="muted stack-main" data-label="When"><%= fmtDateTime(e.created_at) %></td>
+      <td data-label="Who"><%= e.user_name || 'System' %></td>
+      <td data-label="Action"><code><%= e.action %></code></td>
+      <td data-label="Details"><%= e.details || '' %></td>
     </tr>
     <% }) %>
   </table>

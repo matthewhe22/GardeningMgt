@@ -21,6 +21,13 @@ document.querySelectorAll('form').forEach((form) => {
   }
 });
 
+// --- Auto-submit a form when a field marked data-autosubmit changes ---
+// (an inline onchange="this.form.submit()" attribute is blocked by the
+// script-src 'self' CSP header sent on every response)
+document.querySelectorAll('[data-autosubmit]').forEach((el) => {
+  el.addEventListener('change', () => el.form && el.form.submit());
+});
+
 // --- Confirm destructive actions (forms/links marked data-confirm) ---
 // Registered before the double-submit guard so a cancelled confirm also
 // prevents the button from being disabled.
