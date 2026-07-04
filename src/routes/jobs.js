@@ -5,6 +5,7 @@ const { logActivity } = require('../activity');
 const { contractEnd, occurrencesBetween, FREQUENCIES, isValidDate } = require('../recurrence');
 const { today: businessToday } = require('../time');
 const { asyncHandler } = require('../asyncHandler');
+const { pageParam, paginate } = require('../pagination');
 
 const router = express.Router();
 
@@ -23,8 +24,8 @@ router.get('/', asyncHandler(async (req, res) => {
   const args = [today];
   if (!staff) { args.push(req.user.id); cond.push(`j.gardener_id = $${args.length}`); }
   if (search) { args.push(`%${search}%`); cond.push(`(p.name ILIKE $${args.length} OR p.address ILIKE $${args.length})`); }
-  const [jobs, properties, gardeners] = await Promise.all([
-    q(`
+  const page = pageParam(req);
+  const jobsSql = `
     SELECT j.*, p.name AS property_name, p.address, p.lots, u.name AS gardener_name,
       (j.end_date < $1) AS expired,
       (SELECT MIN(v.scheduled_date) FROM visits v
@@ -37,13 +38,16 @@ router.get('/', asyncHandler(async (req, res) => {
     JOIN properties p ON p.id = j.property_id
     LEFT JOIN users u ON u.id = j.gardener_id
     ${cond.length ? 'WHERE ' + cond.join(' AND ') : ''}
-    ORDER BY j.active DESC, p.name`, args),
+    ORDER BY j.active DESC, p.name`;
+  const [jobsPage, properties, gardeners] = await Promise.all([
+    paginate(q, jobsSql, args, page),
     q('SELECT id, name FROM properties ORDER BY name'),
     q("SELECT id, name FROM users WHERE role = 'gardener' AND active"),
   ]);
+  const { rows: jobs, total, totalPages } = jobsPage;
   res.render('jobs/index', {
     title: 'Sites', jobs, properties, gardeners, staff, search, frequencies: FREQUENCIES,
-    flash: req.query.error || null,
+    flash: req.query.error || null, page, total, totalPages,
   });
 }));
 
@@ -60,7 +64,9 @@ router.post('/', requireRole('supervisor'), asyncHandler(async (req, res) => {
     if (!g) return res.redirect('/jobs?error=gardener');
     gardener = g.id;
   }
-  // One active contract per site.
+  // One active contract per site. This check-then-insert still has a race
+  // window, closed below by the uq_jobs_property_active unique index + a
+  // 23505 catch.
   const dup = await q1('SELECT id FROM jobs WHERE property_id = $1 AND active', [Number(property_id)]);
   if (dup) return res.redirect('/jobs?error=duplicate');
 
@@ -68,23 +74,28 @@ router.post('/', requireRole('supervisor'), asyncHandler(async (req, res) => {
   const endDate = contractEnd(start_date, years);
   const dates = occurrencesBetween(start_date, frequency, endDate).slice(0, PREGENERATE);
 
-  await withTransaction(async (tx) => {
-    const job = await tx.q1(`
-      INSERT INTO jobs (property_id, gardener_id, frequency, contract_years, start_date, end_date, time_window, created_by)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [Number(property_id), gardener, frequency, years, start_date, endDate, time_window || null, req.user.id]);
-    for (const d of dates) {
-      await tx.q(`
-        INSERT INTO visits (job_id, property_id, gardener_id, scheduled_date, time_window, created_by)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        ON CONFLICT (job_id, scheduled_date) WHERE status = 'scheduled' AND job_id IS NOT NULL DO NOTHING`,
-        [job.id, job.property_id, gardener, d, time_window || null, req.user.id]);
-    }
-    await tx.q(`INSERT INTO activity_log (user_id, action, entity_type, entity_id, details)
-      VALUES ($1, 'job.create', 'job', $2, $3)`,
-      [req.user.id, job.id,
-        `Created ${frequency} job for site #${property_id} (${years}-yr from ${start_date}, ${dates.length} visits scheduled)`]);
-  });
+  try {
+    await withTransaction(async (tx) => {
+      const job = await tx.q1(`
+        INSERT INTO jobs (property_id, gardener_id, frequency, contract_years, start_date, end_date, time_window, created_by)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        [Number(property_id), gardener, frequency, years, start_date, endDate, time_window || null, req.user.id]);
+      for (const d of dates) {
+        await tx.q(`
+          INSERT INTO visits (job_id, property_id, gardener_id, scheduled_date, time_window, created_by)
+          VALUES ($1, $2, $3, $4, $5, $6)
+          ON CONFLICT (job_id, scheduled_date) WHERE status = 'scheduled' AND job_id IS NOT NULL DO NOTHING`,
+          [job.id, job.property_id, gardener, d, time_window || null, req.user.id]);
+      }
+      await tx.q(`INSERT INTO activity_log (user_id, action, entity_type, entity_id, details)
+        VALUES ($1, 'job.create', 'job', $2, $3)`,
+        [req.user.id, job.id,
+          `Created ${frequency} job for site #${property_id} (${years}-yr from ${start_date}, ${dates.length} visits scheduled)`]);
+    });
+  } catch (e) {
+    if (e.code === '23505') return res.redirect('/jobs?error=duplicate'); // lost the race to a concurrent create
+    throw e;
+  }
   res.redirect('/jobs');
 }));
 
@@ -99,10 +110,18 @@ router.post('/:id/update', requireRole('supervisor'), asyncHandler(async (req, r
     if (!g) return res.redirect('/jobs?error=gardener');
     gardener = g.id;
   }
-  await q(`
-    UPDATE jobs SET gardener_id = $1, frequency = $2, time_window = $3, active = $4 WHERE id = $5`,
-    [gardener, FREQUENCIES.includes(frequency) ? frequency : job.frequency,
-      time_window || null, active === 'on', job.id]);
+  try {
+    await q(`
+      UPDATE jobs SET gardener_id = $1, frequency = $2, time_window = $3, active = $4 WHERE id = $5`,
+      [gardener, FREQUENCIES.includes(frequency) ? frequency : job.frequency,
+        time_window || null, active === 'on', job.id]);
+  } catch (e) {
+    // Reactivating this job while another active job already exists for the
+    // same property (uq_jobs_property_active) — same conflict as creating a
+    // duplicate, so use the same friendly redirect instead of a 500.
+    if (e.code === '23505') return res.redirect('/jobs?error=duplicate');
+    throw e;
+  }
   // Future scheduled visits follow the new default gardener unless they were
   // individually reassigned (a "replacement" differs from the old default).
   if (gardener !== job.gardener_id) {
@@ -131,12 +150,14 @@ router.post('/:id/renew', requireRole('supervisor'), asyncHandler(async (req, re
 router.get('/site/:propertyId', requireRole('supervisor'), asyncHandler(async (req, res) => {
   const property = await q1('SELECT * FROM properties WHERE id = $1', [req.params.propertyId]);
   if (!property) return res.status(404).render('error', { title: 'Not found', message: 'Site not found.' });
-  const [visits, totals, invoices] = await Promise.all([
-    q(`
+  const page = pageParam(req);
+  const visitsSql = `
     SELECT v.*, u.name AS gardener_name,
       (SELECT COUNT(*) FROM photos ph WHERE ph.visit_id = v.id) AS photo_count
     FROM visits v LEFT JOIN users u ON u.id = v.gardener_id
-    WHERE v.property_id = $1 ORDER BY v.scheduled_date DESC LIMIT 300`, [req.params.propertyId]),
+    WHERE v.property_id = $1 ORDER BY v.scheduled_date DESC`;
+  const [visitsPage, totals, invoices] = await Promise.all([
+    paginate(q, visitsSql, [req.params.propertyId], page),
     q1(`
     SELECT COUNT(*) FILTER (WHERE status = 'completed')::int AS completed,
            COALESCE(SUM(duration_minutes), 0)::int AS minutes
@@ -145,7 +166,8 @@ router.get('/site/:propertyId', requireRole('supervisor'), asyncHandler(async (r
     SELECT inv.* FROM invoices inv JOIN visits v ON v.id = inv.visit_id
     WHERE v.property_id = $1 ORDER BY inv.created_at DESC`, [req.params.propertyId]),
   ]);
-  res.render('jobs/site', { title: property.name, property, visits, totals, invoices });
+  const { rows: visits, total, totalPages } = visitsPage;
+  res.render('jobs/site', { title: property.name, property, visits, totals, invoices, page, total, totalPages });
 }));
 
 module.exports = router;

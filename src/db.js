@@ -283,6 +283,58 @@ CREATE SEQUENCE IF NOT EXISTS invoice_seq;
 `;
 
 let readyPromise = null;
+let criticalSchemaPromise = null;
+
+/**
+ * A handful of small, idempotent DDL statements that critical app behavior
+ * depends on directly (the login throttle table; the invoice/job race-
+ * condition indexes) — kept out of SCHEMA/ready() so they run unconditionally,
+ * even under DB_SKIP_INIT=1 (which every already-provisioned deployment is
+ * expected to set, per the comment on ready() below). Skipping these on such
+ * a deployment would otherwise break login outright the moment this code
+ * ships, since auth.js queries login_attempts unconditionally.
+ * Idempotent and cheap (a handful of IF NOT EXISTS checks), so paying this
+ * on every cold start — including ones that already skip the full schema
+ * pass — costs nothing meaningful.
+ */
+function ensureCriticalSchema() {
+  if (!criticalSchemaPromise) {
+    criticalSchemaPromise = (async () => {
+      // Login brute-force throttle, keyed by "ip|email". Backed by the DB
+      // (rather than an in-process Map) so the limit actually holds across
+      // the many concurrent serverless instances a single deploy can scale
+      // out to. A fresh table can never conflict with existing data, so a
+      // failure here is a real problem — let it propagate.
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS login_attempts (
+          key      TEXT PRIMARY KEY,
+          count    INTEGER NOT NULL DEFAULT 1,
+          first_at TIMESTAMP NOT NULL DEFAULT now()
+        )`);
+      // One invoice per visit, and one active job per property: closes the
+      // check-then-insert races in POST /invoices and POST /jobs. Unlike the
+      // table above, a database that already has duplicate live invoices or
+      // active jobs (possible — that's exactly the race these indexes close)
+      // would fail to create these; don't let that take down every request,
+      // just log it so an operator can dedupe. Until the index exists, those
+      // routes' 23505 catch simply has nothing to catch, same as before this
+      // fix shipped.
+      for (const [name, sql] of [
+        ['uq_invoices_visit_open',
+          `CREATE UNIQUE INDEX IF NOT EXISTS uq_invoices_visit_open ON invoices (visit_id) WHERE status <> 'void'`],
+        ['uq_jobs_property_active',
+          `CREATE UNIQUE INDEX IF NOT EXISTS uq_jobs_property_active ON jobs (property_id) WHERE active`],
+      ]) {
+        try { await pool.query(sql); }
+        catch (e) {
+          console.error(`[db] could not create ${name} (likely duplicate rows already violate it) — dedupe manually:`, e.message);
+        }
+      }
+    })();
+    criticalSchemaPromise.catch(() => { criticalSchemaPromise = null; });
+  }
+  return criticalSchemaPromise;
+}
 
 /**
  * Create the schema (idempotent) and, on an empty database, a bootstrap
@@ -292,10 +344,12 @@ let readyPromise = null;
 function ready() {
   // Once the database is provisioned, set DB_SKIP_INIT=1 so serverless cold
   // starts don't re-run the full schema DDL + migrations on the first request.
-  if (process.env.DB_SKIP_INIT === '1') return Promise.resolve();
+  // ensureCriticalSchema() still runs — see its own doc comment for why.
+  if (process.env.DB_SKIP_INIT === '1') return ensureCriticalSchema();
   if (!readyPromise) {
     readyPromise = (async () => {
       await pool.query(SCHEMA);
+      await ensureCriticalSchema();
       // Migrations for databases created before these columns existed.
       await pool.query('ALTER TABLE properties ADD COLUMN IF NOT EXISTS lots INTEGER');
       await pool.query('ALTER TABLE visits ADD COLUMN IF NOT EXISTS job_id INTEGER REFERENCES jobs(id)');

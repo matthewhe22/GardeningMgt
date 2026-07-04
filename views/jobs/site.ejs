@@ -29,6 +29,7 @@
     </table>
   </div>
   <% if (!visits.length) { %><p class="muted">No visits recorded for this site yet.</p><% } %>
+  <%- include('../partials/pagination') %>
 </div>
 
 <% if (invoices.length) { %>

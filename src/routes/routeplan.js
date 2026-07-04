@@ -5,6 +5,7 @@ const { logActivity } = require('../activity');
 const { optimizeRouteRoad, haversineKm } = require('../routeOptimizer');
 const { asyncHandler } = require('../asyncHandler');
 const { today: businessToday } = require('../time');
+const { mapWithConcurrency } = require('../concurrency');
 
 const router = express.Router();
 
@@ -68,19 +69,25 @@ router.post('/optimize', asyncHandler(async (req, res) => {
   res.redirect(`/routes?date=${date}&gardener_id=${gardenerId}&optimized=${mode}`);
 }));
 
-// Optimize all gardeners for a date in one go (staff)
+// Optimize all gardeners for a date in one go (staff). Bounded to 3 at a
+// time — being impolite to the shared public OSRM demo server every
+// gardener's request hits by default is the concern, not raw throughput.
 router.post('/optimize-all', requireRole('supervisor'), asyncHandler(async (req, res) => {
   const date = req.body.date;
   const gardeners = await q("SELECT id FROM users WHERE role = 'gardener' AND active");
-  let total = 0;
-  let mode = 'road';
-  for (const g of gardeners) {
+  const perGardener = await mapWithConcurrency(gardeners, 3, async (g) => {
     const visits = await loadDayVisits(g.id, date);
-    if (!visits.length) continue;
+    if (!visits.length) return null;
     const r = await optimizeRouteRoad(visits.map((v) => ({ id: v.id, lat: v.lat, lng: v.lng })));
     await applyOrder(r.orderedIds);
+    return { count: visits.length, mode: r.mode };
+  });
+  let total = 0;
+  let mode = 'road';
+  for (const r of perGardener) {
+    if (!r) continue;
+    total += r.count;
     if (r.mode === 'straight') mode = 'straight'; // any fallback downgrades the summary
-    total += visits.length;
   }
   await logActivity(req.user.id, 'route.optimize_all', 'visit', null,
     `Optimized all routes (${mode === 'road' ? 'road distance' : 'straight-line'}) for ${date} (${total} visits)`);

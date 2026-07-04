@@ -72,7 +72,7 @@
   <div>Showing
     <% if (status) { %><span class="status status-<%= status %>"><%= status.replace('_',' ') %></span> <% } %>
     visits<% if (from || to) { %> · <%= from || '…' %> → <%= to || '…' %><% } %>
-    · <strong><%= visits.length %></strong> found
+    · <strong><%= totalVisits %></strong> found
   </div>
   <a class="btn btn-sm" href="/visits">✕ Clear filter</a>
 </div>
@@ -127,4 +127,5 @@
 <% }) %>
 
 <% if (!visits.length) { %><div class="card"><p class="muted">No visits match this filter.</p></div><% } %>
+<%- include('../partials/pagination') %>
 <%- include('../partials/footer') %>

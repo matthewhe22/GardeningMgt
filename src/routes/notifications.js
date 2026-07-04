@@ -1,15 +1,25 @@
 const express = require('express');
 const { q, q1 } = require('../db');
 const { asyncHandler } = require('../asyncHandler');
+const { pageParam, paginate } = require('../pagination');
 
 const router = express.Router();
 
 router.get('/', asyncHandler(async (req, res) => {
-  const notifications = await q(`
+  const page = pageParam(req);
+  const notificationsSql = `
     SELECT n.*, v.scheduled_date FROM notifications n
     LEFT JOIN visits v ON v.id = n.visit_id
-    WHERE n.user_id = $1 ORDER BY n.created_at DESC LIMIT 100`, [req.user.id]);
-  res.render('notifications/index', { title: 'Notifications', notifications });
+    WHERE n.user_id = $1 ORDER BY n.created_at DESC`;
+  const [{ rows: notifications, total, totalPages }, hasUnreadRow] = await Promise.all([
+    paginate(q, notificationsSql, [req.user.id], page),
+    // "Mark all read" acts on every notification, not just this page, so its
+    // visibility must reflect ALL unread notifications, not just this page's.
+    q1('SELECT 1 AS x FROM notifications WHERE user_id = $1 AND read_at IS NULL LIMIT 1', [req.user.id]),
+  ]);
+  res.render('notifications/index', {
+    title: 'Notifications', notifications, page, total, totalPages, hasUnread: !!hasUnreadRow,
+  });
 }));
 
 router.post('/read-all', asyncHandler(async (req, res) => {

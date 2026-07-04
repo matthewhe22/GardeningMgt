@@ -10,6 +10,7 @@ const { assertCsrf } = require('../csrf');
 const { optimizeRouteRoad } = require('../routeOptimizer');
 const { runInBackground } = require('../background');
 const { today } = require('../time');
+const { pageParam, paginate } = require('../pagination');
 
 const router = express.Router();
 
@@ -62,21 +63,48 @@ router.get('/', asyncHandler(async (req, res) => {
   } else if (!showAll) {
     args.push(todayStr); where.push(`v.scheduled_date >= $${args.length}`);
   }
-  // Every view reads nearest → future (ascending by date), then by visiting
-  // order within the day. The visit list and the filter dropdowns are
+  const page = pageParam(req);
+  const baseWhere = where.length ? 'WHERE ' + where.join(' AND ') : '';
+  // Paginate by DAY, not by row: the list groups visits by scheduled_date for
+  // display (route order within a day, per-day reorder/optimize controls), so
+  // slicing by a fixed row count could split one gardener's day across two
+  // pages — silently wrong stop counts and reorder buttons on both halves.
+  // Fetching a page of distinct dates first, then every visit on those dates,
+  // guarantees a page always contains whole days.
+  const DAYS_PER_PAGE = 20;
+  const dateSql = `
+    SELECT DISTINCT v.scheduled_date
+    FROM visits v
+    JOIN properties p ON p.id = v.property_id
+    LEFT JOIN users u ON u.id = v.gardener_id
+    ${baseWhere}
+    ORDER BY v.scheduled_date ASC`;
+  const totalVisitsSql = `
+    SELECT COUNT(*)::int AS c
+    FROM visits v
+    JOIN properties p ON p.id = v.property_id
+    LEFT JOIN users u ON u.id = v.gardener_id
+    ${baseWhere}`;
+  // The date page, the visit-count summary, and the filter dropdowns are all
   // independent, so fetch them in parallel to cut page latency.
-  const [visits, gardeners, properties] = await Promise.all([
-    q(`
+  const [datesPage, totalVisitsRow, gardeners, properties] = await Promise.all([
+    paginate(q, dateSql, args, page, DAYS_PER_PAGE),
+    q(totalVisitsSql, args),
+    q("SELECT id, name FROM users WHERE role = 'gardener' AND active"),
+    q('SELECT id, name FROM properties ORDER BY name'),
+  ]);
+  const dates = datesPage.rows.map((r) => r.scheduled_date);
+  const dateArgs = [...args, dates];
+  const dateCond = `v.scheduled_date = ANY($${dateArgs.length})`;
+  const visits = dates.length ? await q(`
     SELECT v.*, p.name AS property_name, p.address, p.lat, p.lng, u.name AS gardener_name
     FROM visits v
     JOIN properties p ON p.id = v.property_id
     LEFT JOIN users u ON u.id = v.gardener_id
-    ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-    ORDER BY v.scheduled_date ASC, COALESCE(v.route_order, 999), v.id
-    LIMIT 200`, args),
-    q("SELECT id, name FROM users WHERE role = 'gardener' AND active"),
-    q('SELECT id, name FROM properties ORDER BY name'),
-  ]);
+    ${where.length ? `${baseWhere} AND ${dateCond}` : `WHERE ${dateCond}`}
+    ORDER BY v.scheduled_date ASC, COALESCE(v.route_order, 999), v.id`, dateArgs) : [];
+  const totalVisits = totalVisitsRow[0].c;
+  const { total: totalDays, totalPages } = datesPage;
   // Group consecutive visits by day so the list reads as a per-day route in
   // visiting sequence (route_order). Reordering / optimizing is offered per day
   // only when the list is scoped to a single gardener (one route to order).
@@ -92,7 +120,8 @@ router.get('/', asyncHandler(async (req, res) => {
   res.render('visits/index', {
     title: 'Visits / Jobs', visits, groups, gardeners, properties, staff,
     date, upto, showAll, status, from, to, search, gardenerId, today: todayStr,
-    canReorder: !!gardenerId && !filtered,
+    canReorder: !!gardenerId && !filtered, page, totalPages,
+    total: totalDays, totalLabel: totalDays === 1 ? 'day' : 'days', totalVisits,
   });
 }));
 
@@ -329,20 +358,25 @@ router.post('/:id/timer/stop', asyncHandler(async (req, res) => {
     RETURNING id, duration_minutes`, [visit.id]);
   if (!gate) return res.redirect(`/visits/${visit.id}`); // already completed — no double side effects
 
-  await recordGps(visit.id, req.user.id, req.body, 'finish');
-  await logActivity(req.user.id, 'visit.timer.stop', 'visit', visit.id,
-    `Finished job #${visit.id} in ${gate.duration_minutes} min`);
-
-  const { dc } = await q1("SELECT COUNT(*)::int AS dc FROM tasks WHERE visit_id = $1 AND status = 'done'", [visit.id]);
-  const { tc } = await q1('SELECT COUNT(*)::int AS tc FROM tasks WHERE visit_id = $1', [visit.id]);
+  // These three don't depend on each other's result — run them together
+  // instead of one round-trip at a time on the gardener's "complete job" tap.
+  const [, , { dc, tc }] = await Promise.all([
+    recordGps(visit.id, req.user.id, req.body, 'finish'),
+    logActivity(req.user.id, 'visit.timer.stop', 'visit', visit.id,
+      `Finished job #${visit.id} in ${gate.duration_minutes} min`),
+    q1("SELECT COUNT(*) FILTER (WHERE status = 'done')::int AS dc, COUNT(*)::int AS tc FROM tasks WHERE visit_id = $1",
+      [visit.id]),
+  ]);
   const summary = `Job #${visit.id} completed by ${req.user.name} at ${visit.property_name}: ` +
     `${gate.duration_minutes} min, tasks ${dc}/${tc} done, ${pc} photo(s).`;
-  await pool.query(`
-    INSERT INTO notifications (user_id, visit_id, type, message)
-    SELECT id, $1, 'job_summary', $2 FROM users WHERE role IN ('admin','supervisor') AND active`,
-    [visit.id, summary]);
-
-  await advanceRecurringJob(visit, req.user.id, true);
+  // Notifying staff and advancing the recurring contract are independent too.
+  await Promise.all([
+    pool.query(`
+      INSERT INTO notifications (user_id, visit_id, type, message)
+      SELECT id, $1, 'job_summary', $2 FROM users WHERE role IN ('admin','supervisor') AND active`,
+      [visit.id, summary]),
+    advanceRecurringJob(visit, req.user.id, true),
+  ]);
   // Archive report + photos to OneDrive in the background (best-effort) so the
   // gardener's "complete job" tap returns immediately instead of waiting on the
   // report render + sequential Graph uploads.

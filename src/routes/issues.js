@@ -5,6 +5,7 @@ const { assertCsrf } = require('../csrf');
 const { logActivity } = require('../activity');
 const { upload, savePhoto } = require('../upload');
 const { asyncHandler } = require('../asyncHandler');
+const { pageParam, paginate } = require('../pagination');
 
 const router = express.Router();
 
@@ -15,8 +16,8 @@ router.get('/', asyncHandler(async (req, res) => {
   const args = [];
   if (status) { args.push(status); cond.push(`i.status = $${args.length}`); }
   if (search) { args.push(`%${search}%`); cond.push(`(i.title ILIKE $${args.length} OR p.name ILIKE $${args.length})`); }
-  const [issues, properties, users] = await Promise.all([
-    q(`
+  const page = pageParam(req);
+  const issuesSql = `
     SELECT i.*, p.name AS property_name, r.name AS reporter_name, a.name AS assignee_name
     FROM issues i
     LEFT JOIN properties p ON p.id = i.property_id
@@ -25,12 +26,16 @@ router.get('/', asyncHandler(async (req, res) => {
     ${cond.length ? 'WHERE ' + cond.join(' AND ') : ''}
     ORDER BY (i.status IN ('resolved','closed')),
       CASE i.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
-      i.created_at DESC
-    LIMIT 300`, args),
+      i.created_at DESC`;
+  const [issuesPage, properties, users] = await Promise.all([
+    paginate(q, issuesSql, args, page),
     q('SELECT id, name FROM properties ORDER BY name'),
     q('SELECT id, name FROM users WHERE active ORDER BY name'),
   ]);
-  res.render('issues/index', { title: 'Issues', issues, properties, users, status, search, staff: isStaff(req.user) });
+  const { rows: issues, total, totalPages } = issuesPage;
+  res.render('issues/index', {
+    title: 'Issues', issues, properties, users, status, search, staff: isStaff(req.user), page, total, totalPages,
+  });
 }));
 
 // Anyone can report an issue

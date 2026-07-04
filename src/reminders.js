@@ -38,11 +38,14 @@ async function sendRemindersForDate(date, opts = {}) {
   await pool.query(`INSERT INTO notifications (user_id, visit_id, type, message) VALUES ${values}`, params);
 
   // Best-effort external delivery; no-ops unless a provider is configured.
-  for (const v of claimed) {
+  // Every send is independent (and each already swallows its own errors), so
+  // fire them all concurrently instead of one gardener at a time — a busy
+  // day's worth of visits was otherwise slow enough to risk a serverless
+  // request timeout partway through.
+  await Promise.all(claimed.flatMap((v) => {
     const msg = msgFor(v);
-    await sendSms(v.gardener_phone, msg);
-    await sendEmail(v.gardener_email, 'Visit reminder', msg);
-  }
+    return [sendSms(v.gardener_phone, msg), sendEmail(v.gardener_email, 'Visit reminder', msg)];
+  }));
   await logActivity(actorId, actorId ? 'reminder.bulk' : 'reminder.auto', 'visit', null,
     `Sent ${claimed.length} visit reminder(s) for ${date}`);
   return claimed.length;
@@ -55,7 +58,7 @@ async function sendRemindersForDate(date, opts = {}) {
  * Returns the number of visits created.
  */
 async function backfillSchedules() {
-  const { occurrence, nextOccurrenceAfter } = require('./recurrence');
+  const { nextOccurrenceOnOrAfter } = require('./recurrence');
   const today = businessToday();
   const jobs = await q(`
     SELECT j.* FROM jobs j
@@ -67,8 +70,7 @@ async function backfillSchedules() {
   let created = 0;
   for (const job of jobs) {
     // Next occurrence on/after today, anchored to the contract start.
-    let next = job.start_date >= today ? job.start_date : nextOccurrenceAfter(job.start_date, job.frequency, today);
-    if (next < today) next = occurrence(job.start_date, job.frequency, 0);
+    const next = nextOccurrenceOnOrAfter(job.start_date, job.frequency, today);
     if (next > job.end_date) continue;
     const ins = await q1(`
       INSERT INTO visits (job_id, property_id, gardener_id, scheduled_date, time_window, created_by)
