@@ -4,16 +4,18 @@ const { today: businessToday } = require('./time');
 const { sendSms, sendEmail } = require('./notify');
 
 /**
- * Create in-app reminder notifications for every assigned, scheduled visit on
- * `date` (YYYY-MM-DD). Idempotent under concurrency: a single statement claims
- * unreminded visits (RETURNING) so a cron retry overlapping the supervisor's
- * "bulk reminders" click can't double-notify. Optionally also sends SMS/email
- * if a provider is configured (see notify.js). Returns count sent.
+ * Core implementation of sendRemindersForDate with every I/O dependency
+ * passed in explicitly, so the concurrent-send behavior and the query shapes
+ * built here can be unit tested with fakes — no live DB or SMS/email
+ * provider needed (see test/reminders.test.js). sendRemindersForDate() below
+ * is a thin wrapper binding the real db/notify/activity modules.
  *
+ * @param {{q: Function, pool: {query: Function}, sendSms: Function, sendEmail: Function, logActivity: Function}} deps
  * @param {string} date
  * @param {{actorId?: number|null, force?: boolean}} opts force re-sends even if already reminded
  */
-async function sendRemindersForDate(date, opts = {}) {
+async function sendRemindersForDateWith(deps, date, opts = {}) {
+  const { q, pool, sendSms, sendEmail, logActivity: log } = deps;
   const { actorId = null, force = false } = opts;
   // Join the gardener's contact details into the claim so there's no per-visit
   // user lookup (was an N+1) when sending SMS/email.
@@ -46,9 +48,23 @@ async function sendRemindersForDate(date, opts = {}) {
     const msg = msgFor(v);
     return [sendSms(v.gardener_phone, msg), sendEmail(v.gardener_email, 'Visit reminder', msg)];
   }));
-  await logActivity(actorId, actorId ? 'reminder.bulk' : 'reminder.auto', 'visit', null,
+  await log(actorId, actorId ? 'reminder.bulk' : 'reminder.auto', 'visit', null,
     `Sent ${claimed.length} visit reminder(s) for ${date}`);
   return claimed.length;
+}
+
+/**
+ * Create in-app reminder notifications for every assigned, scheduled visit on
+ * `date` (YYYY-MM-DD). Idempotent under concurrency: a single statement claims
+ * unreminded visits (RETURNING) so a cron retry overlapping the supervisor's
+ * "bulk reminders" click can't double-notify. Optionally also sends SMS/email
+ * if a provider is configured (see notify.js). Returns count sent.
+ *
+ * @param {string} date
+ * @param {{actorId?: number|null, force?: boolean}} opts force re-sends even if already reminded
+ */
+async function sendRemindersForDate(date, opts = {}) {
+  return sendRemindersForDateWith({ q, pool, sendSms, sendEmail, logActivity }, date, opts);
 }
 
 /**
@@ -100,4 +116,4 @@ function startReminderScheduler() {
   }, { timezone: TZ });
 }
 
-module.exports = { sendRemindersForDate, backfillSchedules, startReminderScheduler };
+module.exports = { sendRemindersForDate, sendRemindersForDateWith, backfillSchedules, startReminderScheduler };

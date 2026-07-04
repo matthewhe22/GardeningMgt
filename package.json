@@ -9,7 +9,7 @@
     "geocode": "node scripts/geocode.js",
     "migrate:photos": "node scripts/migrate-photos-to-s3.js",
     "test": "node --test",
-    "test:integration": "node --test test/integration/"
+    "test:integration": "node --test --test-concurrency=1 \"test/integration/**/*.test.js\""
   },
   "keywords": [],
   "author": "",
@@ -30,5 +30,8 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "devDependencies": {
+    "supertest": "^7.2.2"
   }
 }
