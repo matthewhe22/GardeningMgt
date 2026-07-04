@@ -48,7 +48,7 @@
       <td data-label="Status"><span class="status status-<%= t.status %>"><%= t.status.replace('_',' ') %></span></td>
       <td data-label="Change">
         <form method="post" action="/tasks/<%= t.id %>/status" class="inline">
-          <select name="status" onchange="this.form.submit()" aria-label="Change task status">
+          <select name="status" data-autosubmit aria-label="Change task status">
             <% ['pending','in_progress','done','blocked'].forEach(s => { %>
               <option value="<%= s %>" <%= t.status === s ? 'selected' : '' %>><%= s.replace('_',' ') %></option>
             <% }) %>
