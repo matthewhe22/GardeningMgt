@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title><%= title %> · GardeningMgt</title>
-  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/css/style.css?v=2">
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#0f3424">
   <% if (locals.csrfToken) { %><meta name="csrf-token" content="<%= csrfToken %>"><% } %>
@@ -27,6 +27,7 @@
     reminders: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="7.5"/><path d="M12 9.5V13l2.5 2"/><path d="m4.5 4-2 2"/><path d="m19.5 4 2 2"/></svg>',
     properties: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10.5c0 5.5-8 11-8 11s-8-5.5-8-11a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10.5" r="3"/></svg>',
     activity: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg>',
+    me: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.6"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg>',
     users: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 5a3.5 3.5 0 0 1 0 7"/><path d="M17.5 14.5a6.5 6.5 0 0 1 4 5.5"/></svg>',
     logout: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4H6a1.5 1.5 0 0 0-1.5 1.5v13A1.5 1.5 0 0 0 6 20h8"/><path d="m16.5 8 4 4-4 4"/><path d="M20 12H9.5"/></svg>',
     more: '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>',
@@ -60,11 +61,13 @@
     <% } %>
   </nav>
   <div class="sidebar-foot">
-    <span class="avatar" aria-hidden="true"><%= user.name.trim().charAt(0).toUpperCase() %></span>
-    <div class="sidebar-user">
-      <div class="name"><%= user.name %></div>
-      <div class="role"><%= user.role %></div>
-    </div>
+    <a href="/profile" class="sidebar-me" title="My profile">
+      <span class="avatar" aria-hidden="true"><%= user.name.trim().charAt(0).toUpperCase() %></span>
+      <span class="sidebar-user">
+        <span class="name"><%= user.name %></span>
+        <span class="role"><%= user.role %></span>
+      </span>
+    </a>
     <form method="post" action="/logout" class="inline"><button class="signout-btn" title="Sign out · <%= user.name %>" aria-label="Sign out"><%- icons.logout %></button></form>
   </div>
 </aside>
@@ -81,6 +84,7 @@
     <a href="/routes" class="tab<%= active('/routes') %>"><%- icons.routes %><span>Routes</span></a>
     <a href="/issues" class="tab<%= active('/issues') %>"><%- icons.issues %><span>Issues</span></a>
     <a href="/notifications" class="tab<%= active('/notifications') %>"><%- icons.bell %><span>Alerts</span><% if (unreadCount > 0) { %><span class="badge"><%= unreadCount %></span><% } %></a>
+    <a href="/profile" class="tab<%= active('/profile') %>"><%- icons.me %><span>Me</span></a>
   </div>
 </nav>
 
@@ -88,6 +92,7 @@
 <label for="nav-toggle" class="sheet-backdrop" aria-hidden="true"></label>
 <div class="sheet" aria-label="More options">
   <div class="sheet-handle"></div>
+  <a href="/profile" class="nav-item<%= active('/profile') %>"><%- icons.me %> My profile</a>
   <a href="/jobs" class="nav-item<%= active('/jobs') %>"><%- icons.repeat %> Sites</a>
   <a href="/tasks" class="nav-item<%= active('/tasks') %>"><%- icons.tasks %> Tasks</a>
   <a href="/photos" class="nav-item<%= active('/photos') %>"><%- icons.photos %> Photos</a>

@@ -53,14 +53,20 @@ app.use(cookieSession({
 }));
 
 // Ensure schema exists (no-op after first call), then resolve the user and
-// unread notification count for every request.
+// unread notification count for every request. Both lookups key off the
+// session's userId, so run them in parallel — one DB round trip of latency
+// instead of two on every page.
 app.use(asyncHandler(async (req, res, next) => {
   await ready();
-  res.locals.user = await currentUser(req);
-  res.locals.unreadCount = res.locals.user
-    ? (await q1('SELECT COUNT(*)::int AS c FROM notifications WHERE user_id = $1 AND read_at IS NULL',
-        [res.locals.user.id])).c
-    : 0;
+  const userId = req.session && req.session.userId;
+  const [user, unread] = userId
+    ? await Promise.all([
+        currentUser(req),
+        q1('SELECT COUNT(*)::int AS c FROM notifications WHERE user_id = $1 AND read_at IS NULL', [userId]),
+      ])
+    : [null, null];
+  res.locals.user = user;
+  res.locals.unreadCount = user ? unread.c : 0;
   res.locals.currentPath = req.path;
   next();
 }));
@@ -92,6 +98,7 @@ app.get('/uploads/:filename', requireLogin, asyncHandler(async (req, res) => {
 
 app.use('/', require('./routes/auth'));
 app.use('/', requireLogin, require('./routes/dashboard'));
+app.use('/profile', requireLogin, require('./routes/profile'));
 app.use('/visits', requireLogin, require('./routes/visits'));
 app.use('/jobs', requireLogin, require('./routes/jobs'));
 app.use('/tasks', requireLogin, require('./routes/tasks'));

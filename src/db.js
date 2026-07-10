@@ -109,6 +109,9 @@ CREATE TABLE IF NOT EXISTS visits (
   created_at       TIMESTAMP NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_visits_day ON visits (gardener_id, scheduled_date);
+-- Staff dashboard filters by date alone; idx_visits_day leads with gardener_id
+-- so it can't serve that query.
+CREATE INDEX IF NOT EXISTS idx_visits_date ON visits (scheduled_date);
 
 CREATE TABLE IF NOT EXISTS tasks (
   id           SERIAL PRIMARY KEY,
@@ -254,6 +257,10 @@ CREATE SEQUENCE IF NOT EXISTS invoice_seq;
 
 let readyPromise = null;
 
+// Bump when SCHEMA or the migrations below change, so existing databases
+// re-run the DDL exactly once instead of on every serverless cold start.
+const SCHEMA_VERSION = '2';
+
 /**
  * Create the schema (idempotent) and, on an empty database, a bootstrap
  * admin account so the first deploy is immediately usable.
@@ -262,6 +269,15 @@ let readyPromise = null;
 function ready() {
   if (!readyPromise) {
     readyPromise = (async () => {
+      // Fast path: one cheap SELECT instead of replaying ~50 DDL statements
+      // on every cold start (that DDL was the main cause of slow first
+      // page loads on mobile). Any error (e.g. settings table missing on a
+      // brand-new database) falls through to the full setup below.
+      try {
+        const v = (await pool.query("SELECT value FROM settings WHERE key = 'schema_version'")).rows[0];
+        if (v && v.value === SCHEMA_VERSION) return;
+      } catch (e) { /* first boot: settings table doesn't exist yet */ }
+
       await pool.query(SCHEMA);
       // Migrations for databases created before these columns existed.
       await pool.query('ALTER TABLE properties ADD COLUMN IF NOT EXISTS lots INTEGER');
@@ -285,6 +301,11 @@ function ready() {
         );
         console.log(`[bootstrap] created admin ${email} with password: ${password} — sign in and change it now.`);
       }
+      await pool.query(
+        `INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', $1, now())
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+        [SCHEMA_VERSION]
+      );
     })();
     // Don't memoize failures: a transient DB outage at cold start should not
     // poison every later request in this process.
