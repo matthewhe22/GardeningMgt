@@ -4,7 +4,7 @@ const { q, q1 } = require('./db');
 const { uploadFile, getConfig, getAccessToken } = require('./onedrive');
 const { logActivity } = require('./activity');
 const { renderMapSnapshot, externalMapUrl } = require('./mapSnapshot');
-const { fmtDateTime } = require('./time');
+const { fmtDateTime, fmtDate } = require('./time');
 
 /** Everything needed to render a job completion report. */
 async function loadReportData(visitId) {
@@ -230,4 +230,136 @@ async function renderReportPdf(data) {
   });
 }
 
-module.exports = { loadReportData, renderReportHtml, renderReportPdf, archiveToOneDrive };
+/**
+ * Render a single invoice as a real PDF (Buffer), for the "Download PDF"
+ * action on the invoice detail page. Same pdfkit approach as
+ * renderReportPdf above — no headless browser, lazily required.
+ * @param {object} invoice  from invoiceWithItems() in routes/invoices.js —
+ *   header fields plus .items[] and .total
+ * @param {object} business  invoice-related settings (see
+ *   INVOICE_SETTING_KEYS in settings.js): business name/address/ABN, payment
+ *   details, and default payment-terms days. Any/all may be unset.
+ */
+async function renderInvoicePdf(invoice, business = {}) {
+  const PDFDocument = require('pdfkit');
+
+  // pdfkit's built-in fonts are Latin-1 only: strip emoji / exotic glyphs so
+  // user-entered text never renders as boxes or breaks encoding.
+  const clean = (s) => String(s == null ? '' : s).replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF]/g, '').trim();
+  const businessName = clean(business.invoice_business_name) || 'GardeningMgt';
+
+  return await new Promise((resolve, reject) => {
+    const doc = new PDFDocument({
+      size: 'A4', margin: 48,
+      info: { Title: `Invoice ${invoice.number}`, Author: businessName },
+    });
+    const chunks = [];
+    doc.on('data', (c) => chunks.push(c));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+
+    const GREEN = '#14532d', MUTED = '#707b72', INK = '#1d2620';
+    const left = doc.page.margins.left;
+    const cw = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+    const bottom = () => doc.page.height - doc.page.margins.bottom;
+    const ensure = (h) => { if (doc.y + h > bottom()) doc.addPage(); };
+    const row = (label, value) => {
+      const v = clean(value);
+      if (v === '') return;
+      const labelW = 130;
+      ensure(20);
+      const y = doc.y;
+      doc.fillColor(MUTED).font('Helvetica-Bold').fontSize(9).text(clean(label), left, y, { width: labelW });
+      doc.fillColor(INK).font('Helvetica').fontSize(10).text(v, left + labelW, y, { width: cw - labelW });
+      doc.y = Math.max(doc.y, y); doc.moveDown(0.2);
+    };
+
+    // Header: business identity (letterhead) + document title.
+    doc.fillColor(GREEN).font('Helvetica-Bold').fontSize(20).text(businessName);
+    doc.fillColor(MUTED).font('Helvetica').fontSize(9);
+    if (business.invoice_business_address) doc.text(clean(business.invoice_business_address));
+    if (business.invoice_business_abn) doc.text(`ABN/GST: ${clean(business.invoice_business_abn)}`);
+    doc.moveDown(0.6);
+    doc.fillColor(GREEN).font('Helvetica-Bold').fontSize(16).text(`TAX INVOICE  ${clean(invoice.number)}`);
+    doc.moveTo(left, doc.y + 4).lineTo(left + cw, doc.y + 4).lineWidth(2).strokeColor(GREEN).stroke();
+    doc.lineWidth(1).moveDown(0.6);
+
+    // Invoice meta
+    doc.fillColor(INK).font('Helvetica').fontSize(10);
+    row('Invoice number', invoice.number);
+    row('Issued', invoice.issued_at ? fmtDate(invoice.issued_at) : 'not yet issued');
+    row('Due date', invoice.due_at ? fmtDate(invoice.due_at) : '-');
+    row('Status', invoice.status);
+
+    // Bill to
+    doc.moveDown(0.4);
+    doc.fillColor(GREEN).font('Helvetica-Bold').fontSize(12).text('Bill to');
+    doc.moveDown(0.2);
+    row('Property', invoice.property_name);
+    row('Address', invoice.address);
+    if (invoice.contact_name) row('Contact', invoice.contact_name);
+    row('Job date', invoice.scheduled_date);
+
+    // Line items table
+    doc.moveDown(0.6);
+    ensure(30);
+    const amtW = 75, priceW = 75, qtyW = 50;
+    const descW = cw - amtW - priceW - qtyW;
+    const colDesc = left, colQty = colDesc + descW, colPrice = colQty + qtyW, colAmt = colPrice + priceW;
+    const tableTop = doc.y;
+    doc.fillColor(GREEN).font('Helvetica-Bold').fontSize(9);
+    doc.text('Description', colDesc, tableTop, { width: descW });
+    doc.text('Qty', colQty, tableTop, { width: qtyW, align: 'right' });
+    doc.text('Unit price', colPrice, tableTop, { width: priceW, align: 'right' });
+    doc.text('Amount', colAmt, tableTop, { width: amtW, align: 'right' });
+    doc.moveTo(left, tableTop + 14).lineTo(left + cw, tableTop + 14).lineWidth(1).strokeColor('#e6e4dc').stroke();
+    doc.y = tableTop + 20;
+
+    doc.font('Helvetica').fillColor(INK).fontSize(10);
+    invoice.items.forEach((it) => {
+      const desc = clean(it.description);
+      const h = Math.max(doc.heightOfString(desc, { width: descW }), 14);
+      ensure(h + 6);
+      const y = doc.y;
+      doc.text(desc, colDesc, y, { width: descW });
+      doc.text(String(it.quantity), colQty, y, { width: qtyW, align: 'right' });
+      doc.text(`$${it.unit_price.toFixed(2)}`, colPrice, y, { width: priceW, align: 'right' });
+      doc.text(`$${(it.quantity * it.unit_price).toFixed(2)}`, colAmt, y, { width: amtW, align: 'right' });
+      doc.y = y + h + 6;
+    });
+    if (!invoice.items.length) {
+      ensure(16);
+      doc.fillColor(MUTED).font('Helvetica').fontSize(9).text('No line items.', colDesc, doc.y);
+      doc.moveDown(0.4);
+    }
+
+    ensure(30);
+    doc.moveTo(left, doc.y + 2).lineTo(left + cw, doc.y + 2).lineWidth(1).strokeColor('#e6e4dc').stroke();
+    doc.moveDown(0.4);
+    const totalY = doc.y;
+    doc.font('Helvetica-Bold').fontSize(11).fillColor(INK);
+    doc.text('Total', colPrice, totalY, { width: priceW, align: 'right' });
+    doc.text(`$${invoice.total.toFixed(2)}`, colAmt, totalY, { width: amtW, align: 'right' });
+    doc.y = totalY + 24;
+
+    // Payment details / terms
+    if (business.invoice_payment_terms_days || business.invoice_payment_details) {
+      ensure(60);
+      doc.fillColor(GREEN).font('Helvetica-Bold').fontSize(11).text('Payment details');
+      doc.moveDown(0.2);
+      doc.fillColor(INK).font('Helvetica').fontSize(9);
+      if (business.invoice_payment_terms_days) {
+        doc.text(`Payment due within ${clean(business.invoice_payment_terms_days)} days of issue.`);
+      }
+      if (business.invoice_payment_details) {
+        doc.text(clean(business.invoice_payment_details), { width: cw });
+      }
+    }
+
+    doc.moveDown(1);
+    doc.fillColor(MUTED).font('Helvetica').fontSize(8).text(`Generated by ${businessName} on ${fmtDateTime(new Date())}.`);
+    doc.end();
+  });
+}
+
+module.exports = { loadReportData, renderReportHtml, renderReportPdf, renderInvoicePdf, archiveToOneDrive };

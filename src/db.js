@@ -220,6 +220,7 @@ CREATE TABLE IF NOT EXISTS invoices (
   created_by INTEGER REFERENCES users(id),
   issued_at  TIMESTAMP,
   paid_at    TIMESTAMP,
+  due_at     DATE,
   created_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
@@ -342,7 +343,7 @@ function ensureCriticalSchema() {
 
 // Bump when SCHEMA or the migrations below change, so existing databases
 // re-run the DDL exactly once instead of on every serverless cold start.
-const SCHEMA_VERSION = '5';
+const SCHEMA_VERSION = '6';
 
 /**
  * Numeric, forward-only comparison of a stored schema_version against this
@@ -379,6 +380,8 @@ async function runMigrations() {
   // every time this migration block runs — a same-type ALTER COLUMN TYPE is
   // a no-op, so no IF NOT EXISTS guard is needed.
   await pool.query('ALTER TABLE invoice_items ALTER COLUMN quantity TYPE NUMERIC(10,2), ALTER COLUMN unit_price TYPE NUMERIC(10,2)');
+  // Invoice due date, so the invoice PDF/print view can show it.
+  await pool.query('ALTER TABLE invoices ADD COLUMN IF NOT EXISTS due_at DATE');
   const { c } = (await pool.query('SELECT COUNT(*)::int AS c FROM users')).rows[0];
   if (c === 0) {
     const bcrypt = require('bcryptjs');

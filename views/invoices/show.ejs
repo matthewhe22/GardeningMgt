@@ -2,14 +2,20 @@
 <h1><%= invoice.number %> <span class="status status-<%= invoice.status %>"><%= invoice.status %></span></h1>
 <% if (error === 'duplicate') { %>
 <p class="alert alert-error">Can't set that status: another live invoice already exists for this job. Void or update that one first.</p>
+<% } else if (error === 'hasitems') { %>
+<p class="alert alert-error">Can't delete this invoice: it already has line items. Void it instead.</p>
+<% } else if (error === 'notdraft') { %>
+<p class="alert alert-error">Only a draft invoice can be deleted. Void it instead.</p>
 <% } %>
 <p class="muted">
   <%= invoice.property_name %>, <%= invoice.address %> · Job on <%= invoice.scheduled_date %>
   (<a href="/visits/<%= invoice.visit_id %>">job #<%= invoice.visit_id %></a>)
   <% if (invoice.gardener_name) { %> · Gardener: <%= invoice.gardener_name %><% } %>
+  <% if (invoice.due_at) { %> · Due <%= invoice.due_at %><% } %>
   <% if (invoice.issued_at) { %> · Issued <%= fmtDateTime(invoice.issued_at) %><% } %>
   <% if (invoice.paid_at) { %> · Paid <%= fmtDateTime(invoice.paid_at) %><% } %>
 </p>
+<p><a class="btn" href="/invoices/<%= invoice.id %>/pdf">⬇ Download PDF</a></p>
 
 <div class="card">
   <table class="table table--stack">
@@ -51,5 +57,12 @@
     </label>
     <button class="btn btn-primary">Update status</button>
   </form>
+
+  <% if (invoice.status === 'draft' && !invoice.items.length) { %>
+  <form method="post" action="/invoices/<%= invoice.id %>/delete" class="inline" style="margin-top:8px"
+    data-confirm="Delete this empty draft invoice? This can't be undone.">
+    <button class="link-btn">Delete this empty draft</button>
+  </form>
+  <% } %>
 </div>
 <%- include('../partials/footer') %>

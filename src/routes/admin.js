@@ -206,7 +206,11 @@ router.post('/properties/:id/update', requireRole('supervisor'), asyncHandler(as
 
 router.get('/users', requireRole(), asyncHandler(async (req, res) => {
   const users = await q('SELECT id, name, email, role, phone, active, created_at FROM users ORDER BY role, name');
-  res.render('admin/users', { title: 'Users', users });
+  res.render('admin/users', {
+    title: 'Users', users,
+    error: req.query.error || null,
+    created: req.query.created || null, updated: req.query.updated || null, reset: req.query.reset || null,
+  });
 }));
 
 router.post('/users', requireRole(), asyncHandler(async (req, res) => {
@@ -227,21 +231,80 @@ router.post('/users', requireRole(), asyncHandler(async (req, res) => {
   res.redirect('/admin/users?created=1');
 }));
 
+// How many *other* active admins exist besides `id` — used to stop a
+// role-change or deactivation from leaving the business with zero admins.
+async function activeAdminCountExcluding(id) {
+  const { c } = await q1(
+    "SELECT COUNT(*)::int AS c FROM users WHERE role = 'admin' AND active AND id <> $1", [id]);
+  return c;
+}
+
+// Edit an existing user's name/email/phone/role. Mirrors the create route's
+// validation and duplicate-email handling (unique index + 23505 catch, same
+// pattern as uq_jobs_property_active elsewhere in this codebase).
+router.post('/users/:id/update', requireRole(), asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  const existing = await q1('SELECT id, role, active FROM users WHERE id = $1', [id]);
+  if (!existing) return res.redirect('/admin/users');
+  const { name, email, role, phone } = req.body;
+  if (!(name || '').trim() || !(email || '').trim() || !['admin', 'supervisor', 'gardener'].includes(role)) {
+    return res.redirect('/admin/users?error=invalid');
+  }
+  if (existing.role === 'admin' && existing.active && role !== 'admin' && await activeAdminCountExcluding(id) === 0) {
+    return res.redirect('/admin/users?error=lastadmin');
+  }
+  try {
+    await q(`UPDATE users SET name = $1, email = $2, role = $3, phone = $4 WHERE id = $5`,
+      [name.trim(), email.trim().toLowerCase(), role, phone || null, id]);
+  } catch (e) {
+    if (e.code === '23505') return res.redirect('/admin/users?error=dupemail'); // unique_violation
+    throw e;
+  }
+  await logActivity(req.user.id, 'user.update', 'user', id, `Updated details for ${name.trim()}`);
+  res.redirect('/admin/users?updated=1');
+}));
+
+// Admin-initiated password reset — no email flow, just sets the new hash
+// directly (same bcrypt convention as the login route in routes/auth.js).
+// The log entry records who reset whose password, never the password itself.
+router.post('/users/:id/password', requireRole(), asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  const target = await q1('SELECT id, name FROM users WHERE id = $1', [id]);
+  if (!target) return res.redirect('/admin/users');
+  const { password } = req.body;
+  if (!password || String(password).length < 8) return res.redirect('/admin/users?error=weak');
+  await q('UPDATE users SET password_hash = $1 WHERE id = $2', [bcrypt.hashSync(password, 10), id]);
+  await logActivity(req.user.id, 'user.password_reset', 'user', id, `Reset password for ${target.name}`);
+  res.redirect('/admin/users?reset=1');
+}));
+
 router.post('/users/:id/toggle', requireRole(), asyncHandler(async (req, res) => {
-  if (Number(req.params.id) !== req.user.id) {
-    await q('UPDATE users SET active = NOT active WHERE id = $1', [req.params.id]);
-    await logActivity(req.user.id, 'user.toggle', 'user', Number(req.params.id), `Toggled active state of user #${req.params.id}`);
+  const id = Number(req.params.id);
+  if (id !== req.user.id) {
+    const existing = await q1('SELECT role, active FROM users WHERE id = $1', [id]);
+    // Disabling the last active admin would lock the whole business out of
+    // admin-only functions (user management, settings, ...) — block it.
+    if (existing && existing.role === 'admin' && existing.active && await activeAdminCountExcluding(id) === 0) {
+      return res.redirect('/admin/users?error=lastadmin');
+    }
+    await q('UPDATE users SET active = NOT active WHERE id = $1', [id]);
+    await logActivity(req.user.id, 'user.toggle', 'user', id, `Toggled active state of user #${id}`);
   }
   res.redirect('/admin/users');
 }));
 
-// --- App settings (OneDrive archiving): admin only ---
+// --- App settings (OneDrive archiving, invoice letterhead): admin only ---
 
-const { getSettings, setSetting } = require('../settings');
+const { getSettings, setSetting, INVOICE_SETTING_KEYS } = require('../settings');
 const { testConnection, SETTING_KEYS } = require('../onedrive');
 
+// Settings whose masked placeholder ('********') means "leave as-is, don't
+// overwrite the stored secret" — mirrors the onedrive_client_secret pattern.
+const MASKED_SETTING_KEYS = new Set(['onedrive_client_secret', 'invoice_payment_details']);
+const ALL_SETTING_KEYS = [...SETTING_KEYS, ...INVOICE_SETTING_KEYS];
+
 router.get('/settings', requireRole(), asyncHandler(async (req, res) => {
-  const settings = await getSettings(SETTING_KEYS);
+  const settings = await getSettings(ALL_SETTING_KEYS);
   res.render('admin/settings', {
     title: 'Settings', settings,
     saved: req.query.saved, test: null,
@@ -249,18 +312,18 @@ router.get('/settings', requireRole(), asyncHandler(async (req, res) => {
 }));
 
 router.post('/settings', requireRole(), asyncHandler(async (req, res) => {
-  for (const key of SETTING_KEYS) {
+  for (const key of ALL_SETTING_KEYS) {
     const value = (req.body[key] || '').trim();
     // Leave the stored secret untouched when the masked placeholder comes back.
-    if (key === 'onedrive_client_secret' && value === '********') continue;
+    if (MASKED_SETTING_KEYS.has(key) && value === '********') continue;
     await setSetting(key, value || null);
   }
-  await logActivity(req.user.id, 'settings.update', 'settings', null, 'Updated OneDrive settings');
+  await logActivity(req.user.id, 'settings.update', 'settings', null, 'Updated settings');
   res.redirect('/admin/settings?saved=1');
 }));
 
 router.post('/settings/test', requireRole(), asyncHandler(async (req, res) => {
-  const settings = await getSettings(SETTING_KEYS);
+  const settings = await getSettings(ALL_SETTING_KEYS);
   const test = await testConnection();
   // Log only pass/fail — the message can contain Graph error detail.
   await logActivity(req.user.id, 'settings.test', 'settings', null,
