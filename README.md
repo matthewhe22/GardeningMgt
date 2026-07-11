@@ -18,7 +18,7 @@ normal Node.js server.
 | Job timer with GPS capture on start/finish | Job page (mobile-friendly) |
 | Job completion summary sent to supervisors & admins | 🔔 Notifications |
 | Per-job comments (supervisor ↔ gardener) | Job page |
-| Invoicing per job (labour pre-filled from the timer) | **Invoices** (staff) |
+| Invoicing per job (pre-filled from the site's gardening fee, admin-only) | **Invoices** (staff) |
 | Reporting (visits, hours per gardener, issues, invoice totals) | **Reports** (staff) |
 
 ## Roles
@@ -101,7 +101,6 @@ Demo accounts (after seeding):
 | `SESSION_SECRET` | dev value | **Set in production** — signs the session cookie |
 | `CRON_SECRET` | unset | If set, `/cron/reminders` requires `Authorization: Bearer <secret>` |
 | `BOOTSTRAP_ADMIN_EMAIL/_PASSWORD` | admin@example.com / admin1234 | First admin on an empty database |
-| `HOURLY_RATE` | 50 | Default labour rate for invoices |
 | `BUSINESS_TZ` | Australia/Melbourne | Timezone for the business calendar, reminder scheduling and every timestamp shown to users |
 | `OSRM_URL` | public demo server | Road-distance routing endpoint (OSRM). Falls back to straight-line if unreachable; self-host for production volume — see [docs/OSRM.md](docs/OSRM.md) |
 | `GEOCODER_URL` / `GEOCODER_EMAIL` | Nominatim | Address→coordinates geocoder (used by Sites) |

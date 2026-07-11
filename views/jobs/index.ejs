@@ -49,6 +49,9 @@
     </label>
     <label>First visit date <input type="date" name="start_date" required></label>
     <label>Time window <input type="text" name="time_window" placeholder="08:00-10:00"></label>
+    <% if (user.role === 'admin') { %>
+      <label>Gardening fee <input type="number" name="gardening_fee" min="0" step="0.01" placeholder="e.g. 85.00"></label>
+    <% } %>
     <button class="btn btn-primary">Create job &amp; schedule first visit</button>
   </form>
 </details>
@@ -56,7 +59,7 @@
 
 <div class="card">
   <table class="table table--stack">
-    <tr class="thead-row"><th>Site</th><th>Frequency</th><th>Contract</th><th>Gardener</th><th>Last completed</th><th>Next visit</th><% if (staff) { %><th>Manage</th><% } %></tr>
+    <tr class="thead-row"><th>Site</th><th>Frequency</th><th>Contract</th><th>Gardener</th><th>Last completed</th><th>Next visit</th><% if (user.role === 'admin') { %><th>Fee</th><% } %><% if (staff) { %><th>Manage</th><% } %></tr>
     <% jobs.forEach(j => { %>
     <tr>
       <td class="stack-main"><strong><% if (staff) { %><a href="/jobs/site/<%= j.property_id %>"><%= j.property_name %></a><% } else { %><%= j.property_name %><% } %></strong><br>
@@ -74,6 +77,9 @@
           <% if (j.upcoming_count > 1) { %><br><span class="muted"><%= j.upcoming_count %> upcoming</span><% } %>
         <% } else { %><span class="muted">none scheduled</span><% } %>
       </td>
+      <% if (user.role === 'admin') { %>
+      <td data-label="Fee"><%= j.gardening_fee != null ? '$' + Number(j.gardening_fee).toFixed(2) : '—' %></td>
+      <% } %>
       <% if (staff) { %>
       <td class="stack-main">
         <% if (j.expired) { %>
@@ -101,6 +107,10 @@
               </select>
             </label>
             <label>Time window <input type="text" name="time_window" value="<%= j.time_window || '' %>"></label>
+            <% if (user.role === 'admin') { %>
+              <label>Gardening fee <input type="number" name="gardening_fee" min="0" step="0.01"
+                value="<%= j.gardening_fee != null ? j.gardening_fee : '' %>" placeholder="e.g. 85.00"></label>
+            <% } %>
             <label><input type="checkbox" name="active" <%= j.active ? 'checked' : '' %>> Active</label>
             <button class="btn">Save</button>
           </form>

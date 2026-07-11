@@ -56,11 +56,14 @@ router.get('/', asyncHandler(async (req, res) => {
   res.render('invoices/index', { title: 'Invoices', invoices, search, page, total, totalPages });
 }));
 
-// Create an invoice for a job, pre-filled with a labour line from the timer.
+// Create an invoice for a job, pre-filled with a gardening-fee line when the
+// site's job has one set (an admin-only figure — see jobs.js parseFee).
 router.post('/', asyncHandler(async (req, res) => {
   const visitId = Number(req.body.visit_id);
   if (!Number.isInteger(visitId)) return res.redirect('/invoices');
-  const visit = await q1('SELECT * FROM visits WHERE id = $1', [visitId]);
+  const visit = await q1(
+    `SELECT v.*, j.gardening_fee FROM visits v LEFT JOIN jobs j ON j.id = v.job_id WHERE v.id = $1`,
+    [visitId]);
   if (!visit) return res.redirect('/invoices');
   // Don't create a second live invoice for the same job (voided ones don't count).
   // This check-then-insert still has a race window, closed below by the
@@ -70,17 +73,15 @@ router.post('/', asyncHandler(async (req, res) => {
   const number = await nextInvoiceNumber();
   let invoiceId;
   try {
-    // Invoice + its labour line are one unit: a failure partway through must
+    // Invoice + its fee line are one unit: a failure partway through must
     // not leave a live invoice with zero line items.
     invoiceId = await withTransaction(async (tx) => {
       const { id } = await tx.q1(
         'INSERT INTO invoices (visit_id, number, created_by) VALUES ($1, $2, $3) RETURNING id',
         [visitId, number, req.user.id]);
-      if (visit.duration_minutes) {
-        const hourlyRate = Number(process.env.HOURLY_RATE || 50);
+      if (visit.gardening_fee != null) {
         await tx.q('INSERT INTO invoice_items (invoice_id, description, quantity, unit_price) VALUES ($1, $2, $3, $4)',
-          [id, `Gardening labour (${visit.duration_minutes} min)`,
-            Math.round((visit.duration_minutes / 60) * 100) / 100, hourlyRate]);
+          [id, 'Gardening fee', 1, visit.gardening_fee]);
       }
       return id;
     });

@@ -14,6 +14,14 @@ const router = express.Router();
 // from inserting 100+ rows at once while still giving a real forward schedule.
 const PREGENERATE = 12;
 
+// The gardening fee is an admin-only figure — parse to a clean non-negative
+// amount (or null to clear it), and only ever call this for an admin caller.
+function parseFee(raw) {
+  if (raw === undefined || raw === null || String(raw).trim() === '') return null;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : null;
+}
+
 // Recurring site jobs: one contract per site. Gardeners see their own;
 // staff see and manage all.
 router.get('/', asyncHandler(async (req, res) => {
@@ -53,10 +61,13 @@ router.get('/', asyncHandler(async (req, res) => {
 
 // Create a recurring job and pre-generate its forward schedule (transactional).
 router.post('/', requireRole('supervisor'), asyncHandler(async (req, res) => {
-  const { property_id, gardener_id, frequency, contract_years, start_date, time_window } = req.body;
+  const { property_id, gardener_id, frequency, contract_years, start_date, time_window, gardening_fee } = req.body;
   if (!Number(property_id) || !isValidDate(start_date) || !FREQUENCIES.includes(frequency)) {
     return res.redirect('/jobs?error=invalid');
   }
+  // Only an admin can set the fee — a supervisor posting this field (or
+  // tampering with the request) is silently ignored, not an error.
+  const fee = req.user.role === 'admin' ? parseFee(gardening_fee) : null;
   // The default gardener must actually be a gardener (or unassigned).
   let gardener = null;
   if (gardener_id) {
@@ -77,9 +88,9 @@ router.post('/', requireRole('supervisor'), asyncHandler(async (req, res) => {
   try {
     await withTransaction(async (tx) => {
       const job = await tx.q1(`
-        INSERT INTO jobs (property_id, gardener_id, frequency, contract_years, start_date, end_date, time_window, created_by)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-        [Number(property_id), gardener, frequency, years, start_date, endDate, time_window || null, req.user.id]);
+        INSERT INTO jobs (property_id, gardener_id, frequency, contract_years, start_date, end_date, time_window, gardening_fee, created_by)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+        [Number(property_id), gardener, frequency, years, start_date, endDate, time_window || null, fee, req.user.id]);
       for (const d of dates) {
         await tx.q(`
           INSERT INTO visits (job_id, property_id, gardener_id, scheduled_date, time_window, created_by)
@@ -103,18 +114,21 @@ router.post('/', requireRole('supervisor'), asyncHandler(async (req, res) => {
 router.post('/:id/update', requireRole('supervisor'), asyncHandler(async (req, res) => {
   const job = await q1('SELECT * FROM jobs WHERE id = $1', [req.params.id]);
   if (!job) return res.redirect('/jobs');
-  const { gardener_id, frequency, time_window, active } = req.body;
+  const { gardener_id, frequency, time_window, active, gardening_fee } = req.body;
   let gardener = null;
   if (gardener_id) {
     const g = await q1("SELECT id FROM users WHERE id = $1 AND role = 'gardener' AND active", [Number(gardener_id)]);
     if (!g) return res.redirect('/jobs?error=gardener');
     gardener = g.id;
   }
+  // Only an admin can change the fee — a supervisor submitting this form
+  // (the field isn't even rendered for them) leaves it untouched.
+  const fee = req.user.role === 'admin' ? parseFee(gardening_fee) : job.gardening_fee;
   try {
     await q(`
-      UPDATE jobs SET gardener_id = $1, frequency = $2, time_window = $3, active = $4 WHERE id = $5`,
+      UPDATE jobs SET gardener_id = $1, frequency = $2, time_window = $3, active = $4, gardening_fee = $5 WHERE id = $6`,
       [gardener, FREQUENCIES.includes(frequency) ? frequency : job.frequency,
-        time_window || null, active === 'on', job.id]);
+        time_window || null, active === 'on', fee, job.id]);
   } catch (e) {
     // Reactivating this job while another active job already exists for the
     // same property (uq_jobs_property_active) — same conflict as creating a

@@ -108,6 +108,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   start_date        DATE NOT NULL,
   end_date          DATE NOT NULL,                    -- start_date + contract term
   time_window       TEXT,
+  gardening_fee     NUMERIC(10,2),                    -- admin-only flat fee; seeds the invoice line item
   last_completed_at TIMESTAMP,                        -- set every time an occurrence completes
   active            BOOLEAN NOT NULL DEFAULT true,
   created_by        INTEGER REFERENCES users(id),
@@ -341,7 +342,7 @@ function ensureCriticalSchema() {
 
 // Bump when SCHEMA or the migrations below change, so existing databases
 // re-run the DDL exactly once instead of on every serverless cold start.
-const SCHEMA_VERSION = '3';
+const SCHEMA_VERSION = '4';
 
 /**
  * Create the schema (idempotent) and, on an empty database, a bootstrap
@@ -372,6 +373,7 @@ function ready() {
       await pool.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS visit_comment_id INTEGER REFERENCES visit_comments(id) ON DELETE SET NULL');
       // Renewal tracking: flag when a contract has been renewed/closed.
       await pool.query("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS renewal_acknowledged BOOLEAN NOT NULL DEFAULT false");
+      await pool.query("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS gardening_fee NUMERIC(10,2)");
       const { c } = (await pool.query('SELECT COUNT(*)::int AS c FROM users')).rows[0];
       if (c === 0) {
         const bcrypt = require('bcryptjs');
