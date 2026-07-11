@@ -219,6 +219,7 @@ CREATE TABLE IF NOT EXISTS invoices (
   created_by INTEGER REFERENCES users(id),
   issued_at  TIMESTAMP,
   paid_at    TIMESTAMP,
+  due_at     DATE,
   created_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
@@ -341,7 +342,7 @@ function ensureCriticalSchema() {
 
 // Bump when SCHEMA or the migrations below change, so existing databases
 // re-run the DDL exactly once instead of on every serverless cold start.
-const SCHEMA_VERSION = '3';
+const SCHEMA_VERSION = '4';
 
 /**
  * Create the schema (idempotent) and, on an empty database, a bootstrap
@@ -372,6 +373,8 @@ function ready() {
       await pool.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS visit_comment_id INTEGER REFERENCES visit_comments(id) ON DELETE SET NULL');
       // Renewal tracking: flag when a contract has been renewed/closed.
       await pool.query("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS renewal_acknowledged BOOLEAN NOT NULL DEFAULT false");
+      // Invoice due date, so the invoice PDF/print view can show it.
+      await pool.query('ALTER TABLE invoices ADD COLUMN IF NOT EXISTS due_at DATE');
       const { c } = (await pool.query('SELECT COUNT(*)::int AS c FROM users')).rows[0];
       if (c === 0) {
         const bcrypt = require('bcryptjs');

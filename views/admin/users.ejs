@@ -1,6 +1,18 @@
 <%- include('../partials/header') %>
 <h1>Users</h1>
 
+<% if (locals.created) { %><p class="alert alert-ok">User created.</p><% } %>
+<% if (locals.updated) { %><p class="alert alert-ok">User details updated.</p><% } %>
+<% if (locals.reset) { %><p class="alert alert-ok">Password reset.</p><% } %>
+<% if (locals.error) { %>
+<p class="alert alert-error">
+  <% if (error === 'dupemail') { %>That email address is already in use by another account.
+  <% } else if (error === 'weak') { %>Password must be at least 8 characters.
+  <% } else if (error === 'lastadmin') { %>Can't do that — it would leave the business with no active admin account.
+  <% } else { %>Some details were invalid — please check and try again.<% } %>
+</p>
+<% } %>
+
 <details class="card">
   <summary><strong>＋ Add user</strong></summary>
   <form method="post" action="/admin/users" class="form-grid">
@@ -35,6 +47,27 @@
           <button class="link-btn"><%= u.active ? 'Disable' : 'Enable' %></button>
         </form>
         <% } %>
+        <details>
+          <summary class="muted">Edit</summary>
+          <form method="post" action="/admin/users/<%= u.id %>/update" class="form-grid">
+            <label>Name <input type="text" name="name" value="<%= u.name %>" required></label>
+            <label>Email <input type="email" name="email" value="<%= u.email %>" required></label>
+            <label>Phone <input type="text" name="phone" value="<%= u.phone || '' %>"></label>
+            <label>Role
+              <select name="role">
+                <option value="gardener" <%= u.role === 'gardener' ? 'selected' : '' %>>Gardener</option>
+                <option value="supervisor" <%= u.role === 'supervisor' ? 'selected' : '' %>>Supervisor</option>
+                <option value="admin" <%= u.role === 'admin' ? 'selected' : '' %>>Admin</option>
+              </select>
+            </label>
+            <button class="btn">Save</button>
+          </form>
+          <form method="post" action="/admin/users/<%= u.id %>/password" class="form-grid" style="margin-top:8px"
+            data-confirm="Set a new password for <%= u.name %>?">
+            <label>New password <input type="password" name="password" minlength="8" required placeholder="At least 8 characters"></label>
+            <button class="btn">Set new password</button>
+          </form>
+        </details>
       </td>
     </tr>
     <% }) %>

@@ -34,6 +34,28 @@
 </div>
 
 <div class="card">
+  <h2>Invoice details</h2>
+  <p class="muted">Shown on every invoice PDF: business letterhead, GST/ABN, and the default
+    payment terms used to set each new invoice's due date.</p>
+  <form method="post" action="/admin/settings" class="form-grid">
+    <label>Business name
+      <input type="text" name="invoice_business_name" value="<%= settings.invoice_business_name || '' %>" placeholder="e.g. Green Thumb Gardening Pty Ltd"></label>
+    <label class="span2">Business address
+      <input type="text" name="invoice_business_address" value="<%= settings.invoice_business_address || '' %>" placeholder="123 Example St, Melbourne VIC 3000"></label>
+    <label>ABN / GST number
+      <input type="text" name="invoice_business_abn" value="<%= settings.invoice_business_abn || '' %>" placeholder="e.g. 12 345 678 901"></label>
+    <label>Default payment terms (days)
+      <input type="number" name="invoice_payment_terms_days" min="0" step="1"
+        value="<%= settings.invoice_payment_terms_days || 14 %>"></label>
+    <label class="span2">Payment details (bank/BPAY etc. — shown on invoices)
+      <input type="text" name="invoice_payment_details"
+        value="<%= settings.invoice_payment_details ? '********' : '' %>"
+        placeholder="<%= settings.invoice_payment_details ? 'saved — leave as is to keep' : 'e.g. BSB 000-000, Acc 000000000' %>"></label>
+    <button class="btn btn-primary">Save settings</button>
+  </form>
+</div>
+
+<div class="card">
   <h2>How to set this up in Azure</h2>
   <ol class="muted" style="line-height:1.9">
     <li>Go to <strong>portal.azure.com → Microsoft Entra ID → App registrations → New registration</strong>.</li>

@@ -3,10 +3,20 @@ const { q, q1, withTransaction } = require('../db');
 const { requireRole } = require('../auth');
 const { logActivity } = require('../activity');
 const { asyncHandler } = require('../asyncHandler');
-const { year: businessYear } = require('../time');
+const { year: businessYear, today: businessToday } = require('../time');
 const { pageParam, paginate } = require('../pagination');
+const { getSetting, getSettings, INVOICE_SETTING_KEYS } = require('../settings');
+const { renderInvoicePdf } = require('../report');
 
 const router = express.Router();
+
+// Add `days` calendar days to a 'YYYY-MM-DD' date string, without any
+// timezone drift (plain UTC-midnight arithmetic on the calendar date).
+function addDays(dateStr, days) {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
 
 async function nextInvoiceNumber() {
   // A DB sequence is atomic, so concurrent creates never collide on the
@@ -53,7 +63,10 @@ router.get('/', asyncHandler(async (req, res) => {
     ${cond}
     ORDER BY inv.created_at DESC`;
   const { rows: invoices, total, totalPages } = await paginate(q, invoicesSql, args, page);
-  res.render('invoices/index', { title: 'Invoices', invoices, search, page, total, totalPages });
+  res.render('invoices/index', {
+    title: 'Invoices', invoices, search, page, total, totalPages,
+    error: req.query.error || null, deleted: req.query.deleted || null,
+  });
 }));
 
 // Create an invoice for a job, pre-filled with a labour line from the timer.
@@ -62,20 +75,27 @@ router.post('/', asyncHandler(async (req, res) => {
   if (!Number.isInteger(visitId)) return res.redirect('/invoices');
   const visit = await q1('SELECT * FROM visits WHERE id = $1', [visitId]);
   if (!visit) return res.redirect('/invoices');
+  // A job that hasn't happened yet has nothing to bill — block invoicing
+  // until the visit is actually completed.
+  if (visit.status !== 'completed') {
+    return res.redirect('/invoices?error=notcompleted');
+  }
   // Don't create a second live invoice for the same job (voided ones don't count).
   // This check-then-insert still has a race window, closed below by the
   // uq_invoices_visit_open unique index + a 23505 catch.
   const existing = await q1("SELECT id FROM invoices WHERE visit_id = $1 AND status <> 'void' LIMIT 1", [visitId]);
   if (existing) return res.redirect(`/invoices/${existing.id}`);
   const number = await nextInvoiceNumber();
+  const termsDays = Number(await getSetting('invoice_payment_terms_days')) || 14;
+  const dueAt = addDays(businessToday(), termsDays);
   let invoiceId;
   try {
     // Invoice + its labour line are one unit: a failure partway through must
     // not leave a live invoice with zero line items.
     invoiceId = await withTransaction(async (tx) => {
       const { id } = await tx.q1(
-        'INSERT INTO invoices (visit_id, number, created_by) VALUES ($1, $2, $3) RETURNING id',
-        [visitId, number, req.user.id]);
+        'INSERT INTO invoices (visit_id, number, created_by, due_at) VALUES ($1, $2, $3, $4) RETURNING id',
+        [visitId, number, req.user.id, dueAt]);
       if (visit.duration_minutes) {
         const hourlyRate = Number(process.env.HOURLY_RATE || 50);
         await tx.q('INSERT INTO invoice_items (invoice_id, description, quantity, unit_price) VALUES ($1, $2, $3, $4)',
@@ -99,6 +119,32 @@ router.get('/:id', asyncHandler(async (req, res) => {
   const invoice = await invoiceWithItems(req.params.id);
   if (!invoice) return res.status(404).render('error', { title: 'Not found', message: 'Invoice not found.' });
   res.render('invoices/show', { title: invoice.number, invoice, error: req.query.error || null });
+}));
+
+// PDF export — same gating as this whole router (staff-only), following the
+// job-report PDF's approach (src/report.js, served from GET /visits/:id/report).
+router.get('/:id/pdf', asyncHandler(async (req, res) => {
+  const invoice = await invoiceWithItems(req.params.id);
+  if (!invoice) return res.status(404).render('error', { title: 'Not found', message: 'Invoice not found.' });
+  const business = await getSettings(INVOICE_SETTING_KEYS);
+  const pdf = await renderInvoicePdf(invoice, business);
+  res.set('Content-Type', 'application/pdf');
+  res.set('Content-Disposition', `attachment; filename="${invoice.number}.pdf"`);
+  res.send(pdf);
+}));
+
+// Delete an empty draft — the one case where burning the invoice number
+// with "void" is overkill (e.g. created by mistake, never had a line added).
+router.post('/:id/delete', asyncHandler(async (req, res) => {
+  const invoice = await q1('SELECT id, status FROM invoices WHERE id = $1', [req.params.id]);
+  if (!invoice) return res.redirect('/invoices');
+  if (invoice.status !== 'draft') return res.redirect(`/invoices/${req.params.id}?error=notdraft`);
+  const { c } = await q1('SELECT COUNT(*)::int AS c FROM invoice_items WHERE invoice_id = $1', [req.params.id]);
+  if (c > 0) return res.redirect(`/invoices/${req.params.id}?error=hasitems`);
+  await q('DELETE FROM invoices WHERE id = $1', [req.params.id]);
+  await logActivity(req.user.id, 'invoice.delete', 'invoice', Number(req.params.id),
+    `Deleted empty draft invoice #${req.params.id}`);
+  res.redirect('/invoices?deleted=1');
 }));
 
 router.post('/:id/items', asyncHandler(async (req, res) => {

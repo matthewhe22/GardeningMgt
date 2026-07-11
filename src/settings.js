@@ -4,7 +4,15 @@ const { q, q1 } = require('./db');
 // Secret-valued settings are encrypted at rest with AES-256-GCM using a key
 // derived from SETTINGS_KEY (or SESSION_SECRET as a fallback). Stored as
 // enc:<iv>:<tag>:<ciphertext> (all base64). Plaintext legacy values still read.
-const SECRET_KEYS = new Set(['onedrive_client_secret']);
+const SECRET_KEYS = new Set(['onedrive_client_secret', 'invoice_payment_details']);
+
+// Business details shown on invoice PDFs, edited on /admin/settings.
+// invoice_payment_details (bank/BPAY info etc.) is encrypted at rest like the
+// OneDrive client secret above; the rest is non-sensitive letterhead text.
+const INVOICE_SETTING_KEYS = [
+  'invoice_business_name', 'invoice_business_address', 'invoice_business_abn',
+  'invoice_payment_details', 'invoice_payment_terms_days',
+];
 const KEY = crypto.createHash('sha256')
   .update(process.env.SETTINGS_KEY || process.env.SESSION_SECRET || 'dev-only-insecure-secret')
   .digest();
@@ -50,4 +58,4 @@ async function setSetting(key, value) {
     [key, stored]);
 }
 
-module.exports = { getSetting, getSettings, setSetting };
+module.exports = { getSetting, getSettings, setSetting, INVOICE_SETTING_KEYS };
