@@ -6,12 +6,18 @@
   "scripts": {
     "start": "node src/server.js",
     "seed": "node scripts/seed.js",
-    "test": "node --test"
+    "geocode": "node scripts/geocode.js",
+    "migrate:photos": "node scripts/migrate-photos-to-s3.js",
+    "test": "node --test",
+    "test:integration": "node --test --test-concurrency=1 \"test/integration/**/*.test.js\""
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1073.0",
+    "@aws-sdk/s3-request-presigner": "^3.1073.0",
+    "@vercel/functions": "^3.7.1",
     "bcryptjs": "^3.0.3",
     "cookie-session": "^2.1.1",
     "ejs": "^6.0.1",
@@ -19,9 +25,13 @@
     "express": "^5.2.1",
     "multer": "^2.1.1",
     "node-cron": "^4.2.1",
+    "pdfkit": "^0.19.1",
     "pg": "^8.21.0"
   },
   "engines": {
     "node": ">=18"
+  },
+  "devDependencies": {
+    "supertest": "^7.2.2"
   }
 }

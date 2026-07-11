@@ -1,12 +1,8 @@
 // GardeningMgt service worker: app-shell + static caching so the UI loads
 // offline, with a friendly offline fallback for navigations. (Form POSTs are
 // not queued — they require connectivity; the offline page tells the user.)
-//
-// Bump CACHE whenever /css or /js changes: installed phones keep serving the
-// cached copy until a new cache name forces a refresh (also bump the ?v= asset
-// query in views/partials/header.ejs and footer.ejs).
-const CACHE = 'gmgt-v2';
-const STATIC = ['/css/style.css?v=2', '/js/app.js?v=2', '/manifest.json', '/icon.svg', '/offline.html'];
+const CACHE = 'gmgt-v3';
+const STATIC = ['/manifest.json', '/icon.svg', '/offline.html'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(STATIC)).then(() => self.skipWaiting()));
@@ -24,23 +20,36 @@ self.addEventListener('fetch', (e) => {
   if (request.method !== 'GET') return; // never cache mutations
 
   const url = new URL(request.url);
-  // Static assets: stale-while-revalidate — respond from cache instantly, but
-  // refresh the cached copy in the background so CSS/JS fixes reach devices
-  // on the next load instead of never (the old cache-first served a stale
-  // stylesheet forever, which is how phones ended up with a broken layout).
-  if (url.pathname.startsWith('/css/') || url.pathname.startsWith('/js/')
-      || STATIC.includes(url.pathname) || STATIC.includes(url.pathname + url.search)) {
+  // CSS/JS are network-first: always take the freshly deployed file when online
+  // (the ?v=<deploy> query also makes each deploy a new URL), and fall back to
+  // the cached copy only when offline. This guarantees a deploy is never masked
+  // by a stale cached asset.
+  if (url.pathname.startsWith('/css/') || url.pathname.startsWith('/js/')) {
     e.respondWith(
-      caches.open(CACHE).then(async (cache) => {
-        const cached = await cache.match(request);
-        const refresh = fetch(request)
-          .then((res) => {
+      fetch(request)
+        .then((res) => {
+          if (res && res.ok) {
+            const copy = res.clone();
+            caches.open(CACHE).then((cache) => cache.put(request, copy));
+          }
+          return res;
+        })
+        .catch(() => caches.match(request))
+    );
+    return;
+  }
+  // Other static assets (manifest, icon, offline page): stale-while-revalidate.
+  if (STATIC.includes(url.pathname)) {
+    e.respondWith(
+      caches.open(CACHE).then((cache) =>
+        cache.match(request).then((hit) => {
+          const network = fetch(request).then((res) => {
             if (res && res.ok) cache.put(request, res.clone());
             return res;
-          })
-          .catch(() => cached); // offline: fall back to whatever we have
-        return cached || refresh;
-      })
+          }).catch(() => hit);
+          return hit || network;
+        })
+      )
     );
     return;
   }

@@ -2,17 +2,45 @@
 const CSRF = document.querySelector('meta[name="csrf-token"]')?.content || '';
 document.querySelectorAll('form').forEach((form) => {
   if ((form.method || '').toLowerCase() !== 'post') return;
-  if (form.querySelector('input[name="_csrf"]')) return;
-  const i = document.createElement('input');
-  i.type = 'hidden';
-  i.name = '_csrf';
-  i.value = CSRF;
-  form.appendChild(i);
+  if (!form.querySelector('input[name="_csrf"]')) {
+    const i = document.createElement('input');
+    i.type = 'hidden';
+    i.name = '_csrf';
+    i.value = CSRF;
+    form.appendChild(i);
+  }
+  // Multipart uploads: the hidden field lands in the (unparsed) body, so also
+  // carry the token in the query string where it can be checked before multer
+  // buffers the files.
+  if ((form.enctype || '').includes('multipart')) {
+    try {
+      const u = new URL(form.getAttribute('action') || location.href, location.origin);
+      u.searchParams.set('_csrf', CSRF);
+      form.setAttribute('action', u.pathname + u.search);
+    } catch (_) { /* leave action as-is */ }
+  }
+});
+
+// --- Auto-submit a form when a field marked data-autosubmit changes ---
+// (an inline onchange="this.form.submit()" attribute is blocked by the
+// script-src 'self' CSP header sent on every response)
+document.querySelectorAll('[data-autosubmit]').forEach((el) => {
+  el.addEventListener('change', () => el.form && el.form.submit());
+});
+
+// --- Confirm destructive actions (forms/links marked data-confirm) ---
+// Registered before the double-submit guard so a cancelled confirm also
+// prevents the button from being disabled.
+document.querySelectorAll('[data-confirm]').forEach((el) => {
+  const msg = el.getAttribute('data-confirm') || 'Are you sure?';
+  const evt = el.tagName === 'FORM' ? 'submit' : 'click';
+  el.addEventListener(evt, (e) => { if (!window.confirm(msg)) e.preventDefault(); });
 });
 
 // --- Prevent double-submit: disable submit buttons once a form is submitted ---
 document.querySelectorAll('form').forEach((form) => {
-  form.addEventListener('submit', () => {
+  form.addEventListener('submit', (e) => {
+    if (e.defaultPrevented) return; // e.g. a confirm() was cancelled
     const btn = form.querySelector('button[type="submit"], button:not([type])');
     if (btn) {
       // Let the value still post, just block repeat taps.
@@ -36,6 +64,62 @@ document.querySelectorAll('form.gps-form').forEach((form) => {
   );
 });
 
+// --- Photo capture preview: show thumbnails of what was taken/selected ---
+// Field gardeners tap "Take photo" / "Choose from library"; this shows the
+// chosen photos right away so they can confirm before uploading. The upload
+// still works without JS — these are progressive enhancements only.
+document.querySelectorAll('form[data-upload]').forEach((form) => {
+  const inputs = form.querySelectorAll('input[type="file"]');
+  const status = form.querySelector('[data-upload-status]');
+  const previews = form.querySelector('[data-upload-previews]');
+  let urls = []; // object URLs to revoke between selections
+
+  const render = () => {
+    const files = [];
+    inputs.forEach((inp) => { for (const f of inp.files || []) files.push(f); });
+
+    if (status) {
+      status.hidden = files.length === 0;
+      status.textContent = files.length
+        ? (files.length === 1 ? '✓ 1 photo ready to upload' : `✓ ${files.length} photos ready to upload`)
+        : '';
+    }
+
+    if (previews) {
+      urls.forEach((u) => URL.revokeObjectURL(u));
+      urls = [];
+      previews.innerHTML = '';
+      previews.hidden = files.length === 0;
+      files.forEach((f) => {
+        const fig = document.createElement('figure');
+        fig.className = 'preview-thumb';
+        if (f.type && f.type.startsWith('image/')) {
+          const url = URL.createObjectURL(f);
+          urls.push(url);
+          const img = document.createElement('img');
+          img.src = url;
+          img.alt = f.name;
+          img.loading = 'lazy';
+          fig.appendChild(img);
+        } else {
+          // e.g. iPhone HEIC that the browser can't render — show a placeholder.
+          const span = document.createElement('span');
+          span.className = 'preview-file';
+          span.textContent = '🖼';
+          fig.appendChild(span);
+        }
+        const cap = document.createElement('figcaption');
+        cap.textContent = f.name;
+        fig.appendChild(cap);
+        previews.appendChild(fig);
+      });
+    }
+  };
+
+  inputs.forEach((inp) => inp.addEventListener('change', render));
+  render();
+});
+
 // Expose the token for any fetch()-based callers (e.g. GPS pings).
 window.CSRF_TOKEN = CSRF;
 
@@ -52,7 +136,9 @@ function showNet() {
       bar = document.createElement('div');
       bar.id = 'net-offline';
       bar.textContent = '⚠ Offline — changes won’t save until you reconnect';
-      bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:60;background:#855600;color:#fff;text-align:center;padding:8px;font-size:0.85rem';
+      // Sit above the bottom tab bar (and the iOS home indicator) so it never
+      // hides navigation while a field user is offline.
+      bar.style.cssText = 'position:fixed;left:0;right:0;bottom:calc(62px + env(safe-area-inset-bottom,0px));z-index:39;background:#855600;color:#fff;text-align:center;padding:8px;font-size:0.85rem';
       document.body.appendChild(bar);
     }
   } else if (bar) {

@@ -5,25 +5,37 @@ const { assertCsrf } = require('../csrf');
 const { logActivity } = require('../activity');
 const { upload, savePhoto } = require('../upload');
 const { asyncHandler } = require('../asyncHandler');
+const { pageParam, paginate } = require('../pagination');
 
 const router = express.Router();
 
 router.get('/', asyncHandler(async (req, res) => {
   const status = req.query.status || '';
-  const issues = await q(`
+  const search = (req.query.search || '').trim();
+  const cond = [];
+  const args = [];
+  if (status) { args.push(status); cond.push(`i.status = $${args.length}`); }
+  if (search) { args.push(`%${search}%`); cond.push(`(i.title ILIKE $${args.length} OR p.name ILIKE $${args.length})`); }
+  const page = pageParam(req);
+  const issuesSql = `
     SELECT i.*, p.name AS property_name, r.name AS reporter_name, a.name AS assignee_name
     FROM issues i
     LEFT JOIN properties p ON p.id = i.property_id
     LEFT JOIN users r ON r.id = i.reported_by
     LEFT JOIN users a ON a.id = i.assigned_to
-    ${status ? 'WHERE i.status = $1' : ''}
+    ${cond.length ? 'WHERE ' + cond.join(' AND ') : ''}
     ORDER BY (i.status IN ('resolved','closed')),
       CASE i.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
-      i.created_at DESC
-    LIMIT 300`, status ? [status] : []);
-  const properties = await q('SELECT id, name FROM properties ORDER BY name');
-  const users = await q('SELECT id, name FROM users WHERE active ORDER BY name');
-  res.render('issues/index', { title: 'Issues', issues, properties, users, status, staff: isStaff(req.user) });
+      i.created_at DESC`;
+  const [issuesPage, properties, users] = await Promise.all([
+    paginate(q, issuesSql, args, page),
+    q('SELECT id, name FROM properties ORDER BY name'),
+    q('SELECT id, name FROM users WHERE active ORDER BY name'),
+  ]);
+  const { rows: issues, total, totalPages } = issuesPage;
+  res.render('issues/index', {
+    title: 'Issues', issues, properties, users, status, search, staff: isStaff(req.user), page, total, totalPages,
+  });
 }));
 
 // Anyone can report an issue
@@ -49,14 +61,16 @@ router.get('/:id', asyncHandler(async (req, res) => {
     LEFT JOIN users a ON a.id = i.assigned_to
     WHERE i.id = $1`, [req.params.id]);
   if (!issue) return res.status(404).render('error', { title: 'Not found', message: 'Issue not found.' });
-  const comments = await q(`
+  const [comments, photos, users] = await Promise.all([
+    q(`
     SELECT c.*, u.name AS author_name FROM issue_comments c
-    LEFT JOIN users u ON u.id = c.user_id WHERE c.issue_id = $1 ORDER BY c.created_at`, [issue.id]);
-  const photos = await q(`
-    SELECT ph.id, ph.filename, ph.caption, ph.original_name, ph.created_at, u.name AS uploader_name
+    LEFT JOIN users u ON u.id = c.user_id WHERE c.issue_id = $1 ORDER BY c.created_at`, [issue.id]),
+    q(`
+    SELECT ph.id, ph.filename, ph.caption, ph.original_name, ph.created_at, ph.uploaded_by, u.name AS uploader_name
     FROM photos ph
-    LEFT JOIN users u ON u.id = ph.uploaded_by WHERE ph.issue_id = $1 ORDER BY ph.created_at DESC`, [issue.id]);
-  const users = await q('SELECT id, name FROM users WHERE active ORDER BY name');
+    LEFT JOIN users u ON u.id = ph.uploaded_by WHERE ph.issue_id = $1 ORDER BY ph.created_at DESC`, [issue.id]),
+    q('SELECT id, name FROM users WHERE active ORDER BY name'),
+  ]);
   res.render('issues/show', { title: `Issue #${issue.id}`, issue, comments, photos, users, staff: isStaff(req.user) });
 }));
 
@@ -81,25 +95,33 @@ router.post('/:id/update', requireRole('supervisor'), asyncHandler(async (req, r
 }));
 
 router.post('/:id/comments', asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(404).render('error', { title: 'Not found', message: 'Issue not found.' });
+  const issue = await q1('SELECT id FROM issues WHERE id = $1', [id]);
+  if (!issue) return res.status(404).render('error', { title: 'Not found', message: 'Issue not found.' });
   const body = (req.body.body || '').trim();
   if (body) {
     await q('INSERT INTO issue_comments (issue_id, user_id, body) VALUES ($1, $2, $3)',
-      [req.params.id, req.user.id, body]);
-    await logActivity(req.user.id, 'issue.comment', 'issue', Number(req.params.id), `Commented on issue #${req.params.id}`);
+      [id, req.user.id, body]);
+    await logActivity(req.user.id, 'issue.comment', 'issue', id, `Commented on issue #${id}`);
   }
-  res.redirect(`/issues/${req.params.id}#comments`);
+  res.redirect(`/issues/${id}#comments`);
 }));
 
 router.post('/:id/photos', upload.array('photos', 10), asyncHandler(async (req, res) => {
   assertCsrf(req);
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(404).render('error', { title: 'Not found', message: 'Issue not found.' });
+  const issue = await q1('SELECT id FROM issues WHERE id = $1', [id]);
+  if (!issue) return res.status(404).render('error', { title: 'Not found', message: 'Issue not found.' });
   for (const f of req.files || []) {
-    await savePhoto(f, { caption: req.body.caption || null, issueId: Number(req.params.id), userId: req.user.id });
+    await savePhoto(f, { caption: req.body.caption || null, issueId: id, userId: req.user.id });
   }
   if ((req.files || []).length) {
-    await logActivity(req.user.id, 'photo.upload', 'issue', Number(req.params.id),
-      `Uploaded ${req.files.length} photo(s) to issue #${req.params.id}`);
+    await logActivity(req.user.id, 'photo.upload', 'issue', id,
+      `Uploaded ${req.files.length} photo(s) to issue #${id}`);
   }
-  res.redirect(`/issues/${req.params.id}#photos`);
+  res.redirect(`/issues/${id}#photos`);
 }));
 
 module.exports = router;

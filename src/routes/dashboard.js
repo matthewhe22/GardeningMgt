@@ -2,16 +2,17 @@ const express = require('express');
 const { q } = require('../db');
 const { isStaff } = require('../auth');
 const { asyncHandler } = require('../asyncHandler');
+const { today: businessToday } = require('../time');
 
 const router = express.Router();
 
 router.get('/', asyncHandler(async (req, res) => {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = businessToday();
   const me = req.user;
   const staff = isStaff(me);
 
-  // The three panels are independent — fetch them in parallel so the page
-  // waits one DB round trip, not three (this was the slowest mobile page).
+  // These three are independent — run them concurrently rather than waiting
+  // for each round-trip in turn.
   const [todayVisits, myTasks, openIssues] = await Promise.all([
     q(`
     SELECT v.*, p.name AS property_name, p.address, u.name AS gardener_name
@@ -21,7 +22,6 @@ router.get('/', asyncHandler(async (req, res) => {
     WHERE v.scheduled_date = $1 ${staff ? '' : 'AND v.gardener_id = $2'}
     ORDER BY COALESCE(v.route_order, 999), v.time_window`,
       staff ? [today] : [today, me.id]),
-
     q(`
     SELECT t.*, v.scheduled_date, p.name AS property_name
     FROM tasks t
@@ -32,7 +32,6 @@ router.get('/', asyncHandler(async (req, res) => {
     ORDER BY COALESCE(t.due_date, v.scheduled_date, '9999-12-31')
     LIMIT 15`,
       staff ? [] : [me.id]),
-
     q(`
     SELECT i.*, p.name AS property_name, u.name AS assignee_name
     FROM issues i

@@ -8,15 +8,39 @@ types.setTypeParser(1184, (v) => v.replace('T', ' ').slice(0, 19)); // timestamp
 types.setTypeParser(20, (v) => parseInt(v, 10));           // int8 (COUNT)
 types.setTypeParser(1700, (v) => parseFloat(v));           // numeric (SUM)
 
-const isLocal = /localhost|127\.0\.0\.1/.test(process.env.DATABASE_URL || 'localhost');
+const DB_URL = process.env.DATABASE_URL || 'postgresql://postgres@localhost:5433/gardeningmgt';
+const isLocal = /localhost|127\.0\.0\.1/.test(DB_URL);
+// A connection pooler (Supabase pgBouncer on :6543, or any "pooler" host) can
+// absorb more connections safely, so we open a few more per instance to get
+// more out of the parallel (Promise.all) page queries. On a direct connection
+// we stay conservative to avoid exhausting Postgres across serverless
+// instances. DB_POOL_MAX overrides explicitly.
+const usingPooler = /pgbouncer=true|:6543\b|pooler\./i.test(DB_URL);
 const pool = new Pool({
-  connectionString:
-    process.env.DATABASE_URL || 'postgresql://postgres@localhost:5433/gardeningmgt',
-  // Verify the server certificate in production. Supabase presents a valid
-  // public chain, so rejectUnauthorized can stay on; opt out with DB_INSECURE_TLS.
-  ssl: isLocal ? false : { rejectUnauthorized: process.env.DB_INSECURE_TLS !== '1' },
-  max: process.env.VERCEL ? 3 : 10, // keep connections low per serverless instance
+  connectionString: DB_URL,
+  // Hosted Postgres (e.g. the Supabase pooler) presents a certificate signed
+  // by the provider's own CA, which Node does not trust by default, so full
+  // verification fails with SELF_SIGNED_CERT_IN_CHAIN. Verify only when the
+  // CA is supplied via DB_SSL_CA (PEM contents); otherwise still encrypt but
+  // skip chain verification.
+  ssl: isLocal
+    ? false
+    : process.env.DB_SSL_CA
+      ? { rejectUnauthorized: true, ca: process.env.DB_SSL_CA }
+      : { rejectUnauthorized: false },
+  max: process.env.DB_POOL_MAX
+    ? Number(process.env.DB_POOL_MAX)
+    : (process.env.VERCEL ? (usingPooler ? 8 : 3) : 10),
 });
+
+// On serverless, many concurrent instances each holding direct connections can
+// exhaust Postgres' connection slots. Warn loudly if we're on Vercel without a
+// pooler so this scaling cliff shows up in the logs rather than as random 500s.
+if (process.env.VERCEL && !usingPooler && !isLocal) {
+  console.warn('[db] WARNING: running on Vercel with a direct (non-pooler) DATABASE_URL. ' +
+    'Use the connection pooler to avoid exhausting Postgres connections under serverless ' +
+    'concurrency (e.g. Supabase port 6543 with ?pgbouncer=true, or a host containing "pooler").');
+}
 
 /** All rows. */
 const q = async (sql, params = []) => (await pool.query(sql, params)).rows;
@@ -246,6 +270,12 @@ CREATE INDEX IF NOT EXISTS idx_issue_comments_issue ON issue_comments (issue_id)
 CREATE INDEX IF NOT EXISTS idx_invoices_visit ON invoices (visit_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_property ON jobs (property_id);
 
+-- Indexes for hot list/report query shapes (issues board, photo gallery,
+-- date-range reports that aren't scoped to a single gardener).
+CREATE INDEX IF NOT EXISTS idx_issues_status_priority ON issues (status, priority);
+CREATE INDEX IF NOT EXISTS idx_photos_created ON photos (created_at);
+CREATE INDEX IF NOT EXISTS idx_visits_scheduled ON visits (scheduled_date);
+
 -- Prevent duplicate future occurrences of the same job on the same day
 -- (closes the check-then-insert race in rollRecurringJob).
 CREATE UNIQUE INDEX IF NOT EXISTS uq_visits_job_day_scheduled
@@ -256,10 +286,62 @@ CREATE SEQUENCE IF NOT EXISTS invoice_seq;
 `;
 
 let readyPromise = null;
+let criticalSchemaPromise = null;
+
+/**
+ * A handful of small, idempotent DDL statements that critical app behavior
+ * depends on directly (the login throttle table; the invoice/job race-
+ * condition indexes) — kept out of SCHEMA/ready() so they run unconditionally,
+ * even under DB_SKIP_INIT=1 (which every already-provisioned deployment is
+ * expected to set, per the comment on ready() below). Skipping these on such
+ * a deployment would otherwise break login outright the moment this code
+ * ships, since auth.js queries login_attempts unconditionally.
+ * Idempotent and cheap (a handful of IF NOT EXISTS checks), so paying this
+ * on every cold start — including ones that already skip the full schema
+ * pass — costs nothing meaningful.
+ */
+function ensureCriticalSchema() {
+  if (!criticalSchemaPromise) {
+    criticalSchemaPromise = (async () => {
+      // Login brute-force throttle, keyed by "ip|email". Backed by the DB
+      // (rather than an in-process Map) so the limit actually holds across
+      // the many concurrent serverless instances a single deploy can scale
+      // out to. A fresh table can never conflict with existing data, so a
+      // failure here is a real problem — let it propagate.
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS login_attempts (
+          key      TEXT PRIMARY KEY,
+          count    INTEGER NOT NULL DEFAULT 1,
+          first_at TIMESTAMP NOT NULL DEFAULT now()
+        )`);
+      // One invoice per visit, and one active job per property: closes the
+      // check-then-insert races in POST /invoices and POST /jobs. Unlike the
+      // table above, a database that already has duplicate live invoices or
+      // active jobs (possible — that's exactly the race these indexes close)
+      // would fail to create these; don't let that take down every request,
+      // just log it so an operator can dedupe. Until the index exists, those
+      // routes' 23505 catch simply has nothing to catch, same as before this
+      // fix shipped.
+      for (const [name, sql] of [
+        ['uq_invoices_visit_open',
+          `CREATE UNIQUE INDEX IF NOT EXISTS uq_invoices_visit_open ON invoices (visit_id) WHERE status <> 'void'`],
+        ['uq_jobs_property_active',
+          `CREATE UNIQUE INDEX IF NOT EXISTS uq_jobs_property_active ON jobs (property_id) WHERE active`],
+      ]) {
+        try { await pool.query(sql); }
+        catch (e) {
+          console.error(`[db] could not create ${name} (likely duplicate rows already violate it) — dedupe manually:`, e.message);
+        }
+      }
+    })();
+    criticalSchemaPromise.catch(() => { criticalSchemaPromise = null; });
+  }
+  return criticalSchemaPromise;
+}
 
 // Bump when SCHEMA or the migrations below change, so existing databases
 // re-run the DDL exactly once instead of on every serverless cold start.
-const SCHEMA_VERSION = '2';
+const SCHEMA_VERSION = '3';
 
 /**
  * Create the schema (idempotent) and, on an empty database, a bootstrap
@@ -267,6 +349,10 @@ const SCHEMA_VERSION = '2';
  * Called once per process before handling requests.
  */
 function ready() {
+  // Once the database is provisioned, set DB_SKIP_INIT=1 so serverless cold
+  // starts don't re-run the full schema DDL + migrations on the first request.
+  // ensureCriticalSchema() still runs — see its own doc comment for why.
+  if (process.env.DB_SKIP_INIT === '1') return ensureCriticalSchema();
   if (!readyPromise) {
     readyPromise = (async () => {
       // Fast path: one cheap SELECT instead of replaying ~50 DDL statements
@@ -279,6 +365,7 @@ function ready() {
       } catch (e) { /* first boot: settings table doesn't exist yet */ }
 
       await pool.query(SCHEMA);
+      await ensureCriticalSchema();
       // Migrations for databases created before these columns existed.
       await pool.query('ALTER TABLE properties ADD COLUMN IF NOT EXISTS lots INTEGER');
       await pool.query('ALTER TABLE visits ADD COLUMN IF NOT EXISTS job_id INTEGER REFERENCES jobs(id)');

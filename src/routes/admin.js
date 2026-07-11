@@ -7,28 +7,37 @@ const { requireRole } = require('../auth');
 const { logActivity } = require('../activity');
 const { sendRemindersForDate } = require('../reminders');
 const { asyncHandler } = require('../asyncHandler');
+const { today: businessToday } = require('../time');
 const { assertCsrf } = require('../csrf');
+const { geocodeAddress, sleep } = require('../geocode');
+const { pageParam, paginate } = require('../pagination');
+
+// Per-click cap on the backfill so the request stays under the serverless
+// time limit (Nominatim wants ~1 req/sec). Click again to continue.
+const GEOCODE_BATCH = Number(process.env.GEOCODE_BATCH || 5);
 
 const router = express.Router();
 
 // --- Activity log & bulk reminders: supervisors and admins ---
 
 router.get('/activity', requireRole('supervisor'), asyncHandler(async (req, res) => {
-  const entries = await q(`
+  const page = pageParam(req);
+  const activitySql = `
     SELECT a.*, u.name AS user_name FROM activity_log a
     LEFT JOIN users u ON u.id = a.user_id
-    ORDER BY a.created_at DESC, a.id DESC LIMIT 300`);
-  res.render('admin/activity', { title: 'Activity log', entries });
+    ORDER BY a.created_at DESC, a.id DESC`;
+  const { rows: entries, total, totalPages } = await paginate(q, activitySql, [], page);
+  res.render('admin/activity', { title: 'Activity log', entries, page, total, totalPages });
 }));
 
 router.post('/reminders/bulk', requireRole('supervisor'), asyncHandler(async (req, res) => {
-  const date = req.body.date || new Date().toISOString().slice(0, 10);
+  const date = req.body.date || businessToday();
   const sent = await sendRemindersForDate(date, { actorId: req.user.id, force: req.body.force === 'on' });
   res.redirect(`/admin/reminders?date=${date}&sent=${sent}`);
 }));
 
 router.get('/reminders', requireRole('supervisor'), asyncHandler(async (req, res) => {
-  const date = req.query.date || new Date().toISOString().slice(0, 10);
+  const date = req.query.date || businessToday();
   const pending = await q(`
     SELECT v.*, p.name AS property_name, u.name AS gardener_name
     FROM visits v JOIN properties p ON p.id = v.property_id
@@ -42,23 +51,75 @@ router.get('/reminders', requireRole('supervisor'), asyncHandler(async (req, res
 
 router.get('/properties', requireRole('supervisor'), asyncHandler(async (req, res) => {
   const properties = await q('SELECT * FROM properties ORDER BY name');
+  const missingCoords = properties.filter((p) => p.lat == null || p.lng == null).length;
   res.render('admin/properties', {
-    title: 'Properties', properties,
+    title: 'Properties', properties, missingCoords,
     imported: req.query.imported, importErrors: req.query.errors,
+    geocoded: req.query.geocoded, geoFailed: req.query.failed, remaining: req.query.remaining,
   });
 }));
 
 router.post('/properties', requireRole('supervisor'), asyncHandler(async (req, res) => {
   const { name, address, contact_name, contact_phone, lat, lng, lots, notes } = req.body;
   if (!(name || '').trim() || !(address || '').trim()) return res.redirect('/admin/properties');
+  // Coordinates power route optimization. If they weren't entered, derive them
+  // from the address automatically (best-effort — a save never fails on this).
+  let latN = lat ? Number(lat) : null;
+  let lngN = lng ? Number(lng) : null;
+  if ((latN == null || lngN == null)) {
+    try {
+      const geo = await geocodeAddress(address.trim());
+      if (geo) { latN = geo.lat; lngN = geo.lng; }
+    } catch (e) { console.error('[geocode] create lookup failed:', e.message); }
+  }
   const { id } = await q1(`
     INSERT INTO properties (name, address, contact_name, contact_phone, lat, lng, lots, notes)
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
     [name.trim(), address.trim(), contact_name || null, contact_phone || null,
-      lat ? Number(lat) : null, lng ? Number(lng) : null,
-      lots ? Math.round(Number(lots)) : null, notes || null]);
+      latN, lngN, lots ? Math.round(Number(lots)) : null, notes || null]);
   await logActivity(req.user.id, 'property.create', 'property', id, `Added site "${name.trim()}"`);
   res.redirect('/admin/properties');
+}));
+
+// Backfill coordinates for sites that don't have them yet, from their address.
+// Processes a small batch per click (Nominatim ~1 req/sec) and reports how many
+// still remain so the button can be clicked again until it's done.
+// Geocode up to `limit` sites that are missing coordinates, from their address.
+// Shared by the "Find missing coordinates" button and the spreadsheet import.
+async function geocodeMissingBatch(limit) {
+  const missing = await q(
+    `SELECT id, address FROM properties
+     WHERE (lat IS NULL OR lng IS NULL) AND COALESCE(TRIM(address), '') <> ''
+     ORDER BY id LIMIT $1`, [limit]);
+  let done = 0;
+  let failed = 0;
+  for (let i = 0; i < missing.length; i++) {
+    const p = missing[i];
+    try {
+      const geo = await geocodeAddress(p.address);
+      if (geo) {
+        await q('UPDATE properties SET lat = $1, lng = $2 WHERE id = $3', [geo.lat, geo.lng, p.id]);
+        done++;
+      } else { failed++; }
+    } catch (e) {
+      console.error(`[geocode] site #${p.id} failed:`, e.message);
+      failed++;
+    }
+    if (i < missing.length - 1) await sleep(1100); // stay under ~1 req/sec
+  }
+  const { c: remaining } = await q1(
+    `SELECT COUNT(*)::int AS c FROM properties WHERE lat IS NULL OR lng IS NULL`);
+  return { done, failed, remaining };
+}
+
+router.post('/properties/geocode', requireRole('supervisor'), asyncHandler(async (req, res) => {
+  const { done, failed, remaining } = await geocodeMissingBatch(GEOCODE_BATCH);
+  if (done) {
+    await logActivity(req.user.id, 'property.geocode', 'property', null,
+      `Geocoded ${done} site(s) from address`);
+  }
+  const params = new URLSearchParams({ geocoded: String(done), failed: String(failed), remaining: String(remaining) });
+  res.redirect(`/admin/properties?${params}`);
 }));
 
 // Bulk import sites from an Excel (.xlsx) or CSV upload.
@@ -103,8 +164,43 @@ router.post('/properties/import', requireRole('supervisor'),
     }
     const params = new URLSearchParams({ imported: String(imported) });
     if (errors.length) params.set('errors', errors.slice(0, 10).join(' · '));
+    // Auto-fill coordinates for imported rows that had no Lat/Lng (a bounded
+    // batch so the request doesn't time out — the rest are caught by the
+    // "Find missing coordinates" button, which the banner points to).
+    if (imported) {
+      const geo = await geocodeMissingBatch(GEOCODE_BATCH);
+      params.set('geocoded', String(geo.done));
+      params.set('failed', String(geo.failed));
+      params.set('remaining', String(geo.remaining));
+    }
     res.redirect(`/admin/properties?${params}`);
   }));
+
+// Edit a site. Re-detects coordinates from the address when "Re-detect" is
+// ticked, or whenever latitude/longitude are left blank.
+router.post('/properties/:id/update', requireRole('supervisor'), asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  const existing = await q1('SELECT id FROM properties WHERE id = $1', [id]);
+  if (!existing) return res.redirect('/admin/properties');
+  const { name, address, contact_name, contact_phone, lat, lng, lots, notes } = req.body;
+  if (!(name || '').trim() || !(address || '').trim()) return res.redirect('/admin/properties');
+  const redetect = req.body.regeocode === 'on';
+  let latN = (!redetect && lat) ? Number(lat) : null;
+  let lngN = (!redetect && lng) ? Number(lng) : null;
+  if (redetect || latN == null || lngN == null) {
+    try {
+      const g = await geocodeAddress(address.trim());
+      if (g) { latN = g.lat; lngN = g.lng; }
+    } catch (e) { console.error('[geocode] update lookup failed:', e.message); }
+  }
+  await q(`
+    UPDATE properties SET name = $1, address = $2, contact_name = $3, contact_phone = $4,
+      lat = $5, lng = $6, lots = $7, notes = $8 WHERE id = $9`,
+    [name.trim(), address.trim(), contact_name || null, contact_phone || null,
+      latN, lngN, lots ? Math.round(Number(lots)) : null, notes || null, id]);
+  await logActivity(req.user.id, 'property.update', 'property', id, `Updated site "${name.trim()}"`);
+  res.redirect('/admin/properties');
+}));
 
 // --- User management: admin only ---
 

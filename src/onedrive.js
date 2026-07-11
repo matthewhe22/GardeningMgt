@@ -53,11 +53,14 @@ async function getAccessToken(cfg) {
  * @param {string} relPath e.g. "job-12-2026-06-18/report.html"
  * @param {Buffer|string} content
  * @param {string} mime
+ * @param {{cfg?: object, token?: string}} [ctx] pre-fetched config/token, so a
+ *   caller uploading many files in one batch (e.g. archiveToOneDrive) pays for
+ *   the settings lookup and OAuth token request once instead of per file.
  */
-async function uploadFile(relPath, content, mime) {
-  const cfg = await getConfig();
+async function uploadFile(relPath, content, mime, ctx = {}) {
+  const cfg = ctx.cfg || await getConfig();
   if (!cfg) return { ok: false, skipped: true, reason: 'OneDrive not configured' };
-  const token = await getAccessToken(cfg);
+  const token = ctx.token || await getAccessToken(cfg);
   const drivePath = `${cfg.onedrive_folder}/${relPath}`.split('/').map(encodeURIComponent).join('/');
   const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(cfg.onedrive_drive_user)}` +
     `/drive/root:/${drivePath}:/content`;
@@ -91,4 +94,4 @@ async function testConnection() {
   }
 }
 
-module.exports = { uploadFile, testConnection, getConfig, SETTING_KEYS };
+module.exports = { uploadFile, testConnection, getConfig, getAccessToken, SETTING_KEYS };

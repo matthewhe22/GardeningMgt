@@ -1,44 +1,47 @@
 <%- include('../partials/header') %>
 <h1><%= invoice.number %> <span class="status status-<%= invoice.status %>"><%= invoice.status %></span></h1>
+<% if (error === 'duplicate') { %>
+<p class="alert alert-error">Can't set that status: another live invoice already exists for this job. Void or update that one first.</p>
+<% } %>
 <p class="muted">
   <%= invoice.property_name %>, <%= invoice.address %> · Job on <%= invoice.scheduled_date %>
   (<a href="/visits/<%= invoice.visit_id %>">job #<%= invoice.visit_id %></a>)
   <% if (invoice.gardener_name) { %> · Gardener: <%= invoice.gardener_name %><% } %>
-  <% if (invoice.issued_at) { %> · Issued <%= invoice.issued_at %><% } %>
-  <% if (invoice.paid_at) { %> · Paid <%= invoice.paid_at %><% } %>
+  <% if (invoice.issued_at) { %> · Issued <%= fmtDateTime(invoice.issued_at) %><% } %>
+  <% if (invoice.paid_at) { %> · Paid <%= fmtDateTime(invoice.paid_at) %><% } %>
 </p>
 
 <div class="card">
-  <table class="table">
-    <tr><th>Description</th><th>Qty</th><th>Unit price</th><th>Amount</th><th></th></tr>
+  <table class="table table--stack">
+    <tr class="thead-row"><th>Description</th><th>Qty</th><th>Unit price</th><th>Amount</th><th>Remove</th></tr>
     <% invoice.items.forEach(it => { %>
     <tr>
-      <td><%= it.description %></td>
-      <td><%= it.quantity %></td>
-      <td>$<%= it.unit_price.toFixed(2) %></td>
-      <td>$<%= (it.quantity * it.unit_price).toFixed(2) %></td>
-      <td>
+      <td class="stack-main"><%= it.description %></td>
+      <td data-label="Qty"><%= it.quantity %></td>
+      <td data-label="Unit price">$<%= it.unit_price.toFixed(2) %></td>
+      <td data-label="Amount">$<%= (it.quantity * it.unit_price).toFixed(2) %></td>
+      <td data-label="Remove">
         <% if (invoice.status === 'draft') { %>
-        <form method="post" action="/invoices/<%= invoice.id %>/items/<%= it.id %>/delete" class="inline">
+        <form method="post" action="/invoices/<%= invoice.id %>/items/<%= it.id %>/delete" class="inline" data-confirm="Remove this line item?">
           <button class="link-btn">✕</button>
         </form>
         <% } %>
       </td>
     </tr>
     <% }) %>
-    <tr><td colspan="3"><strong>Total</strong></td><td><strong>$<%= invoice.total.toFixed(2) %></strong></td><td></td></tr>
+    <tr><td colspan="3" class="stack-main"><strong>Total</strong></td><td data-label="Total"><strong>$<%= invoice.total.toFixed(2) %></strong></td><td></td></tr>
   </table>
 
   <% if (invoice.status === 'draft') { %>
   <form method="post" action="/invoices/<%= invoice.id %>/items" class="filter-row">
-    <input type="text" name="description" placeholder="Description" required>
-    <input type="number" name="quantity" placeholder="Qty" step="0.01" value="1" required>
-    <input type="number" name="unit_price" placeholder="Unit price" step="0.01" required>
+    <label>Description <input type="text" name="description" placeholder="e.g. Mulch supply" required></label>
+    <label>Qty <input type="number" name="quantity" step="0.01" min="0" value="1" required></label>
+    <label>Unit price <input type="number" name="unit_price" step="0.01" min="0" required></label>
     <button class="btn">Add line</button>
   </form>
   <% } %>
 
-  <form method="post" action="/invoices/<%= invoice.id %>/status" class="filter-row">
+  <form method="post" action="/invoices/<%= invoice.id %>/status" class="filter-row" data-confirm="Update this invoice's status?">
     <label>Status
       <select name="status">
         <% ['draft','sent','paid','void'].forEach(s => { %>

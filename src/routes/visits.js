@@ -4,9 +4,13 @@ const { requireRole, isStaff } = require('../auth');
 const { logActivity } = require('../activity');
 const { upload, savePhoto } = require('../upload');
 const { nextOccurrenceAfter, isValidDate } = require('../recurrence');
-const { loadReportData, renderReportHtml, archiveToOneDrive } = require('../report');
+const { loadReportData, renderReportHtml, renderReportPdf, archiveToOneDrive } = require('../report');
 const { asyncHandler } = require('../asyncHandler');
 const { assertCsrf } = require('../csrf');
+const { optimizeRouteRoad } = require('../routeOptimizer');
+const { runInBackground } = require('../background');
+const { today } = require('../time');
+const { pageParam, paginate } = require('../pagination');
 
 const router = express.Router();
 
@@ -25,26 +29,159 @@ function canSeeVisit(user, visit) {
   return isStaff(user) || visit.gardener_id === user.id;
 }
 
-// List (staff see all; gardeners see their own). Filter by date / gardener.
+// List (staff see all; gardeners see their own). Three quick scopes:
+//   • upcoming (default): today onward, nearest first
+//   • today (upto=<today>): on or before today — includes delayed/overdue
+//   • all: full history + future
+// plus an exact-day picker. All views are ordered nearest → future.
 router.get('/', asyncHandler(async (req, res) => {
   const staff = isStaff(req.user);
-  const date = req.query.date || '';
+  const todayStr = today();
+  const date = req.query.date || '';     // exact day (date picker)
+  const upto = req.query.upto || '';     // on/before this day (Today + overdue)
+  const showAll = req.query.all === '1'; // entire history + future
+  // Drill-down filters (used by the Reports "visits by status" links): an
+  // exact status and/or a from–to date window.
+  const status = VISIT_STATUSES.includes(req.query.status) ? req.query.status : '';
+  const from = req.query.from || '';
+  const to = req.query.to || '';
   const gardenerId = staff ? (req.query.gardener_id || '') : String(req.user.id);
+  const search = (req.query.search || '').trim();
   const where = [];
   const args = [];
-  if (date) { args.push(date); where.push(`v.scheduled_date = $${args.length}`); }
   if (gardenerId) { args.push(Number(gardenerId)); where.push(`v.gardener_id = $${args.length}`); }
-  const visits = await q(`
-    SELECT v.*, p.name AS property_name, p.address, u.name AS gardener_name
+  if (status) { args.push(status); where.push(`v.status = $${args.length}`); }
+  if (search) { args.push(`%${search}%`); where.push(`(p.name ILIKE $${args.length} OR p.address ILIKE $${args.length})`); }
+  if (from || to) {
+    // A from–to window takes precedence over the quick scopes.
+    if (from) { args.push(from); where.push(`v.scheduled_date >= $${args.length}`); }
+    if (to) { args.push(to); where.push(`v.scheduled_date <= $${args.length}`); }
+  } else if (date) {
+    args.push(date); where.push(`v.scheduled_date = $${args.length}`);
+  } else if (upto) {
+    args.push(upto); where.push(`v.scheduled_date <= $${args.length}`);
+  } else if (!showAll) {
+    args.push(todayStr); where.push(`v.scheduled_date >= $${args.length}`);
+  }
+  const page = pageParam(req);
+  const baseWhere = where.length ? 'WHERE ' + where.join(' AND ') : '';
+  // Paginate by DAY, not by row: the list groups visits by scheduled_date for
+  // display (route order within a day, per-day reorder/optimize controls), so
+  // slicing by a fixed row count could split one gardener's day across two
+  // pages — silently wrong stop counts and reorder buttons on both halves.
+  // Fetching a page of distinct dates first, then every visit on those dates,
+  // guarantees a page always contains whole days.
+  const DAYS_PER_PAGE = 20;
+  const dateSql = `
+    SELECT DISTINCT v.scheduled_date
     FROM visits v
     JOIN properties p ON p.id = v.property_id
     LEFT JOIN users u ON u.id = v.gardener_id
-    ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-    ORDER BY v.scheduled_date DESC, COALESCE(v.route_order, 999)
-    LIMIT 200`, args);
-  const gardeners = await q("SELECT id, name FROM users WHERE role = 'gardener' AND active");
-  const properties = await q('SELECT id, name FROM properties ORDER BY name');
-  res.render('visits/index', { title: 'Visits / Jobs', visits, gardeners, properties, staff, date, gardenerId });
+    ${baseWhere}
+    ORDER BY v.scheduled_date ASC`;
+  const totalVisitsSql = `
+    SELECT COUNT(*)::int AS c
+    FROM visits v
+    JOIN properties p ON p.id = v.property_id
+    LEFT JOIN users u ON u.id = v.gardener_id
+    ${baseWhere}`;
+  // The date page, the visit-count summary, and the filter dropdowns are all
+  // independent, so fetch them in parallel to cut page latency.
+  const [datesPage, totalVisitsRow, gardeners, properties] = await Promise.all([
+    paginate(q, dateSql, args, page, DAYS_PER_PAGE),
+    q(totalVisitsSql, args),
+    q("SELECT id, name FROM users WHERE role = 'gardener' AND active"),
+    q('SELECT id, name FROM properties ORDER BY name'),
+  ]);
+  const dates = datesPage.rows.map((r) => r.scheduled_date);
+  const dateArgs = [...args, dates];
+  const dateCond = `v.scheduled_date = ANY($${dateArgs.length})`;
+  const visits = dates.length ? await q(`
+    SELECT v.*, p.name AS property_name, p.address, p.lat, p.lng, u.name AS gardener_name
+    FROM visits v
+    JOIN properties p ON p.id = v.property_id
+    LEFT JOIN users u ON u.id = v.gardener_id
+    ${where.length ? `${baseWhere} AND ${dateCond}` : `WHERE ${dateCond}`}
+    ORDER BY v.scheduled_date ASC, COALESCE(v.route_order, 999), v.id`, dateArgs) : [];
+  const totalVisits = totalVisitsRow[0].c;
+  const { total: totalDays, totalPages } = datesPage;
+  // Group consecutive visits by day so the list reads as a per-day route in
+  // visiting sequence (route_order). Reordering / optimizing is offered per day
+  // only when the list is scoped to a single gardener (one route to order).
+  const groups = [];
+  for (const v of visits) {
+    let g = groups[groups.length - 1];
+    if (!g || g.date !== v.scheduled_date) { g = { date: v.scheduled_date, items: [] }; groups.push(g); }
+    g.items.push(v);
+  }
+  // Reordering only makes sense for a single gardener's plain day view, not a
+  // status / date-range drill-down that can span many days.
+  const filtered = !!(status || from || to);
+  res.render('visits/index', {
+    title: 'Visits / Jobs', visits, groups, gardeners, properties, staff,
+    date, upto, showAll, status, from, to, search, gardenerId, today: todayStr,
+    canReorder: !!gardenerId && !filtered, page, totalPages,
+    total: totalDays, totalLabel: totalDays === 1 ? 'day' : 'days', totalVisits,
+  });
+}));
+
+// --- Per-day route ordering, available right on the Jobs page ---------------
+// Scoped to one gardener + one day (a single route). Staff can order any
+// gardener's day; a gardener can order their own.
+
+function loadDayOrder(gardenerId, date) {
+  return q(`
+    SELECT v.id, p.lat, p.lng
+    FROM visits v JOIN properties p ON p.id = v.property_id
+    WHERE v.gardener_id = $1 AND v.scheduled_date = $2 AND v.status <> 'cancelled'
+    ORDER BY COALESCE(v.route_order, 999), v.id`, [gardenerId, date]);
+}
+
+async function applyRouteOrder(orderedIds) {
+  await withTransaction(async (tx) => {
+    for (let i = 0; i < orderedIds.length; i++) {
+      await tx.q('UPDATE visits SET route_order = $1 WHERE id = $2', [i + 1, orderedIds[i]]);
+    }
+  });
+}
+
+function backToList(date, gardenerId) {
+  const qs = new URLSearchParams();
+  if (date) qs.set('date', date);
+  if (gardenerId) qs.set('gardener_id', String(gardenerId));
+  return `/visits${qs.toString() ? '?' + qs.toString() : ''}`;
+}
+
+// Optimize one gardener's day with the routing function (nearest-neighbour + 2-opt).
+router.post('/optimize', asyncHandler(async (req, res) => {
+  const date = req.body.date;
+  const gardenerId = isStaff(req.user) ? Number(req.body.gardener_id) : req.user.id;
+  if (!gardenerId || !isValidDate(date)) return res.redirect('/visits');
+  const day = await loadDayOrder(gardenerId, date);
+  if (day.length) {
+    const { orderedIds, lengthKm, mode } = await optimizeRouteRoad(day.map((v) => ({ id: v.id, lat: v.lat, lng: v.lng })));
+    await applyRouteOrder(orderedIds);
+    await logActivity(req.user.id, 'route.optimize', 'visit', null,
+      `Optimized route (${mode === 'road' ? 'road distance' : 'straight-line'}) for gardener #${gardenerId} on ${date}: ${orderedIds.length} stops, ~${lengthKm.toFixed(1)} km`);
+  }
+  res.redirect(backToList(date, gardenerId));
+}));
+
+// Manually nudge a visit up/down within its day's visiting sequence.
+router.post('/:id/move', asyncHandler(async (req, res) => {
+  const visit = await getVisit(req.params.id);
+  if (!visit || !canSeeVisit(req.user, visit) || !visit.gardener_id) return res.redirect('/visits');
+  const day = await loadDayOrder(visit.gardener_id, visit.scheduled_date);
+  const ids = day.map((d) => d.id);
+  const idx = ids.indexOf(visit.id);
+  const swap = idx + (req.body.dir === 'up' ? -1 : 1);
+  if (idx >= 0 && swap >= 0 && swap < ids.length) {
+    [ids[idx], ids[swap]] = [ids[swap], ids[idx]];
+    await applyRouteOrder(ids);
+    await logActivity(req.user.id, 'route.reorder', 'visit', visit.id,
+      `Moved job #${visit.id} ${req.body.dir === 'up' ? 'earlier' : 'later'} in the ${visit.scheduled_date} route`);
+  }
+  res.redirect(backToList(visit.scheduled_date, visit.gardener_id) + `#v${visit.id}`);
 }));
 
 // Create (staff only)
@@ -68,22 +205,26 @@ router.get('/:id', asyncHandler(async (req, res) => {
   if (!canSeeVisit(req.user, visit)) {
     return res.status(403).render('error', { title: 'Forbidden', message: 'Not your visit.' });
   }
-  const tasks = await q('SELECT t.*, u.name AS assignee_name FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id WHERE t.visit_id = $1 ORDER BY t.id', [visit.id]);
-  const photos = await q('SELECT ph.id, ph.filename, ph.caption, ph.original_name, ph.created_at, u.name AS uploader_name FROM photos ph LEFT JOIN users u ON u.id = ph.uploaded_by WHERE ph.visit_id = $1 AND ph.visit_comment_id IS NULL ORDER BY ph.created_at DESC', [visit.id]);
-  const comments = await q('SELECT c.*, u.name AS author_name, u.role AS author_role FROM visit_comments c LEFT JOIN users u ON u.id = c.user_id WHERE c.visit_id = $1 ORDER BY c.created_at', [visit.id]);
-  const commentPhotos = await q('SELECT ph.visit_comment_id, ph.filename, ph.created_at FROM photos ph WHERE ph.visit_id = $1 AND ph.visit_comment_id IS NOT NULL ORDER BY ph.created_at', [visit.id]);
+  // All of these are independent of one another — fetch them concurrently so
+  // the page costs one round-trip's worth of latency instead of eight.
+  const [tasks, photos, comments, commentPhotos, invoice, gardeners, gpsPoints, job] = await Promise.all([
+    q('SELECT t.*, u.name AS assignee_name FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id WHERE t.visit_id = $1 ORDER BY t.id', [visit.id]),
+    q('SELECT ph.id, ph.filename, ph.caption, ph.original_name, ph.created_at, ph.uploaded_by, u.name AS uploader_name FROM photos ph LEFT JOIN users u ON u.id = ph.uploaded_by WHERE ph.visit_id = $1 AND ph.visit_comment_id IS NULL ORDER BY ph.created_at DESC', [visit.id]),
+    q('SELECT c.*, u.name AS author_name, u.role AS author_role FROM visit_comments c LEFT JOIN users u ON u.id = c.user_id WHERE c.visit_id = $1 ORDER BY c.created_at', [visit.id]),
+    q('SELECT ph.visit_comment_id, ph.filename, ph.created_at FROM photos ph WHERE ph.visit_id = $1 AND ph.visit_comment_id IS NOT NULL ORDER BY ph.created_at', [visit.id]),
+    q1('SELECT * FROM invoices WHERE visit_id = $1 ORDER BY id DESC LIMIT 1', [visit.id]),
+    q("SELECT id, name FROM users WHERE role = 'gardener' AND active"),
+    q('SELECT * FROM gps_points WHERE visit_id = $1 ORDER BY recorded_at', [visit.id]),
+    visit.job_id
+      ? q1('SELECT j.*, u.name AS default_gardener_name FROM jobs j LEFT JOIN users u ON u.id = j.gardener_id WHERE j.id = $1', [visit.job_id])
+      : Promise.resolve(null),
+  ]);
   const photosByComment = {};
   for (const ph of commentPhotos) (photosByComment[ph.visit_comment_id] ||= []).push(ph);
-  const invoice = await q1('SELECT * FROM invoices WHERE visit_id = $1 ORDER BY id DESC LIMIT 1', [visit.id]);
-  const gardeners = await q("SELECT id, name FROM users WHERE role = 'gardener' AND active");
-  const gpsPoints = await q('SELECT * FROM gps_points WHERE visit_id = $1 ORDER BY recorded_at', [visit.id]);
-  const job = visit.job_id
-    ? await q1('SELECT j.*, u.name AS default_gardener_name FROM jobs j LEFT JOIN users u ON u.id = j.gardener_id WHERE j.id = $1', [visit.job_id])
-    : null;
   res.render('visits/show', {
     title: `Job #${visit.id} — ${visit.property_name}`,
     visit, tasks, photos, comments, photosByComment, invoice, gardeners, gpsPoints, job,
-    staff: isStaff(req.user), flash: req.query.error || null,
+    staff: isStaff(req.user), flash: req.query.error || null, warning: req.query.warning || null,
   });
 }));
 
@@ -104,27 +245,42 @@ router.post('/:id/update', requireRole('supervisor'), asyncHandler(async (req, r
       finished_at = CASE WHEN $4 = 'completed' AND finished_at IS NULL THEN now() ELSE finished_at END
     WHERE id = $7`,
     [gardener_id || null, scheduled_date, time_window || null, status, notes || null,
-      duration_minutes ? Number(duration_minutes) : visit.duration_minutes, visit.id]);
+      duration_minutes ? Math.max(0, Number(duration_minutes) || 0) : visit.duration_minutes, visit.id]);
   await logActivity(req.user.id, 'visit.update', 'visit', visit.id,
     `Updated visit #${visit.id} (status: ${visit.status} -> ${status})`);
   // Advance the recurring contract when this occurrence reaches a terminal state.
   if (['completed', 'skipped', 'cancelled'].includes(status) && status !== visit.status) {
     await advanceRecurringJob(visit, req.user.id, status === 'completed');
   }
-  res.redirect(`/visits/${visit.id}`);
+  const busy = status === 'scheduled'
+    ? await dayConflicts(gardener_id ? Number(gardener_id) : null, scheduled_date, visit.id) : 0;
+  res.redirect(`/visits/${visit.id}${busy ? '?warning=busy' : ''}`);
 }));
+
+// How many *other* scheduled visits a gardener already has on a day — used to
+// warn (not block) about double-booking when reassigning or rescheduling.
+async function dayConflicts(gardenerId, date, exceptVisitId) {
+  if (!gardenerId || !date) return 0;
+  const { c } = await q1(
+    `SELECT COUNT(*)::int AS c FROM visits
+     WHERE gardener_id = $1 AND scheduled_date = $2 AND status = 'scheduled' AND id <> $3`,
+    [gardenerId, date, exceptVisitId]);
+  return c;
+}
 
 // Reschedule: the assigned gardener (or staff) can set the date of a visit.
 router.post('/:id/reschedule', asyncHandler(async (req, res) => {
   const visit = await getVisit(req.params.id);
   if (!visit || !canSeeVisit(req.user, visit)) return res.redirect('/visits');
   const date = req.body.scheduled_date;
+  let busy = 0;
   if (isValidDate(date)) {
     await q('UPDATE visits SET scheduled_date = $1, route_order = NULL WHERE id = $2', [date, visit.id]);
     await logActivity(req.user.id, 'visit.reschedule', 'visit', visit.id,
       `Moved job #${visit.id} from ${visit.scheduled_date} to ${date}`);
+    busy = await dayConflicts(visit.gardener_id, date, visit.id);
   }
-  res.redirect(`/visits/${visit.id}`);
+  res.redirect(`/visits/${visit.id}${busy ? '?warning=busy' : ''}`);
 }));
 
 // Status shortcut (gardeners: skip; staff: any). Advances the contract on a
@@ -133,7 +289,12 @@ router.post('/:id/status', asyncHandler(async (req, res) => {
   const visit = await getVisit(req.params.id);
   if (!visit || !canSeeVisit(req.user, visit)) return res.redirect('/visits');
   const status = req.body.status;
-  if (!['scheduled', 'in_progress', 'skipped', 'cancelled'].includes(status)) {
+  // Staff may set any status; a gardener may only skip their own visit
+  // (cancelling/rescheduling contract work is a supervisor decision).
+  const allowed = isStaff(req.user)
+    ? ['scheduled', 'in_progress', 'skipped', 'cancelled']
+    : ['skipped'];
+  if (!allowed.includes(status)) {
     return res.redirect(`/visits/${visit.id}`);
   }
   if (status === visit.status) return res.redirect(`/visits/${visit.id}`);
@@ -197,22 +358,29 @@ router.post('/:id/timer/stop', asyncHandler(async (req, res) => {
     RETURNING id, duration_minutes`, [visit.id]);
   if (!gate) return res.redirect(`/visits/${visit.id}`); // already completed — no double side effects
 
-  await recordGps(visit.id, req.user.id, req.body, 'finish');
-  await logActivity(req.user.id, 'visit.timer.stop', 'visit', visit.id,
-    `Finished job #${visit.id} in ${gate.duration_minutes} min`);
-
-  const { dc } = await q1("SELECT COUNT(*)::int AS dc FROM tasks WHERE visit_id = $1 AND status = 'done'", [visit.id]);
-  const { tc } = await q1('SELECT COUNT(*)::int AS tc FROM tasks WHERE visit_id = $1', [visit.id]);
+  // These three don't depend on each other's result — run them together
+  // instead of one round-trip at a time on the gardener's "complete job" tap.
+  const [, , { dc, tc }] = await Promise.all([
+    recordGps(visit.id, req.user.id, req.body, 'finish'),
+    logActivity(req.user.id, 'visit.timer.stop', 'visit', visit.id,
+      `Finished job #${visit.id} in ${gate.duration_minutes} min`),
+    q1("SELECT COUNT(*) FILTER (WHERE status = 'done')::int AS dc, COUNT(*)::int AS tc FROM tasks WHERE visit_id = $1",
+      [visit.id]),
+  ]);
   const summary = `Job #${visit.id} completed by ${req.user.name} at ${visit.property_name}: ` +
     `${gate.duration_minutes} min, tasks ${dc}/${tc} done, ${pc} photo(s).`;
-  await pool.query(`
-    INSERT INTO notifications (user_id, visit_id, type, message)
-    SELECT id, $1, 'job_summary', $2 FROM users WHERE role IN ('admin','supervisor') AND active`,
-    [visit.id, summary]);
-
-  await advanceRecurringJob(visit, req.user.id, true);
-  // Archive report + photos to OneDrive (best-effort; never blocks completion).
-  await archiveToOneDrive(visit.id);
+  // Notifying staff and advancing the recurring contract are independent too.
+  await Promise.all([
+    pool.query(`
+      INSERT INTO notifications (user_id, visit_id, type, message)
+      SELECT id, $1, 'job_summary', $2 FROM users WHERE role IN ('admin','supervisor') AND active`,
+      [visit.id, summary]),
+    advanceRecurringJob(visit, req.user.id, true),
+  ]);
+  // Archive report + photos to OneDrive in the background (best-effort) so the
+  // gardener's "complete job" tap returns immediately instead of waiting on the
+  // report render + sequential Graph uploads.
+  runInBackground(() => archiveToOneDrive(visit.id), `onedrive archive #${visit.id}`);
   res.redirect(`/visits/${visit.id}`);
 }));
 
@@ -223,7 +391,17 @@ router.get('/:id/report', asyncHandler(async (req, res) => {
     return res.status(404).render('error', { title: 'Not found', message: 'Report not found.' });
   }
   const data = await loadReportData(visit.id);
-  res.send(await renderReportHtml(data));
+  const slug = String(visit.property_name || 'job')
+    .replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'job';
+  // ?download=1 returns a PDF file; otherwise the report opens as HTML in the tab.
+  if (req.query.download === '1') {
+    const pdf = await renderReportPdf(data);
+    res.set('Content-Type', 'application/pdf');
+    res.set('Content-Disposition',
+      `attachment; filename="completion-report-${slug}-${visit.scheduled_date}.pdf"`);
+    return res.send(pdf);
+  }
+  res.type('html').send(await renderReportHtml(data));
 }));
 
 /**

@@ -7,6 +7,9 @@
 <% if (locals.importErrors) { %>
   <p class="alert alert-error">Some rows were skipped: <%= importErrors %></p>
 <% } %>
+<% if (locals.geocoded !== undefined && geocoded !== null) { %>
+  <p class="alert alert-ok">Found coordinates for <%= geocoded %> site(s)<% if (Number(geoFailed) > 0) { %> · <%= geoFailed %> address(es) couldn't be matched<% } %><% if (Number(remaining) > 0) { %> · <strong><%= remaining %> still missing</strong> — click “Find missing coordinates” again to continue<% } else { %> · all sites now have coordinates 🎉<% } %>.</p>
+<% } %>
 
 <details class="card">
   <summary><strong>📥 Import sites from Excel / CSV</strong></summary>
@@ -29,27 +32,63 @@
     <label>Contact name <input type="text" name="contact_name"></label>
     <label>Contact phone <input type="text" name="contact_phone"></label>
     <label># of lots <input type="number" name="lots" min="0"></label>
-    <label>Latitude <input type="number" name="lat" step="any" placeholder="-36.8485"></label>
-    <label>Longitude <input type="number" name="lng" step="any" placeholder="174.7633"></label>
+    <label>Latitude <span class="muted">(optional)</span> <input type="number" name="lat" step="any" placeholder="auto from address"></label>
+    <label>Longitude <span class="muted">(optional)</span> <input type="number" name="lng" step="any" placeholder="auto from address"></label>
     <label class="span2">Notes <input type="text" name="notes"></label>
     <button class="btn btn-primary">Add site</button>
   </form>
-  <p class="muted">Latitude/longitude enable route optimization for visits to this site.</p>
+  <p class="muted">Coordinates enable route optimization. Leave latitude/longitude
+    blank and they'll be looked up from the address automatically on save.</p>
 </details>
 
 <div class="card">
-  <table class="table">
-    <tr><th>Site</th><th>Address</th><th>Lots</th><th>Contact</th><th>Coordinates</th></tr>
-    <% properties.forEach(p => { %>
-    <tr>
-      <td><strong><%= p.name %></strong></td>
-      <td><%= p.address %></td>
-      <td><%= p.lots != null ? p.lots : '—' %></td>
-      <td class="muted"><%= p.contact_name || '' %> <%= p.contact_phone || '' %></td>
-      <td class="muted"><%= p.lat != null ? p.lat.toFixed(4) + ', ' + p.lng.toFixed(4) : '⚠ none' %></td>
-    </tr>
-    <% }) %>
-  </table>
-  <% if (!properties.length) { %><p class="muted">No sites yet — import a spreadsheet or add one above.</p><% } %>
+  <div class="card-head">
+    <h2>Coordinates</h2>
+    <% if (missingCoords > 0) { %>
+    <form method="post" action="/admin/properties/geocode" class="inline">
+      <button class="btn btn-primary">📍 Find missing coordinates</button>
+    </form>
+    <% } %>
+  </div>
+  <% if (missingCoords > 0) { %>
+    <p class="muted"><strong><%= missingCoords %></strong> site(s) have no coordinates and would be
+      dropped to the end of any optimized route. Click the button to look them up from their
+      addresses (processed in small batches — click again if any remain).</p>
+  <% } else { %>
+    <p class="muted">✓ Every site has coordinates — route optimization can use them all.</p>
+  <% } %>
 </div>
+
+<h2><%= properties.length %> site<%= properties.length === 1 ? '' : 's' %></h2>
+<% if (!properties.length) { %>
+  <div class="card"><p class="muted">No sites yet — import a spreadsheet or add one above.</p></div>
+<% } %>
+<% properties.forEach(p => { %>
+<details class="card">
+  <summary>
+    <strong><%= p.name %></strong>
+    <span class="muted">· <%= p.address %></span>
+    <% if (p.lat != null && p.lng != null) { %>
+      <span class="status status-completed"><%= p.lat.toFixed(4) %>, <%= p.lng.toFixed(4) %></span>
+    <% } else { %>
+      <span class="status status-open">⚠ no coordinates</span>
+    <% } %>
+  </summary>
+  <form method="post" action="/admin/properties/<%= p.id %>/update" class="form-grid">
+    <label>Site name <input type="text" name="name" value="<%= p.name %>" required></label>
+    <label>Address <input type="text" name="address" value="<%= p.address %>" required></label>
+    <label>Contact name <input type="text" name="contact_name" value="<%= p.contact_name || '' %>"></label>
+    <label>Contact phone <input type="text" name="contact_phone" value="<%= p.contact_phone || '' %>"></label>
+    <label># of lots <input type="number" name="lots" min="0" value="<%= p.lots != null ? p.lots : '' %>"></label>
+    <label class="span2">&nbsp;</label>
+    <label>Latitude <input type="number" name="lat" step="any" value="<%= p.lat != null ? p.lat : '' %>"></label>
+    <label>Longitude <input type="number" name="lng" step="any" value="<%= p.lng != null ? p.lng : '' %>"></label>
+    <label class="span2 confirm-line"><input type="checkbox" name="regeocode">
+      ↻ Re-detect coordinates from the address (overrides the lat/lng above)</label>
+    <label class="span2">Notes <input type="text" name="notes" value="<%= p.notes || '' %>"></label>
+    <button class="btn btn-primary">Save changes</button>
+  </form>
+  <p class="muted">Changed the address? Tick “Re-detect” (or clear lat/lng) and save to look up new coordinates.</p>
+</details>
+<% }) %>
 <%- include('../partials/footer') %>

@@ -49,7 +49,11 @@
 
 * { box-sizing: border-box; }
 
-html { -webkit-text-size-adjust: 100%; }
+html {
+  -webkit-text-size-adjust: 100%;
+  background: var(--bg);
+  overscroll-behavior-y: none;
+}
 
 body {
   margin: 0;
@@ -58,6 +62,7 @@ body {
   color: var(--text);
   line-height: 1.5;
   font-size: 15px;
+  overscroll-behavior-y: none;
 }
 
 a { color: var(--green-700); text-decoration: none; }
@@ -107,9 +112,12 @@ body.authed main.container {
 @media (max-width: 767px) {
   body.authed main.container {
     margin-left: 0;
-    padding: 16px 14px calc(86px + env(safe-area-inset-bottom, 0px));
+    padding: 16px 14px calc(92px + env(safe-area-inset-bottom, 0px));
   }
-  body.authed { padding-top: 56px; } /* room for fixed mobile topbar */
+  body.authed { padding-top: calc(56px + env(safe-area-inset-top, 0px)); } /* room for fixed mobile topbar */
+
+  body.authed h1 { font-size: 1.9rem; }
+  body.authed h1 .muted { font-size: 0.55em; }
 }
 
 /* ----- Sidebar (desktop) ----- */
@@ -244,40 +252,42 @@ body.authed main.container {
   display: none;
   position: fixed;
   top: 0; left: 0; right: 0;
-  height: 56px;
+  height: calc(56px + env(safe-area-inset-top, 0px));
   z-index: 40;
   background: var(--green-900);
   color: #fff;
+  transform: translateZ(0);
   align-items: center;
   gap: 8px;
-  padding: 0 8px 0 14px;
+  padding: env(safe-area-inset-top, 0px) 10px 0 16px;
 }
 
 .topbar-brand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   color: #fff;
   font-weight: 700;
   text-decoration: none;
-  font-size: 1rem;
+  font-size: 1.3rem;
+  letter-spacing: -0.01em;
   margin-right: auto;
 }
 .topbar-brand:hover { text-decoration: none; }
-.topbar-brand .brand-mark { width: 30px; height: 30px; font-size: 15px; }
+.topbar-brand .brand-mark { width: 38px; height: 38px; font-size: 20px; border-radius: 11px; }
 
 .topbar-action {
   position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
+  width: 48px;
+  height: 48px;
   border-radius: 10px;
   color: rgba(230, 242, 234, 0.9);
   cursor: pointer;
 }
-.topbar-action svg { width: 22px; height: 22px; }
+.topbar-action svg { width: 26px; height: 26px; }
 .topbar-action:hover { background: rgba(255, 255, 255, 0.1); }
 .topbar-action .badge { position: absolute; top: 4px; right: 2px; }
 
@@ -293,6 +303,10 @@ body.authed main.container {
   backdrop-filter: blur(10px);
   border-top: 1px solid var(--border);
   padding-bottom: env(safe-area-inset-bottom, 0px);
+  /* Force its own compositing layer so iOS Safari keeps it pinned to the true
+     visual-viewport bottom edge (rather than a stale layout-viewport bottom)
+     as the address bar/toolbar collapses, avoiding a gap under the bar. */
+  transform: translateZ(0);
 }
 
 /* iOS Safari (collapsing toolbar) and home-screen PWAs can end the layout
@@ -316,16 +330,16 @@ body.authed main.container {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  min-height: 56px;
-  padding: 6px 2px;
+  gap: 3px;
+  min-height: 62px;
+  padding: 7px 2px;
   color: var(--muted);
-  font-size: 0.66rem;
+  font-size: 0.72rem;
   font-weight: 600;
   text-decoration: none;
   position: relative;
 }
-.tab svg { width: 22px; height: 22px; }
+.tab svg { width: 26px; height: 26px; }
 .tab:hover { text-decoration: none; }
 .tab.active { color: var(--green-700); }
 .tab .badge { position: absolute; top: 4px; left: calc(50% + 4px); }
@@ -389,7 +403,7 @@ body.authed main.container {
   .tabbar { display: block; }
 }
 
-@media (min-width: 768px) {
+@media (min-width: 768px) and (pointer: fine) {
   .sheet, .sheet-backdrop { display: none !important; }
 }
 
@@ -768,11 +782,11 @@ select {
 .status-in_progress, .status-sent { background: var(--warn-bg); color: var(--warn); }
 .status-completed, .status-done, .status-resolved, .status-paid { background: var(--ok-bg); color: var(--ok); }
 .status-skipped, .status-blocked, .status-cancelled, .status-closed, .status-void { background: #ecebe5; color: #6d7570; }
-.status-open { background: #fdeaf0; color: #b0265c; }
+.status-open { background: #fdeaf0; color: #8e1f4b; }
 
 .prio-low { background: #ecebe5; color: #6d7570; }
 .prio-medium { background: var(--info-bg); color: var(--info); }
-.prio-high { background: #ffedd9; color: #c2570a; }
+.prio-high { background: #ffedd9; color: #9a4408; }
 .prio-urgent { background: var(--danger-bg); color: var(--danger); font-weight: 700; }
 
 .tag-admin { background: #efe9fb; color: #5b34b1; }
@@ -988,6 +1002,9 @@ body.anon {
 .confirm-line input { width: 20px; height: 20px; }
 
 .timer-card details { margin-top: 12px; }
+.map-snapshot { margin: 14px 0; max-width: 600px; }
+.map-snapshot-title { font-size: 0.95rem; margin: 0 0 6px; }
+.map-snapshot svg { width: 100%; height: auto; }
 .manage-card summary { cursor: pointer; }
 .comment-photo { max-width: 140px; display: inline-block; margin-right: 8px; }
 
@@ -998,16 +1015,60 @@ body.anon {
   text-decoration: none; color: var(--text);
   transition: box-shadow 0.12s ease, transform 0.12s ease;
 }
-.job-row:hover { text-decoration: none; box-shadow: var(--shadow); transform: translateY(-1px); }
-.job-row-main { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.job-row:hover { box-shadow: var(--shadow); transform: translateY(-1px); }
+.job-row-main { display: flex; flex-direction: column; min-width: 0; flex: 1; color: var(--text); text-decoration: none; }
+.job-row-main:hover { text-decoration: none; }
+.job-row-main:hover strong { text-decoration: underline; }
 .job-row-main strong { font-size: 0.98rem; }
 .job-row-main .muted { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .job-row-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; flex: none; }
 .job-row .status { flex: none; }
 
+/* Per-day grouping + route header on the Jobs page */
+.day-group { margin-bottom: 22px; }
+.day-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap; margin: 0 2px 10px;
+}
+.day-title { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 0.95rem; }
+.day-title .status { text-transform: none; }
+
+/* Quick "Today / All dates" filter chips */
+.quick-filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.quick-chip { cursor: pointer; }
+.quick-chip.is-active {
+  background: var(--green-700); border-color: var(--green-700); color: #fff;
+}
+.quick-chip.is-active:hover { background: var(--green-800); }
+.reorder-hint { margin: 10px 0 0; }
+
+/* Manual reorder arrows */
+.reorder { display: flex; flex-direction: column; gap: 4px; flex: none; }
+.reorder-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 26px; min-height: 0; padding: 0;
+  border: 1px solid var(--border-strong); border-radius: 6px;
+  background: var(--card); color: var(--text-soft);
+  font-size: 0.72rem; line-height: 1; cursor: pointer;
+}
+.reorder-btn:hover:not(:disabled) { background: var(--bg); border-color: #c6c4ba; }
+.reorder-btn:disabled { opacity: 0.35; cursor: default; }
+
+.btn-sm { min-height: 36px; padding: 6px 12px; font-size: 0.82rem; box-shadow: none; }
+
+.pagination {
+  display: flex; align-items: center; justify-content: center; gap: 14px;
+  margin: 16px 0 4px;
+}
+.pagination [aria-disabled="true"] { opacity: 0.4; pointer-events: none; }
+.pagination-info { font-size: 0.85rem; white-space: nowrap; }
+
 @media (max-width: 600px) {
   .job-row { flex-wrap: wrap; }
   .job-row-meta { align-items: flex-start; flex-direction: row; gap: 10px; width: 100%; order: 4; padding-left: 38px; }
+  .reorder { flex-direction: row; order: 5; width: 100%; padding-left: 38px; gap: 8px; }
+  .reorder-btn { width: 46px; height: 38px; font-size: 0.85rem; }
+  .quick-chip { flex: 1; justify-content: center; min-height: 40px; font-size: 0.9rem; }
 }
 
 /* --------------------------------------------------------------------------
@@ -1021,7 +1082,10 @@ body.anon {
 /* Tables: never clip columns on small screens — scroll horizontally instead. */
 .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 @media (max-width: 640px) {
-  .card > .table, .table-wrap > .table { display: block; overflow-x: auto; white-space: nowrap; }
+  /* Plain tables scroll sideways; tables opted into .table--stack collapse into
+     labelled card rows instead (see the .table--stack rules above). */
+  .card > .table:not(.table--stack),
+  .table-wrap > .table:not(.table--stack) { display: block; overflow-x: auto; white-space: nowrap; }
 }
 
 .chip-link { color: var(--green-700); border-color: var(--green-100); background: var(--green-50); font-weight: 600; }
@@ -1036,3 +1100,272 @@ body.anon {
 /* Bump default button/control min height to 44px for touch. */
 .btn, select, input[type="date"], input[type="text"], input[type="email"], input[type="password"], input[type="number"] { min-height: 44px; }
 .btn { display: inline-flex; align-items: center; justify-content: center; }
+
+/* ==========================================================================
+   Mobile-app experience (phones, iOS + Android)
+   A native-feeling layer: large tap targets, a thumb-reachable primary
+   action bar for starting/completing jobs, camera-first photo capture, and
+   an app-like comment composer. Layered on top of the responsive shell.
+   ========================================================================== */
+
+/* Camera-first photo capture: big side-by-side buttons that open the camera
+   or photo library. Works the same on desktop and mobile. */
+.photo-pick { cursor: pointer; }
+.photo-pick input[type="file"] { display: none; }
+
+.photo-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.photo-actions .photo-pick { flex: 1 1 160px; min-height: 48px; font-size: 0.95rem; }
+
+.upload-status {
+  margin: 4px 0 8px;
+  font-weight: 600;
+  color: var(--green-700);
+}
+
+/* Thumbnails of the photos just taken / picked, shown before upload. */
+.photo-previews {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+  margin: 10px 0;
+}
+.preview-thumb { margin: 0; position: relative; }
+.preview-thumb img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  display: block;
+}
+.preview-thumb .preview-file {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  font-size: 28px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.preview-thumb figcaption {
+  font-size: 0.68rem;
+  color: var(--muted);
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.photo-upload .share-line { font-weight: 500; margin: 10px 0; }
+.photo-upload .btn-block { margin-top: 4px; }
+
+/* App-like comment composer */
+.comment-form textarea {
+  border-radius: 14px;
+  background: var(--bg);
+  border-color: var(--border);
+}
+.comment-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+.comment-actions .comment-send { margin-left: auto; }
+.comment-attach { background: var(--green-50); border-color: var(--green-100); color: var(--green-800); }
+
+/* Thumb-reachable sticky primary action on the job page (phones only).
+   On desktop these stay as normal in-card buttons. */
+.cta-spacer { display: none; }
+.cta-note { margin: 0 0 8px; }
+
+@media (max-width: 767px) {
+  .mobile-sticky-cta {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: calc(62px + env(safe-area-inset-bottom, 0px)); /* sit above the tab bar */
+    z-index: 35;
+    margin: 0;
+    padding: 12px 14px;
+    background: rgba(255, 255, 255, 0.97);
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+    border-top: 1px solid var(--border);
+    box-shadow: 0 -6px 20px rgba(20, 32, 24, 0.1);
+  }
+  .mobile-sticky-cta .btn-block {
+    margin: 0;
+    min-height: 54px;
+    font-size: 1.1rem;
+    border-radius: 14px;
+    box-shadow: 0 6px 16px rgba(20, 83, 45, 0.22);
+  }
+  .mobile-sticky-cta .btn-danger { box-shadow: 0 6px 16px rgba(192, 57, 43, 0.24); }
+  .mobile-sticky-cta .cta-note { font-size: 0.85rem; }
+  .mobile-sticky-cta .confirm-line { margin: 0 0 10px; font-size: 0.9rem; }
+
+  /* Reserve room so the fixed action bar never hides the last bit of content. */
+  .cta-spacer { display: block; height: 150px; }
+
+  /* Make the whole field workflow roomier and easier to tap on a phone. */
+  .photo-actions .photo-pick { min-height: 52px; }
+  .comment-form textarea { font-size: 1rem; min-height: 56px; }
+  .comment-send { min-width: 96px; }
+
+  /* App-style job list: roomier rows with a chevron affordance on the link. */
+  .job-row { border-radius: 14px; padding: 16px; gap: 12px; position: relative; }
+  .job-row-main { position: relative; }
+  .job-row-main::after {
+    content: "";
+    position: absolute; right: 0; top: 6px;
+    width: 8px; height: 8px;
+    border-top: 2px solid var(--border-strong);
+    border-right: 2px solid var(--border-strong);
+    transform: rotate(45deg);
+  }
+  .job-row-main strong { font-size: 1.05rem; padding-right: 16px; }
+
+  /* Larger, friendlier headings and cards on small screens. */
+  h1 { font-size: 1.35rem; }
+  .timer-card .btn { min-width: 0; }
+}
+
+/* Native-app feel: no tap-highlight flash, no accidental text selection on
+   controls, and momentum scrolling. */
+a, button, .btn, .nav-item, .tab, .photo-pick, label.confirm-line {
+  -webkit-tap-highlight-color: transparent;
+}
+.btn, .nav-item, .tab, .photo-pick, .topbar-action, .route-no, .badge {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Honour reduced-motion preferences. */
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; scroll-behavior: auto !important; }
+}
+
+/* ==========================================================================
+   Touch-device shell fallback
+   Safari's "Request Desktop Website" (and similar desktop-mode toggles) make a
+   phone report a ~980px layout viewport, so the max-width:767px rules above
+   don't fire and the desktop sidebar shows shrunk to fit. Key the mobile app
+   shell off a coarse (touch) pointer as well, so phones/tablets always get the
+   app layout regardless of a spoofed width. Real mice (pointer: fine) keep the
+   desktop sidebar.
+   ========================================================================== */
+@media (pointer: coarse) and (max-width: 1024px) {
+  .sidebar { display: none !important; }
+  .topbar { display: flex !important; }
+  .tabbar { display: block !important; }
+  body.authed main.container {
+    margin-left: 0 !important;
+    max-width: none !important;
+    padding: 16px 14px calc(92px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+  body.authed { padding-top: calc(56px + env(safe-area-inset-top, 0px)) !important; } /* room for the fixed topbar */
+}
+
+/* --------------------------------------------------------------------------
+   Dashboard lists — reuse .job-row flex rows for the visit/task/issue cards.
+   Tables collapsed too narrowly on phones (per-word address wrapping); the
+   stacked flex-row pattern reads cleanly from ~370px up through desktop.
+   -------------------------------------------------------------------------- */
+
+.card .job-list { gap: 0; margin: 4px 0 12px; }
+.card .job-list:last-child { margin-bottom: 0; }
+
+/* Compact rows with light dividers instead of the lifted standalone card look. */
+.card .job-row {
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 4px;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+}
+.card .job-list .job-row:first-child { padding-top: 4px; }
+.card .job-list .job-row:last-child { border-bottom: 0; padding-bottom: 4px; }
+.card .job-row:hover { box-shadow: none; transform: none; background: #fbfaf7; }
+.card .job-row--static { cursor: default; }
+.card .job-row--static:hover { background: transparent; }
+
+/* The route badge sits centred against the first text line. */
+.card .job-row > .route-no { margin-top: 1px; }
+
+/* Main column: let the property/address wrap as normal multi-word text —
+   never collapse to one word per line, never force a single clipped line. */
+.card .job-row-main { gap: 1px; }
+.card .job-row-main strong { line-height: 1.35; overflow-wrap: anywhere; }
+.card .job-row-main .muted {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+}
+
+/* Meta column: pills aligned to the top-right, wrapping gracefully if needed. */
+.card .job-row-meta { align-items: flex-end; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+
+/* Phone: keep the route badge + main text on one row, pills drop beneath and
+   align under the text (no awkward fixed indent). */
+@media (max-width: 600px) {
+  .card .job-row { flex-wrap: wrap; }
+  .card .job-row-meta {
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    width: 100%;
+    order: 4;
+    gap: 8px;
+    margin-top: 2px;
+  }
+  /* Indent the pills to line up under the main text when a route badge leads. */
+  .card .job-row > .route-no ~ .job-row-meta { padding-left: 38px; }
+}
+
+/* --------------------------------------------------------------------------
+   Mobile readability & top-of-page spacing
+   Phones reported the body text, the bottom tab bar and the filter controls as
+   too small / cramped. Bump the type, and stack the filter row into full-width
+   controls so the date picker, gardener select and button stop overlapping.
+   -------------------------------------------------------------------------- */
+@media (max-width: 767px) {
+  /* Larger, more legible type across the app. */
+  body { font-size: 16px; }
+  .page-sub { font-size: 0.95rem; }
+  .muted { font-size: 0.92em; }
+  .job-row-main strong { font-size: 1.08rem; }
+  .job-row-meta .muted, .job-row-meta .status { font-size: 0.92rem; }
+  .day-title { font-size: 1.05rem; }
+  .quick-chip { font-size: 0.95rem; }
+
+  /* 16px form controls stop iOS from auto-zooming (and shoving the layout)
+     when a field gains focus — a common cause of the "overlapping boxes" look. */
+  input, select, textarea, .btn { font-size: 16px; }
+
+  /* Stack the top filter controls into full-width rows instead of crowding the
+     date picker, gardener select and Filter button onto one cramped line. */
+  .filter-row { flex-direction: column; align-items: stretch; gap: 14px; }
+  .filter-row label { min-width: 0; width: 100%; }
+  .filter-row > button { width: 100%; }
+}
+
+/* Active drill-down filter banner on the Jobs list. */
+.filter-active {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.filter-active > div { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
