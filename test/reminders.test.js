@@ -2,15 +2,28 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { sendRemindersForDateWith } = require('../src/reminders');
 
-/** Fake DB + notify dependencies for sendRemindersForDateWith. */
+/**
+ * Fake DB + notify dependencies for sendRemindersForDateWith. Mimics db.js's
+ * real withTransaction: runs fn(tx) against a fake tx.q, and only flips
+ * `committed` to true if fn resolves — mirroring how a real Postgres
+ * transaction only persists its writes (the claim, the notification insert,
+ * the final reminder_sent_at update) if it reaches COMMIT. If fn throws,
+ * `committed` stays false and nothing the fn did through tx.q is treated as
+ * having taken effect, matching a real ROLLBACK.
+ */
 function fakeDeps({ claimedRows = [], sendDelayMs = 0 } = {}) {
-  const calls = { q: [], poolQuery: [], sends: [], logActivity: [] };
-  const q = async (sql, params) => {
-    calls.q.push({ sql, params });
-    return claimedRows;
-  };
-  const pool = {
-    query: async (sql, params) => { calls.poolQuery.push({ sql, params }); return {}; },
+  const calls = { txQueries: [], sends: [], logActivity: [], committed: false };
+  const withTransaction = async (fn) => {
+    const tx = {
+      q: async (sql, params) => {
+        calls.txQueries.push({ sql, params });
+        if (/^\s*SELECT/i.test(sql)) return claimedRows;
+        return [];
+      },
+    };
+    const result = await fn(tx); // a throw here propagates uncommitted, like a ROLLBACK
+    calls.committed = true;
+    return result;
   };
   const send = (type) => async (...args) => {
     calls.sends.push({ type, args, start: Date.now() });
@@ -18,7 +31,7 @@ function fakeDeps({ claimedRows = [], sendDelayMs = 0 } = {}) {
     return true;
   };
   const logActivity = async (...args) => { calls.logActivity.push(args); };
-  return { deps: { q, pool, sendSms: send('sms'), sendEmail: send('email'), logActivity }, calls };
+  return { deps: { withTransaction, sendSms: send('sms'), sendEmail: send('email'), logActivity }, calls };
 }
 
 const SAMPLE_ROW = (n) => ({
@@ -32,8 +45,10 @@ test('returns 0 and does no writes/sends when nothing is claimed', async () => {
   const count = await sendRemindersForDateWith(deps, '2026-07-04');
   assert.strictEqual(count, 0);
   assert.strictEqual(calls.sends.length, 0);
-  assert.strictEqual(calls.poolQuery.length, 0);
   assert.strictEqual(calls.logActivity.length, 0);
+  // Only the claim SELECT ran; no notification insert, no reminder_sent_at update.
+  assert.strictEqual(calls.txQueries.length, 1);
+  assert.match(calls.txQueries[0].sql, /^\s*SELECT/i);
 });
 
 test('fires SMS + email for every claimed visit and returns the claimed count', async () => {
@@ -44,6 +59,7 @@ test('fires SMS + email for every claimed visit and returns the claimed count', 
   assert.strictEqual(calls.sends.length, 6); // 3 visits * (sms + email)
   assert.strictEqual(calls.sends.filter((c) => c.type === 'sms').length, 3);
   assert.strictEqual(calls.sends.filter((c) => c.type === 'email').length, 3);
+  assert.strictEqual(calls.committed, true);
 });
 
 test('dispatches sends concurrently, not one gardener at a time', async () => {
@@ -59,16 +75,27 @@ test('dispatches sends concurrently, not one gardener at a time', async () => {
   assert.ok(Math.max(...starts) - Math.min(...starts) < 20, 'expected all sends to start together');
 });
 
-test('builds one multi-row INSERT for all claimed visits, not one per row', async () => {
+test('builds one multi-row INSERT for all claimed visits, and only then marks reminder_sent_at', async () => {
   const claimedRows = [SAMPLE_ROW(1), SAMPLE_ROW(2)];
   const { deps, calls } = fakeDeps({ claimedRows });
   await sendRemindersForDateWith(deps, '2026-07-04');
-  assert.strictEqual(calls.poolQuery.length, 1, 'expected exactly one notifications INSERT');
-  assert.match(calls.poolQuery[0].sql, /VALUES \(\$1, \$2, 'reminder', \$3\), \(\$4, \$5, 'reminder', \$6\)/);
-  assert.deepStrictEqual(calls.poolQuery[0].params, [
+  // claim SELECT, one notifications INSERT, one reminder_sent_at UPDATE.
+  assert.strictEqual(calls.txQueries.length, 3);
+  const insertCall = calls.txQueries.find((c) => /^\s*INSERT INTO notifications/i.test(c.sql));
+  assert.ok(insertCall, 'expected exactly one notifications INSERT');
+  assert.match(insertCall.sql, /VALUES \(\$1, \$2, 'reminder', \$3\), \(\$4, \$5, 'reminder', \$6\)/);
+  assert.deepStrictEqual(insertCall.params, [
     101, 1, 'Reminder: visit Site 1, Addr 1 on 2026-07-04',
     102, 2, 'Reminder: visit Site 2, Addr 2 on 2026-07-04',
   ]);
+  const updateCall = calls.txQueries.find((c) => /^\s*UPDATE visits/i.test(c.sql));
+  assert.ok(updateCall, 'expected exactly one reminder_sent_at UPDATE');
+  assert.match(updateCall.sql, /reminder_sent_at\s*=\s*now\(\)/i);
+  assert.deepStrictEqual(updateCall.params, [[1, 2]]);
+  // The UPDATE must be the last query issued — after the insert, so it can
+  // only ever run once the notification insert (and the sends, awaited
+  // beforehand) have completed.
+  assert.strictEqual(calls.txQueries[calls.txQueries.length - 1], updateCall);
 });
 
 test('logs a bulk vs auto activity entry depending on actorId', async () => {
@@ -79,4 +106,35 @@ test('logs a bulk vs auto activity entry depending on actorId', async () => {
   const { deps: deps2, calls: calls2 } = fakeDeps({ claimedRows: [SAMPLE_ROW(1)] });
   await sendRemindersForDateWith(deps2, '2026-07-04');
   assert.strictEqual(calls2.logActivity[0][1], 'reminder.auto');
+});
+
+test('a crash between claim and final commit leaves visits reclaimable, not lost forever', async () => {
+  // Simulate the serverless process being killed (timeout/crash) after an
+  // external send has fired but before the transaction can commit: make
+  // sendSms throw so the withTransaction callback rejects. A real Postgres
+  // transaction that never reaches COMMIT rolls back everything written
+  // through it — including the reminder_sent_at update, which (per the fix)
+  // only happens as the very last statement — so the visit's reminder_sent_at
+  // never actually gets persisted as "sent".
+  const claimedRows = [SAMPLE_ROW(1)];
+  const { deps, calls } = fakeDeps({ claimedRows });
+  deps.sendSms = async () => { throw new Error('simulated mid-flight crash'); };
+
+  await assert.rejects(() => sendRemindersForDateWith(deps, '2026-07-04'));
+  assert.strictEqual(calls.committed, false, 'the transaction must not have committed');
+  // The final reminder_sent_at UPDATE must never have been reached, since it
+  // only runs after the sends complete.
+  assert.ok(!calls.txQueries.some((c) => /^\s*UPDATE visits/i.test(c.sql)),
+    'reminder_sent_at must not be set when a crash happens before commit');
+
+  // Retry: since the (real) DB transaction rolled back, reminder_sent_at is
+  // still NULL, so the same visit is claimed and reminded again on the next
+  // run instead of being silently lost forever (worst case here: a duplicate
+  // SMS, which is the accepted tradeoff — see sendRemindersForDateWith's doc
+  // comment).
+  const { deps: retryDeps, calls: retryCalls } = fakeDeps({ claimedRows });
+  const count = await sendRemindersForDateWith(retryDeps, '2026-07-04');
+  assert.strictEqual(count, 1);
+  assert.ok(retryCalls.txQueries.some((c) => /^\s*UPDATE visits/i.test(c.sql)));
+  assert.strictEqual(retryCalls.committed, true);
 });

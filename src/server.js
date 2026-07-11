@@ -21,11 +21,19 @@ const PORT = process.env.PORT || 3000;
 const ASSET_VERSION = (process.env.VERCEL_GIT_COMMIT_SHA || String(Date.now())).slice(0, 12);
 app.locals.assetVersion = ASSET_VERSION;
 
-// Fail closed: never run with the placeholder session secret outside local dev.
-// A known secret lets anyone forge a signed admin cookie.
+// Fail closed: never run with the placeholder session secret. The old check
+// only fired when VERCEL or NODE_ENV=production was set, so `npm start` on a
+// plain VPS/server (a supported deployment per reminders.js's doc comment)
+// silently fell through to a literal string sitting in the public repo —
+// anyone can forge a signed `gmgt` session cookie for the bootstrap admin
+// with it. Require an explicit opt-in (ALLOW_INSECURE_SECRET=1) for local dev
+// instead of trying to infer "is this production" from the environment.
 const SESSION_SECRET = process.env.SESSION_SECRET;
-if (!SESSION_SECRET && (process.env.VERCEL || process.env.NODE_ENV === 'production')) {
-  throw new Error('SESSION_SECRET must be set in production — refusing to start with a default secret.');
+if (!SESSION_SECRET && process.env.ALLOW_INSECURE_SECRET !== '1') {
+  throw new Error(
+    'SESSION_SECRET must be set — refusing to start with the default insecure secret. ' +
+    'Set SESSION_SECRET to a long random string, or set ALLOW_INSECURE_SECRET=1 for local dev only.'
+  );
 }
 // Any production deploy serves HTTPS-only, not just Vercel's — used to lock
 // the session cookie and HSTS to HTTPS regardless of host.
@@ -48,11 +56,6 @@ app.use((req, res, next) => {
     "style-src 'self' 'unsafe-inline'; " +
     "script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'self'");
   if (isProdHttps) res.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-  // Rendered HTML pages must always be revalidated so a deploy shows up
-  // immediately instead of being served stale from the browser cache. Static
-  // assets (served later by express.static) and /uploads override this with
-  // their own long-lived caching.
-  res.set('Cache-Control', 'no-cache');
   next();
 });
 
@@ -62,6 +65,21 @@ app.use(express.json());
 // the ?v=<assetVersion> query string, so a long lifetime never serves stale
 // files after a deploy; icons/manifest change rarely.
 app.use(express.static(path.join(__dirname, '..', 'public'), { maxAge: '7d' }));
+
+// Rendered HTML pages must always be revalidated so a deploy shows up
+// immediately instead of being served stale from the browser cache. This must
+// come AFTER express.static: serve-static only sets its own Cache-Control
+// header when the response doesn't already have one, so setting `no-cache`
+// any earlier (e.g. in the security-headers middleware above) silently wins
+// over static's `maxAge: '7d'` for every static asset too, defeating the
+// ?v=<assetVersion> cache-busting design entirely. Static hits short-circuit
+// the request and never reach middleware mounted after them, so this only
+// ever fires for dynamic routes — /uploads overrides it with its own
+// long-lived caching.
+app.use((req, res, next) => {
+  res.set('Cache-Control', 'no-cache');
+  next();
+});
 
 // Signed cookie sessions: no server-side store, so login survives
 // serverless cold starts and multiple instances.

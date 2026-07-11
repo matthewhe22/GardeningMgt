@@ -37,14 +37,14 @@ function canSeeVisit(user, visit) {
 router.get('/', asyncHandler(async (req, res) => {
   const staff = isStaff(req.user);
   const todayStr = today();
-  const date = req.query.date || '';     // exact day (date picker)
-  const upto = req.query.upto || '';     // on/before this day (Today + overdue)
+  const date = isValidDate(req.query.date) ? req.query.date : '';     // exact day (date picker)
+  const upto = isValidDate(req.query.upto) ? req.query.upto : '';     // on/before this day (Today + overdue)
   const showAll = req.query.all === '1'; // entire history + future
   // Drill-down filters (used by the Reports "visits by status" links): an
   // exact status and/or a from–to date window.
   const status = VISIT_STATUSES.includes(req.query.status) ? req.query.status : '';
-  const from = req.query.from || '';
-  const to = req.query.to || '';
+  const from = isValidDate(req.query.from) ? req.query.from : '';
+  const to = isValidDate(req.query.to) ? req.query.to : '';
   const gardenerId = staff ? (req.query.gardener_id || '') : String(req.user.id);
   const search = (req.query.search || '').trim();
   const where = [];

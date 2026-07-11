@@ -227,8 +227,8 @@ CREATE TABLE IF NOT EXISTS invoice_items (
   id          SERIAL PRIMARY KEY,
   invoice_id  INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
   description TEXT NOT NULL,
-  quantity    REAL NOT NULL DEFAULT 1,
-  unit_price  REAL NOT NULL DEFAULT 0
+  quantity    NUMERIC(10,2) NOT NULL DEFAULT 1,
+  unit_price  NUMERIC(10,2) NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS activity_log (
@@ -342,7 +342,71 @@ function ensureCriticalSchema() {
 
 // Bump when SCHEMA or the migrations below change, so existing databases
 // re-run the DDL exactly once instead of on every serverless cold start.
-const SCHEMA_VERSION = '4';
+const SCHEMA_VERSION = '5';
+
+/**
+ * Numeric, forward-only comparison of a stored schema_version against this
+ * build's SCHEMA_VERSION. Deliberately not strict equality: a DB already at
+ * or ahead of this build's version needs no migration work — that covers a
+ * plain re-deploy of the same version, and an older app instance briefly
+ * running against a DB a newer deploy already migrated (rolling deploy
+ * overlap), without either case re-running the full DDL every cold start.
+ */
+function schemaUpToDate(storedValue) {
+  return storedValue != null && Number(storedValue) >= Number(SCHEMA_VERSION);
+}
+
+/**
+ * The expensive path: full schema DDL, column migrations, bootstrap admin,
+ * and recording SCHEMA_VERSION. Shared by both ready() (normal boot) and the
+ * DB_SKIP_INIT=1 boot path so a version bump self-heals either way instead of
+ * only being applied on deployments that happen to run without the flag.
+ */
+async function runMigrations() {
+  await pool.query(SCHEMA);
+  await ensureCriticalSchema();
+  // Migrations for databases created before these columns existed.
+  await pool.query('ALTER TABLE properties ADD COLUMN IF NOT EXISTS lots INTEGER');
+  await pool.query('ALTER TABLE visits ADD COLUMN IF NOT EXISTS job_id INTEGER REFERENCES jobs(id)');
+  await pool.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS visit_comment_id INTEGER REFERENCES visit_comments(id) ON DELETE SET NULL');
+  // Renewal tracking: flag when a contract has been renewed/closed.
+  await pool.query("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS renewal_acknowledged BOOLEAN NOT NULL DEFAULT false");
+  // Admin-only flat fee that seeds an invoice's line item.
+  await pool.query("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS gardening_fee NUMERIC(10,2)");
+  // invoice_items money columns were REAL (binary float), which accumulates
+  // cent-level drift in SUM(quantity * unit_price) aggregates. NUMERIC(10,2)
+  // is exact; Postgres converts existing data automatically. Safe to run
+  // every time this migration block runs — a same-type ALTER COLUMN TYPE is
+  // a no-op, so no IF NOT EXISTS guard is needed.
+  await pool.query('ALTER TABLE invoice_items ALTER COLUMN quantity TYPE NUMERIC(10,2), ALTER COLUMN unit_price TYPE NUMERIC(10,2)');
+  const { c } = (await pool.query('SELECT COUNT(*)::int AS c FROM users')).rows[0];
+  if (c === 0) {
+    const bcrypt = require('bcryptjs');
+    const crypto = require('crypto');
+    const email = process.env.BOOTSTRAP_ADMIN_EMAIL || 'admin@example.com';
+    // In production, never use a known default: take the env password or
+    // generate a random one and print it once to the server logs.
+    const inProd = process.env.VERCEL || process.env.NODE_ENV === 'production';
+    const password = process.env.BOOTSTRAP_ADMIN_PASSWORD
+      || (inProd ? crypto.randomBytes(9).toString('base64url') : 'admin1234');
+    await pool.query(
+      `INSERT INTO users (name, email, password_hash, role) VALUES ($1, $2, $3, 'admin')`,
+      ['Admin', email.toLowerCase(), bcrypt.hashSync(password, 10)]
+    );
+    console.log(`[bootstrap] created admin ${email} with password: ${password} — sign in and change it now.`);
+  }
+  // Only ever move the recorded version forward: an older app instance still
+  // running SCHEMA_VERSION N-1 during a rolling deploy must not stomp the N
+  // a newer instance already wrote, which would make every subsequent cold
+  // start re-run this whole block for nothing (or, worse, thrash forever).
+  await pool.query(
+    `INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', $1, now())
+     ON CONFLICT (key) DO UPDATE SET
+       value = CASE WHEN EXCLUDED.value::int > settings.value::int THEN EXCLUDED.value ELSE settings.value END,
+       updated_at = now()`,
+    [SCHEMA_VERSION]
+  );
+}
 
 /**
  * Create the schema (idempotent) and, on an empty database, a bootstrap
@@ -351,9 +415,11 @@ const SCHEMA_VERSION = '4';
  */
 function ready() {
   // Once the database is provisioned, set DB_SKIP_INIT=1 so serverless cold
-  // starts don't re-run the full schema DDL + migrations on the first request.
-  // ensureCriticalSchema() still runs — see its own doc comment for why.
-  if (process.env.DB_SKIP_INIT === '1') return ensureCriticalSchema();
+  // starts skip the full schema DDL + migrations. This still checks
+  // schema_version (see readySkipInit) so a future version bump is not
+  // silently ignored forever — only the *expensive* path is skipped once the
+  // DB is already at or ahead of SCHEMA_VERSION.
+  if (process.env.DB_SKIP_INIT === '1') return readySkipInit();
   if (!readyPromise) {
     readyPromise = (async () => {
       // Fast path: one cheap SELECT instead of replaying ~50 DDL statements
@@ -362,45 +428,44 @@ function ready() {
       // brand-new database) falls through to the full setup below.
       try {
         const v = (await pool.query("SELECT value FROM settings WHERE key = 'schema_version'")).rows[0];
-        if (v && v.value === SCHEMA_VERSION) return;
+        if (schemaUpToDate(v && v.value)) return;
       } catch (e) { /* first boot: settings table doesn't exist yet */ }
-
-      await pool.query(SCHEMA);
-      await ensureCriticalSchema();
-      // Migrations for databases created before these columns existed.
-      await pool.query('ALTER TABLE properties ADD COLUMN IF NOT EXISTS lots INTEGER');
-      await pool.query('ALTER TABLE visits ADD COLUMN IF NOT EXISTS job_id INTEGER REFERENCES jobs(id)');
-      await pool.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS visit_comment_id INTEGER REFERENCES visit_comments(id) ON DELETE SET NULL');
-      // Renewal tracking: flag when a contract has been renewed/closed.
-      await pool.query("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS renewal_acknowledged BOOLEAN NOT NULL DEFAULT false");
-      await pool.query("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS gardening_fee NUMERIC(10,2)");
-      const { c } = (await pool.query('SELECT COUNT(*)::int AS c FROM users')).rows[0];
-      if (c === 0) {
-        const bcrypt = require('bcryptjs');
-        const crypto = require('crypto');
-        const email = process.env.BOOTSTRAP_ADMIN_EMAIL || 'admin@example.com';
-        // In production, never use a known default: take the env password or
-        // generate a random one and print it once to the server logs.
-        const inProd = process.env.VERCEL || process.env.NODE_ENV === 'production';
-        const password = process.env.BOOTSTRAP_ADMIN_PASSWORD
-          || (inProd ? crypto.randomBytes(9).toString('base64url') : 'admin1234');
-        await pool.query(
-          `INSERT INTO users (name, email, password_hash, role) VALUES ($1, $2, $3, 'admin')`,
-          ['Admin', email.toLowerCase(), bcrypt.hashSync(password, 10)]
-        );
-        console.log(`[bootstrap] created admin ${email} with password: ${password} — sign in and change it now.`);
-      }
-      await pool.query(
-        `INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', $1, now())
-         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
-        [SCHEMA_VERSION]
-      );
+      await runMigrations();
     })();
     // Don't memoize failures: a transient DB outage at cold start should not
     // poison every later request in this process.
     readyPromise.catch(() => { readyPromise = null; });
   }
   return readyPromise;
+}
+
+let skipInitPromise = null;
+
+/**
+ * DB_SKIP_INIT=1 boot path. ensureCriticalSchema() always runs (cheap,
+ * memoized, see its own doc comment). The schema_version check is a single
+ * indexed-PK SELECT, so it's cheap enough to run on every cold start even
+ * under this flag; only the full runMigrations() pass is skipped once the DB
+ * is already at or ahead of SCHEMA_VERSION. Without this, a deployment that
+ * (as recommended) sets DB_SKIP_INIT=1 once provisioned would never apply a
+ * future schema change — it would boot fine and then 500 the first time a
+ * route touched a new column/table.
+ */
+function readySkipInit() {
+  if (!skipInitPromise) {
+    skipInitPromise = (async () => {
+      const critical = ensureCriticalSchema();
+      let stored = null;
+      try {
+        const v = (await pool.query("SELECT value FROM settings WHERE key = 'schema_version'")).rows[0];
+        stored = v && v.value;
+      } catch (e) { /* settings table missing/unreadable: treat as out of date */ }
+      if (!schemaUpToDate(stored)) await runMigrations();
+      await critical;
+    })();
+    skipInitPromise.catch(() => { skipInitPromise = null; });
+  }
+  return skipInitPromise;
 }
 
 module.exports = { pool, q, q1, ready, withTransaction };
