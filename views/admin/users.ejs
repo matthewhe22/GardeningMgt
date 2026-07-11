@@ -3,7 +3,7 @@
 
 <details class="card">
   <summary><strong>＋ Add user</strong></summary>
-  <form method="post" action="/admin/users" class="form-grid">
+  <form method="post" action="/admin/users" class="form-grid"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
     <label>Name <input type="text" name="name" required></label>
     <label>Email <input type="email" name="email" required></label>
     <label>Password <input type="password" name="password" required minlength="8"></label>
@@ -31,7 +31,7 @@
       <td data-label="Status"><%= u.active ? 'active' : 'disabled' %></td>
       <td data-label="Action">
         <% if (u.id !== user.id) { %>
-        <form method="post" action="/admin/users/<%= u.id %>/toggle" class="inline"<% if (u.active) { %> data-confirm="Disable <%= u.name %>? They will no longer be able to sign in."<% } %>>
+        <form method="post" action="/admin/users/<%= u.id %>/toggle" class="inline"<% if (u.active) { %> data-confirm="Disable <%= u.name %>? They will no longer be able to sign in."<% } %>><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
           <button class="link-btn"><%= u.active ? 'Disable' : 'Enable' %></button>
         </form>
         <% } %>

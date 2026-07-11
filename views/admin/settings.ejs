@@ -13,7 +13,7 @@
 
 <div class="card">
   <h2>OneDrive (Microsoft Graph)</h2>
-  <form method="post" action="/admin/settings" class="form-grid">
+  <form method="post" action="/admin/settings" class="form-grid"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
     <label>Tenant (Directory) ID
       <input type="text" name="onedrive_tenant_id" value="<%= settings.onedrive_tenant_id || '' %>" placeholder="00000000-0000-0000-0000-000000000000"></label>
     <label>Client (Application) ID
@@ -28,7 +28,7 @@
       <input type="text" name="onedrive_folder" value="<%= settings.onedrive_folder || '' %>" placeholder="GardeningMgt"></label>
     <button class="btn btn-primary">Save settings</button>
   </form>
-  <form method="post" action="/admin/settings/test" style="margin-top:8px">
+  <form method="post" action="/admin/settings/test" style="margin-top:8px"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
     <button class="btn">Test connection</button>
   </form>
 </div>

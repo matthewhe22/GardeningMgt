@@ -75,7 +75,7 @@
         <span class="role"><%= user.role %></span>
       </span>
     </a>
-    <form method="post" action="/logout" class="inline"><button class="signout-btn" title="Sign out · <%= user.name %>" aria-label="Sign out"><%- icons.logout %></button></form>
+    <form method="post" action="/logout" class="inline"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %><button class="signout-btn" title="Sign out · <%= user.name %>" aria-label="Sign out"><%- icons.logout %></button></form>
   </div>
 </aside>
 
@@ -117,7 +117,7 @@
     <a href="/admin/settings" class="nav-item<%= active('/admin/settings') %>"><%- icons.gear %> Settings</a>
   <% } %>
   <div class="nav-label">Signed in as <%= user.name %></div>
-  <form method="post" action="/logout" class="sheet-signout"><button class="nav-item"><%- icons.logout %> Sign out</button></form>
+  <form method="post" action="/logout" class="sheet-signout"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %><button class="nav-item"><%- icons.logout %> Sign out</button></form>
 </div>
 <% } %>
 <main class="container">

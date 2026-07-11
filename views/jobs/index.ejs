@@ -24,7 +24,7 @@
 <% if (staff) { %>
 <details class="card">
   <summary><strong>＋ New site</strong></summary>
-  <form method="post" action="/jobs" class="form-grid">
+  <form method="post" action="/jobs" class="form-grid"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
     <label>Site
       <select name="property_id" required>
         <% properties.forEach(p => { %><option value="<%= p.id %>"><%= p.name %></option><% }) %>
@@ -83,14 +83,14 @@
       <% if (staff) { %>
       <td class="stack-main">
         <% if (j.expired) { %>
-        <form method="post" action="/jobs/<%= j.id %>/renew" class="add-row" style="margin-bottom:6px">
+        <form method="post" action="/jobs/<%= j.id %>/renew" class="add-row" style="margin-bottom:6px"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
           <select name="contract_years"><option value="1">1 yr</option><option value="2">2 yr</option></select>
           <button class="btn btn-primary">Renew</button>
         </form>
         <% } %>
         <details>
           <summary class="muted">Edit</summary>
-          <form method="post" action="/jobs/<%= j.id %>/update" class="form-grid">
+          <form method="post" action="/jobs/<%= j.id %>/update" class="form-grid"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
             <label>Gardener
               <select name="gardener_id">
                 <option value="">Unassigned</option>

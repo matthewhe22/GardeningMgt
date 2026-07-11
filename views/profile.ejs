@@ -21,7 +21,7 @@
 
 <div class="card">
   <p class="muted" style="margin-top: 0">Signed in as <strong><%= user.email %></strong>. Sign out to switch accounts or hand the device to another gardener.</p>
-  <form method="post" action="/logout">
+  <form method="post" action="/logout"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
     <button class="btn btn-danger btn-block">Sign out</button>
   </form>
 </div>

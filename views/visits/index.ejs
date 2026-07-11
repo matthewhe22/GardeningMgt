@@ -47,7 +47,7 @@
 <% if (staff) { %>
 <details class="card">
   <summary><strong>＋ Schedule a one-off visit</strong> <span class="muted">(recurring jobs are created on the Sites page)</span></summary>
-  <form method="post" action="/visits" class="form-grid">
+  <form method="post" action="/visits" class="form-grid"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
     <label>Property
       <select name="property_id" required>
         <% properties.forEach(p => { %><option value="<%= p.id %>"><%= p.name %></option><% }) %>
@@ -88,7 +88,7 @@
         <span class="muted">· <%= group.items.length %> stop<%= group.items.length === 1 ? '' : 's' %></span>
       </h2>
       <% if (canReorder && group.items.length > 1) { %>
-      <form method="post" action="/visits/optimize" class="inline">
+      <form method="post" action="/visits/optimize" class="inline"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
         <input type="hidden" name="date" value="<%= group.date %>">
         <input type="hidden" name="gardener_id" value="<%= gardenerId %>">
         <button class="btn btn-sm">⚡ Optimize route</button>
@@ -110,11 +110,11 @@
         </span>
         <% if (canReorder) { %>
         <span class="reorder" aria-label="Reorder visit">
-          <form method="post" action="/visits/<%= v.id %>/move" class="inline">
+          <form method="post" action="/visits/<%= v.id %>/move" class="inline"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
             <input type="hidden" name="dir" value="up">
             <button class="reorder-btn" aria-label="Move earlier"<%= i === 0 ? ' disabled' : '' %>>▲</button>
           </form>
-          <form method="post" action="/visits/<%= v.id %>/move" class="inline">
+          <form method="post" action="/visits/<%= v.id %>/move" class="inline"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
             <input type="hidden" name="dir" value="down">
             <button class="reorder-btn" aria-label="Move later"<%= i === group.items.length - 1 ? ' disabled' : '' %>>▼</button>
           </form>

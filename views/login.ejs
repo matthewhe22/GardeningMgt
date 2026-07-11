@@ -7,7 +7,7 @@
       <p class="muted">Sign in to manage your gardening jobs.</p>
     </div>
     <% if (error) { %><p class="alert alert-error"><%= error %></p><% } %>
-    <form method="post" action="/login">
+    <form method="post" action="/login"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
       <label>Email <input type="email" name="email" required autofocus autocomplete="username"></label>
       <label>Password <input type="password" name="password" required autocomplete="current-password"></label>
       <button class="btn btn-primary">Sign in</button>

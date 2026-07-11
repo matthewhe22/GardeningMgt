@@ -13,7 +13,7 @@
 
 <details class="card">
   <summary><strong>📥 Import sites from Excel / CSV</strong></summary>
-  <form method="post" action="/admin/properties/import" enctype="multipart/form-data" class="filter-row">
+  <form method="post" action="/admin/properties/import" enctype="multipart/form-data" class="filter-row"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
     <input type="file" name="file" accept=".xlsx,.csv" required>
     <button class="btn btn-primary">Upload &amp; import</button>
   </form>
@@ -26,7 +26,7 @@
 
 <details class="card">
   <summary><strong>＋ Add a single site</strong></summary>
-  <form method="post" action="/admin/properties" class="form-grid">
+  <form method="post" action="/admin/properties" class="form-grid"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
     <label>Site name <input type="text" name="name" required></label>
     <label>Address <input type="text" name="address" required></label>
     <label>Contact name <input type="text" name="contact_name"></label>
@@ -45,7 +45,7 @@
   <div class="card-head">
     <h2>Coordinates</h2>
     <% if (missingCoords > 0) { %>
-    <form method="post" action="/admin/properties/geocode" class="inline">
+    <form method="post" action="/admin/properties/geocode" class="inline"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
       <button class="btn btn-primary">📍 Find missing coordinates</button>
     </form>
     <% } %>
@@ -74,7 +74,7 @@
       <span class="status status-open">⚠ no coordinates</span>
     <% } %>
   </summary>
-  <form method="post" action="/admin/properties/<%= p.id %>/update" class="form-grid">
+  <form method="post" action="/admin/properties/<%= p.id %>/update" class="form-grid"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
     <label>Site name <input type="text" name="name" value="<%= p.name %>" required></label>
     <label>Address <input type="text" name="address" value="<%= p.address %>" required></label>
     <label>Contact name <input type="text" name="contact_name" value="<%= p.contact_name || '' %>"></label>

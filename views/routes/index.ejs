@@ -26,13 +26,13 @@
 <% } %>
 <div class="card">
   <div class="filter-row">
-    <form method="post" action="/routes/optimize">
+    <form method="post" action="/routes/optimize"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
       <input type="hidden" name="date" value="<%= date %>">
       <input type="hidden" name="gardener_id" value="<%= gardenerId %>">
       <button class="btn btn-primary">⚡ Optimize this route</button>
     </form>
     <% if (staff) { %>
-    <form method="post" action="/routes/optimize-all">
+    <form method="post" action="/routes/optimize-all"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
       <input type="hidden" name="date" value="<%= date %>">
       <button class="btn">⚡ Optimize all gardeners for <%= date %></button>
     </form>

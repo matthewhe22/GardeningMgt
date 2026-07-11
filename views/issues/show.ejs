@@ -12,7 +12,7 @@
       <span class="status status-<%= issue.status %>"><%= issue.status.replace('_',' ') %></span>
       <% if (issue.resolved_at) { %><span class="muted">resolved <%= fmtDateTime(issue.resolved_at) %></span><% } %>
     </p>
-    <form method="post" action="/issues/<%= issue.id %>/update" class="form-grid">
+    <form method="post" action="/issues/<%= issue.id %>/update" class="form-grid"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
       <label>Status
         <select name="status">
           <% ['open','in_progress','resolved','closed'].forEach(s => { %>
@@ -48,12 +48,12 @@
           <figcaption><span class="photo-stamp">📅 <%= fmtDateTime(ph.created_at) %></span><br>
             <span class="muted">by <%= ph.uploader_name %></span>
             <% if (staff || ph.uploaded_by === user.id) { %>
-              <form method="post" action="/photos/<%= ph.id %>/delete" class="inline" data-confirm="Delete this photo?"><button class="link-btn">Delete</button></form>
+              <form method="post" action="/photos/<%= ph.id %>/delete" class="inline" data-confirm="Delete this photo?"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %><button class="link-btn">Delete</button></form>
             <% } %></figcaption>
         </figure>
       <% }) %>
     </div>
-    <form method="post" action="/issues/<%= issue.id %>/photos" enctype="multipart/form-data" class="photo-upload" data-upload>
+    <form method="post" action="/issues/<%= issue.id %>/photos" enctype="multipart/form-data" class="photo-upload" data-upload><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
       <div class="photo-actions">
         <label class="btn btn-primary photo-pick" data-camera>
           📷 Take photo
@@ -76,7 +76,7 @@
       <div class="comment"><strong><%= c.author_name %></strong> <span class="muted"><%= fmtDateTime(c.created_at) %></span>
         <p><%= c.body %></p></div>
     <% }) %>
-    <form method="post" action="/issues/<%= issue.id %>/comments" class="comment-form">
+    <form method="post" action="/issues/<%= issue.id %>/comments" class="comment-form"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
       <textarea name="body" rows="2" placeholder="Add a comment…" required></textarea>
       <div class="comment-actions">
         <button class="btn btn-primary comment-send" type="submit">Send</button>

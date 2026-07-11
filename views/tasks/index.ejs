@@ -18,7 +18,7 @@
 <% if (staff) { %>
 <details class="card">
   <summary><strong>＋ New standalone task</strong></summary>
-  <form method="post" action="/tasks" class="form-grid">
+  <form method="post" action="/tasks" class="form-grid"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
     <label class="span2">Title <input type="text" name="title" required></label>
     <label class="span2">Description <input type="text" name="description"></label>
     <label>Assignee
@@ -47,7 +47,7 @@
       </td>
       <td data-label="Status"><span class="status status-<%= t.status %>"><%= t.status.replace('_',' ') %></span></td>
       <td data-label="Change">
-        <form method="post" action="/tasks/<%= t.id %>/status" class="inline">
+        <form method="post" action="/tasks/<%= t.id %>/status" class="inline"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
           <select name="status" data-autosubmit aria-label="Change task status">
             <% ['pending','in_progress','done','blocked'].forEach(s => { %>
               <option value="<%= s %>" <%= t.status === s ? 'selected' : '' %>><%= s.replace('_',' ') %></option>

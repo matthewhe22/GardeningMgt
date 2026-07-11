@@ -18,7 +18,7 @@
 
 <details class="card">
   <summary><strong>＋ Report an issue</strong></summary>
-  <form method="post" action="/issues" class="form-grid">
+  <form method="post" action="/issues" class="form-grid"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
     <label class="span2">Title <input type="text" name="title" required></label>
     <label class="span2">Description <textarea name="description" rows="3"></textarea></label>
     <label>Property

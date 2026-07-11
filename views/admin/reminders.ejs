@@ -8,7 +8,7 @@
 <% } %>
 
 <div class="card">
-  <form method="post" action="/admin/reminders/bulk" class="filter-row">
+  <form method="post" action="/admin/reminders/bulk" class="filter-row"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
     <label>Date <input type="date" name="date" value="<%= date %>"></label>
     <label><input type="checkbox" name="force"> Re-send even if already reminded</label>
     <button class="btn btn-primary">📣 Send bulk reminders</button>

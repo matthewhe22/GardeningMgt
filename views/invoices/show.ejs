@@ -22,7 +22,7 @@
       <td data-label="Amount">$<%= (it.quantity * it.unit_price).toFixed(2) %></td>
       <td data-label="Remove">
         <% if (invoice.status === 'draft') { %>
-        <form method="post" action="/invoices/<%= invoice.id %>/items/<%= it.id %>/delete" class="inline" data-confirm="Remove this line item?">
+        <form method="post" action="/invoices/<%= invoice.id %>/items/<%= it.id %>/delete" class="inline" data-confirm="Remove this line item?"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
           <button class="link-btn">✕</button>
         </form>
         <% } %>
@@ -33,7 +33,7 @@
   </table>
 
   <% if (invoice.status === 'draft') { %>
-  <form method="post" action="/invoices/<%= invoice.id %>/items" class="filter-row">
+  <form method="post" action="/invoices/<%= invoice.id %>/items" class="filter-row"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
     <label>Description <input type="text" name="description" placeholder="e.g. Mulch supply" required></label>
     <label>Qty <input type="number" name="quantity" step="0.01" min="0" value="1" required></label>
     <label>Unit price <input type="number" name="unit_price" step="0.01" min="0" required></label>
@@ -41,7 +41,7 @@
   </form>
   <% } %>
 
-  <form method="post" action="/invoices/<%= invoice.id %>/status" class="filter-row" data-confirm="Update this invoice's status?">
+  <form method="post" action="/invoices/<%= invoice.id %>/status" class="filter-row" data-confirm="Update this invoice's status?"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
     <label>Status
       <select name="status">
         <% ['draft','sent','paid','void'].forEach(s => { %>
