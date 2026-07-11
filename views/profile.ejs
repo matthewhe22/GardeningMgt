@@ -1,0 +1,28 @@
+<%- include('partials/header') %>
+<div class="page-head">
+  <h1>My profile</h1>
+  <p class="page-sub">Your account details and sign-out.</p>
+</div>
+
+<div class="card">
+  <div class="profile-head">
+    <span class="avatar" aria-hidden="true"><%= user.name.trim().charAt(0).toUpperCase() %></span>
+    <div>
+      <h2><%= user.name %></h2>
+      <div class="muted"><span class="tag tag-<%= user.role %>"><%= user.role %></span></div>
+    </div>
+  </div>
+  <dl class="profile-rows">
+    <div><dt>Email</dt><dd><%= user.email %></dd></div>
+    <div><dt>Phone</dt><dd><%= user.phone || '—' %></dd></div>
+    <div><dt>Role</dt><dd style="text-transform: capitalize"><%= user.role %></dd></div>
+  </dl>
+</div>
+
+<div class="card">
+  <p class="muted" style="margin-top: 0">Signed in as <strong><%= user.email %></strong>. Sign out to switch accounts or hand the device to another gardener.</p>
+  <form method="post" action="/logout">
+    <button class="btn btn-danger btn-block">Sign out</button>
+  </form>
+</div>
+<%- include('partials/footer') %>

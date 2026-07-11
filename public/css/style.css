@@ -215,7 +215,20 @@ body.authed main.container {
   font-size: 0.85rem;
 }
 
-.sidebar-user { min-width: 0; }
+.sidebar-me {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+  border-radius: var(--radius-sm);
+  padding: 2px;
+  margin: -2px;
+  text-decoration: none;
+}
+.sidebar-me:hover { background: rgba(255, 255, 255, 0.07); text-decoration: none; }
+
+.sidebar-user { min-width: 0; display: flex; flex-direction: column; }
 .sidebar-user .name { color: #fff; font-size: 0.86rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sidebar-user .role { color: rgba(230, 242, 234, 0.55); font-size: 0.74rem; text-transform: capitalize; }
 
@@ -294,6 +307,19 @@ body.authed main.container {
      visual-viewport bottom edge (rather than a stale layout-viewport bottom)
      as the address bar/toolbar collapses, avoiding a gap under the bar. */
   transform: translateZ(0);
+}
+
+/* iOS Safari (collapsing toolbar) and home-screen PWAs can end the layout
+   viewport above the physical screen bottom, leaving a strip of page
+   background under a fixed bottom:0 bar. Extend the bar's backdrop past the
+   viewport edge so the nav always reads as anchored to the screen bottom. */
+.tabbar::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 0; right: 0;
+  height: 160px;
+  background: inherit;
 }
 
 .tabbar-inner { display: flex; }
@@ -922,6 +948,32 @@ body.anon {
 
 .auth-card form { margin-top: 8px; }
 .auth-card .btn { width: 100%; margin-top: 16px; }
+
+/* --------------------------------------------------------------------------
+   Profile page
+   -------------------------------------------------------------------------- */
+
+.profile-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.profile-head .avatar { width: 56px; height: 56px; font-size: 1.3rem; }
+.profile-head h2 { margin: 0; font-size: 1.15rem; }
+.profile-head .muted { margin-top: 2px; }
+
+.profile-rows { margin: 20px 0 0; }
+.profile-rows > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.92rem;
+}
+.profile-rows > div:last-child { border-bottom: 0; }
+.profile-rows dt { color: var(--muted); font-weight: 600; }
+.profile-rows dd { margin: 0; text-align: right; word-break: break-word; }
 
 /* --------------------------------------------------------------------------
    Print
