@@ -3,6 +3,7 @@ const { q, q1 } = require('../db');
 const { requireRole } = require('../auth');
 const { asyncHandler } = require('../asyncHandler');
 const { today: businessToday } = require('../time');
+const { isValidDate } = require('../recurrence');
 
 const router = express.Router();
 router.use(requireRole('supervisor'));
@@ -13,8 +14,8 @@ router.get('/', asyncHandler(async (req, res) => {
   const todayStr = businessToday();
   const [y, m, d] = todayStr.split('-').map(Number);
   const defaultFrom = new Date(Date.UTC(y, m - 1, d - 29)).toISOString().slice(0, 10);
-  const from = req.query.from || defaultFrom;
-  const to = req.query.to || todayStr;
+  const from = isValidDate(req.query.from) ? req.query.from : defaultFrom;
+  const to = isValidDate(req.query.to) ? req.query.to : todayStr;
 
   // Five independent aggregates — run them concurrently.
   const [visitStats, perGardener, issueStats, invoiceStats, photoRow] = await Promise.all([
@@ -52,8 +53,8 @@ router.get('/export.csv', asyncHandler(async (req, res) => {
   const todayStr = businessToday();
   const [y, m, d] = todayStr.split('-').map(Number);
   const defaultFrom = new Date(Date.UTC(y, m - 1, d - 29)).toISOString().slice(0, 10);
-  const from = req.query.from || defaultFrom;
-  const to = req.query.to || todayStr;
+  const from = isValidDate(req.query.from) ? req.query.from : defaultFrom;
+  const to = isValidDate(req.query.to) ? req.query.to : todayStr;
   const rows = await q(`
     SELECT v.scheduled_date, p.name AS property, p.address, u.name AS gardener,
            v.status, v.duration_minutes, v.time_window

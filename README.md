@@ -76,9 +76,17 @@ configuring the vars: `npm run migrate:photos`.
 
 ## Run locally / on a normal server
 
+The app refuses to start without `SESSION_SECRET` set (it signs the session
+cookie; a known secret lets anyone forge a signed admin login). For local dev
+only, set `ALLOW_INSECURE_SECRET=1` instead of generating a real secret — never
+set it on a deployment reachable over the network. `npm start` on a bare
+server is a supported deployment (see `startReminderScheduler` in
+`src/reminders.js`), so this applies there too, not just to `npm run dev`.
+
 ```bash
 npm install
 export DATABASE_URL=postgresql://user:pass@host:5432/dbname
+export ALLOW_INSECURE_SECRET=1   # or: export SESSION_SECRET=<a long random string>
 npm run seed     # demo users + data (skips if data exists)
 npm start        # http://localhost:3000
 npm test         # unit tests
@@ -98,7 +106,8 @@ Demo accounts (after seeding):
 | Env var | Default | Purpose |
 |---|---|---|
 | `DATABASE_URL` | local dev value | PostgreSQL connection string (required in production) |
-| `SESSION_SECRET` | dev value | **Set in production** — signs the session cookie |
+| `SESSION_SECRET` | none | Signs the session cookie. **Required** — the app refuses to start without it (or without `ALLOW_INSECURE_SECRET=1`), since a known secret lets anyone forge a signed admin session cookie |
+| `ALLOW_INSECURE_SECRET` | unset | Set to `1` to let the app boot with the built-in insecure default secret/key when `SESSION_SECRET`/`SETTINGS_KEY` aren't set. **Local dev only** — never set this in any deployment reachable over the network |
 | `CRON_SECRET` | unset | If set, `/cron/reminders` requires `Authorization: Bearer <secret>` |
 | `BOOTSTRAP_ADMIN_EMAIL/_PASSWORD` | admin@example.com / admin1234 | First admin on an empty database |
 | `HOURLY_RATE` | 50 | Default labour rate for invoices |

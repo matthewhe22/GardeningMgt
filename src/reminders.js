@@ -1,4 +1,4 @@
-const { pool, q, q1 } = require('./db');
+const { withTransaction, q, q1 } = require('./db');
 const { logActivity } = require('./activity');
 const { today: businessToday } = require('./time');
 const { sendSms, sendEmail } = require('./notify');
@@ -10,61 +10,96 @@ const { sendSms, sendEmail } = require('./notify');
  * provider needed (see test/reminders.test.js). sendRemindersForDate() below
  * is a thin wrapper binding the real db/notify/activity modules.
  *
- * @param {{q: Function, pool: {query: Function}, sendSms: Function, sendEmail: Function, logActivity: Function}} deps
+ * Claim, notification insert, and the final reminder_sent_at update all run
+ * inside one DB transaction (see withTransaction in db.js) that only commits
+ * after the notification insert and the external SMS/email sends have been
+ * attempted. reminder_sent_at is intentionally NOT set by the claim query —
+ * it's the last thing written, right before commit. That means:
+ *   - Concurrency (cron racing a supervisor's manual "bulk send" click) is
+ *     still safe: the claim uses SELECT ... FOR UPDATE SKIP LOCKED, so a
+ *     concurrent transaction skips any row this one is already holding a lock
+ *     on instead of double-claiming it or blocking.
+ *   - If the process crashes/times out anywhere between the claim and the
+ *     commit, the transaction is never committed, so reminder_sent_at stays
+ *     NULL and the next run's claim picks those visits up again — instead of
+ *     the old behavior (mark reminder_sent_at as part of the claim, before
+ *     delivery) which could mark a visit "sent" and then crash before
+ *     anything was actually delivered, silently losing it forever (the claim
+ *     query filters on reminder_sent_at IS NULL, so a lost visit was never
+ *     retried). The tradeoff: if the crash happens *after* an external
+ *     send actually went out but *before* commit, a retry can re-send that
+ *     same SMS/email/in-app notification — a duplicate is far better than a
+ *     silent loss.
+ *
+ * @param {{withTransaction: Function, sendSms: Function, sendEmail: Function, logActivity: Function}} deps
  * @param {string} date
  * @param {{actorId?: number|null, force?: boolean}} opts force re-sends even if already reminded
  */
 async function sendRemindersForDateWith(deps, date, opts = {}) {
-  const { q, pool, sendSms, sendEmail, logActivity: log } = deps;
+  const { withTransaction: withTx, sendSms, sendEmail, logActivity: log } = deps;
   const { actorId = null, force = false } = opts;
-  // Join the gardener's contact details into the claim so there's no per-visit
-  // user lookup (was an N+1) when sending SMS/email.
-  const claimed = await q(
-    `UPDATE visits v SET reminder_sent_at = now()
-     FROM properties p, users u
-     WHERE v.property_id = p.id AND u.id = v.gardener_id
-       AND v.scheduled_date = $1 AND v.status = 'scheduled' AND v.gardener_id IS NOT NULL
-       AND ($2 OR v.reminder_sent_at IS NULL)
-     RETURNING v.id, v.gardener_id, v.time_window, p.name AS property_name, p.address,
-       u.phone AS gardener_phone, u.email AS gardener_email`,
-    [date, force]
-  );
-  if (!claimed.length) return 0;
 
-  const msgFor = (v) =>
-    `Reminder: visit ${v.property_name}, ${v.address} on ${date}${v.time_window ? ` (${v.time_window})` : ''}`;
+  return withTx(async (tx) => {
+    // Join the gardener's contact details into the claim so there's no
+    // per-visit user lookup (was an N+1) when sending SMS/email. FOR UPDATE
+    // OF v ... SKIP LOCKED claims exclusively without setting
+    // reminder_sent_at yet (see the function doc comment above for why).
+    const claimed = await tx.q(
+      `SELECT v.id, v.gardener_id, v.time_window, p.name AS property_name, p.address,
+         u.phone AS gardener_phone, u.email AS gardener_email
+       FROM visits v
+       JOIN properties p ON p.id = v.property_id
+       JOIN users u ON u.id = v.gardener_id
+       WHERE v.scheduled_date = $1 AND v.status = 'scheduled' AND v.gardener_id IS NOT NULL
+         AND ($2 OR v.reminder_sent_at IS NULL)
+       FOR UPDATE OF v SKIP LOCKED`,
+      [date, force]
+    );
+    if (!claimed.length) return 0;
 
-  // One multi-row insert for all in-app notifications instead of N inserts.
-  const values = claimed.map((_, i) => `($${i * 3 + 1}, $${i * 3 + 2}, 'reminder', $${i * 3 + 3})`).join(', ');
-  const params = claimed.flatMap((v) => [v.gardener_id, v.id, msgFor(v)]);
-  await pool.query(`INSERT INTO notifications (user_id, visit_id, type, message) VALUES ${values}`, params);
+    const msgFor = (v) =>
+      `Reminder: visit ${v.property_name}, ${v.address} on ${date}${v.time_window ? ` (${v.time_window})` : ''}`;
 
-  // Best-effort external delivery; no-ops unless a provider is configured.
-  // Every send is independent (and each already swallows its own errors), so
-  // fire them all concurrently instead of one gardener at a time — a busy
-  // day's worth of visits was otherwise slow enough to risk a serverless
-  // request timeout partway through.
-  await Promise.all(claimed.flatMap((v) => {
-    const msg = msgFor(v);
-    return [sendSms(v.gardener_phone, msg), sendEmail(v.gardener_email, 'Visit reminder', msg)];
-  }));
-  await log(actorId, actorId ? 'reminder.bulk' : 'reminder.auto', 'visit', null,
-    `Sent ${claimed.length} visit reminder(s) for ${date}`);
-  return claimed.length;
+    // One multi-row insert for all in-app notifications instead of N inserts.
+    const values = claimed.map((_, i) => `($${i * 3 + 1}, $${i * 3 + 2}, 'reminder', $${i * 3 + 3})`).join(', ');
+    const params = claimed.flatMap((v) => [v.gardener_id, v.id, msgFor(v)]);
+    await tx.q(`INSERT INTO notifications (user_id, visit_id, type, message) VALUES ${values}`, params);
+
+    // Best-effort external delivery; no-ops unless a provider is configured.
+    // Every send is independent (and each already swallows its own errors), so
+    // fire them all concurrently instead of one gardener at a time — a busy
+    // day's worth of visits was otherwise slow enough to risk a serverless
+    // request timeout partway through.
+    await Promise.all(claimed.flatMap((v) => {
+      const msg = msgFor(v);
+      return [sendSms(v.gardener_phone, msg), sendEmail(v.gardener_email, 'Visit reminder', msg)];
+    }));
+
+    // Only now — after the notification insert and the external sends have
+    // both been attempted — mark these visits as reminded.
+    const ids = claimed.map((v) => v.id);
+    await tx.q('UPDATE visits SET reminder_sent_at = now() WHERE id = ANY($1)', [ids]);
+
+    await log(actorId, actorId ? 'reminder.bulk' : 'reminder.auto', 'visit', null,
+      `Sent ${claimed.length} visit reminder(s) for ${date}`);
+    return claimed.length;
+  });
 }
 
 /**
  * Create in-app reminder notifications for every assigned, scheduled visit on
- * `date` (YYYY-MM-DD). Idempotent under concurrency: a single statement claims
- * unreminded visits (RETURNING) so a cron retry overlapping the supervisor's
- * "bulk reminders" click can't double-notify. Optionally also sends SMS/email
- * if a provider is configured (see notify.js). Returns count sent.
+ * `date` (YYYY-MM-DD). Safe under concurrency: the claim runs inside a
+ * transaction with SELECT ... FOR UPDATE SKIP LOCKED, so a cron retry
+ * overlapping the supervisor's "bulk reminders" click can't double-claim the
+ * same visits (see sendRemindersForDateWith's doc comment for the full
+ * crash-recovery story). Optionally also sends SMS/email if a provider is
+ * configured (see notify.js). Returns count sent.
  *
  * @param {string} date
  * @param {{actorId?: number|null, force?: boolean}} opts force re-sends even if already reminded
  */
 async function sendRemindersForDate(date, opts = {}) {
-  return sendRemindersForDateWith({ q, pool, sendSms, sendEmail, logActivity }, date, opts);
+  return sendRemindersForDateWith({ withTransaction, sendSms, sendEmail, logActivity }, date, opts);
 }
 
 /**
