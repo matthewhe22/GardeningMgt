@@ -1368,4 +1368,49 @@ a, button, .btn, .nav-item, .tab, .photo-pick, label.confirm-line {
   gap: 12px;
   flex-wrap: wrap;
 }
+
+/* --------------------------------------------------------------------------
+   Review fixes round 2: overflow-safe task table, overdue-visits banner,
+   offline draft-recovery banner/message
+   -------------------------------------------------------------------------- */
+
+/* Tasks table on the visit page: a plain 3-up .table blew out past 390px
+   (forcing the mobile browser to zoom out, which then mis-targets taps on the
+   sticky Complete-job button and the tab bar) and clipped the status <select>
+   to ~48px. Stack it into single-column rows instead of scrolling it
+   sideways: title + status pill on one line, a full-width select below. */
+.table-tasks { width: 100%; border-collapse: collapse; }
+.table-tasks td { padding: 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.table-tasks tr:last-child td { border-bottom: 0; }
+.task-title-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.task-status-cell select { width: 100%; }
+@media (max-width: 700px) {
+  .table-tasks, .table-tasks tbody { display: block; }
+  .table-tasks tr {
+    display: block;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+    margin-bottom: 10px;
+    background: var(--card);
+  }
+  .table-tasks td { display: block; padding: 4px 0; border: 0; }
+  .task-status-cell { padding-top: 8px; }
+  .task-status-cell form { display: block; }
+}
+
+/* Dashboard "overdue visits" banner: distinct from the plain Today's-visits
+   list so slipped-past-schedule work is impossible to miss on first landing. */
+.overdue-card { border-left: 4px solid var(--danger); }
+.overdue-card h2 { color: #8e1f4b; }
+
+/* Staff duration-correction control on a completed visit. */
+.manage-duration { margin-top: 12px; }
+.manage-duration form { margin-top: 8px; }
+
+/* Offline-safe form submission: draft-restore banner and the inline
+   connectivity-failure message shown instead of the browser's own error page. */
+.draft-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 4px; }
+.draft-banner .link-btn { font-weight: 700; }
+.form-net-msg { margin-top: 10px; }
 .filter-active > div { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

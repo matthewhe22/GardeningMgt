@@ -11,9 +11,9 @@ router.get('/', asyncHandler(async (req, res) => {
   const me = req.user;
   const staff = isStaff(me);
 
-  // These three are independent — run them concurrently rather than waiting
+  // These four are independent — run them concurrently rather than waiting
   // for each round-trip in turn.
-  const [todayVisits, myTasks, openIssues] = await Promise.all([
+  const [todayVisits, overdueVisits, myTasks, openIssues] = await Promise.all([
     q(`
     SELECT v.*, p.name AS property_name, p.address, u.name AS gardener_name
     FROM visits v
@@ -21,6 +21,19 @@ router.get('/', asyncHandler(async (req, res) => {
     LEFT JOIN users u ON u.id = v.gardener_id
     WHERE v.scheduled_date = $1 ${staff ? '' : 'AND v.gardener_id = $2'}
     ORDER BY COALESCE(v.route_order, 999), v.time_window`,
+      staff ? [today] : [today, me.id]),
+    // Visits from before today that never got completed — these used to be
+    // invisible from the landing page (only findable via the "Today &
+    // overdue" chip on /visits), so both staff monitoring the crew and a
+    // gardener planning their day would miss slipped work entirely.
+    q(`
+    SELECT v.*, p.name AS property_name, p.address, u.name AS gardener_name
+    FROM visits v
+    JOIN properties p ON p.id = v.property_id
+    LEFT JOIN users u ON u.id = v.gardener_id
+    WHERE v.scheduled_date < $1 AND v.status = 'scheduled' ${staff ? '' : 'AND v.gardener_id = $2'}
+    ORDER BY v.scheduled_date ASC
+    LIMIT 10`,
       staff ? [today] : [today, me.id]),
     q(`
     SELECT t.*, v.scheduled_date, p.name AS property_name
@@ -44,7 +57,7 @@ router.get('/', asyncHandler(async (req, res) => {
       staff ? [] : [me.id]),
   ]);
 
-  res.render('dashboard', { title: 'Dashboard', today, todayVisits, myTasks, openIssues, staff });
+  res.render('dashboard', { title: 'Dashboard', today, todayVisits, overdueVisits, myTasks, openIssues, staff });
 }));
 
 module.exports = router;

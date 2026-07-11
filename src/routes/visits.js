@@ -9,12 +9,17 @@ const { asyncHandler } = require('../asyncHandler');
 const { assertCsrf } = require('../csrf');
 const { optimizeRouteRoad } = require('../routeOptimizer');
 const { runInBackground } = require('../background');
-const { today } = require('../time');
+const { today, toDate } = require('../time');
 const { pageParam, paginate } = require('../pagination');
 
 const router = express.Router();
 
 const VISIT_STATUSES = ['scheduled', 'in_progress', 'completed', 'skipped', 'cancelled'];
+
+// A running timer past this long is much more likely a gardener who forgot to
+// tap "Complete job" than a genuinely long visit — nudge them, but only ever
+// as a passive UI hint (see the note on the /:id GET handler below).
+const LONG_RUNNING_MS = 4 * 60 * 60 * 1000; // 4 hours
 
 function getVisit(id) {
   return q1(`
@@ -221,10 +226,16 @@ router.get('/:id', asyncHandler(async (req, res) => {
   ]);
   const photosByComment = {};
   for (const ph of commentPhotos) (photosByComment[ph.visit_comment_id] ||= []).push(ph);
+  // Passive nudge only (never auto-stops or blocks completion) — a forgotten
+  // timer left running for hours would otherwise inflate hours-worked/payroll
+  // unnoticed until someone reviews the report after the fact.
+  const longRunning = !!(visit.started_at && !visit.finished_at &&
+    (Date.now() - toDate(visit.started_at).getTime()) > LONG_RUNNING_MS);
   res.render('visits/show', {
     title: `Job #${visit.id} — ${visit.property_name}`,
     visit, tasks, photos, comments, photosByComment, invoice, gardeners, gpsPoints, job,
     staff: isStaff(req.user), flash: req.query.error || null, warning: req.query.warning || null,
+    longRunning,
   });
 }));
 
@@ -255,6 +266,25 @@ router.post('/:id/update', requireRole('supervisor'), asyncHandler(async (req, r
   const busy = status === 'scheduled'
     ? await dayConflicts(gardener_id ? Number(gardener_id) : null, scheduled_date, visit.id) : 0;
   res.redirect(`/visits/${visit.id}${busy ? '?warning=busy' : ''}`);
+}));
+
+// Staff-only correction of a completed visit's recorded worked time. A timer
+// that's skipped entirely records 0 minutes; one left running unnoticed can
+// run for hours; once a visit is completed neither can be fixed by anyone —
+// and this feeds invoicing and the hours-worked report directly. Scoped to
+// just duration_minutes (rather than reusing the broader "Manage job" form)
+// so a supervisor can't accidentally change gardener/status/date while
+// fixing hours, and so the audit trail below records the actual correction.
+router.post('/:id/duration', requireRole('supervisor'), asyncHandler(async (req, res) => {
+  const visit = await getVisit(req.params.id);
+  if (!visit) return res.redirect('/visits');
+  const minutes = Math.round(Number(req.body.duration_minutes));
+  if (!Number.isFinite(minutes) || minutes < 0) return res.redirect(`/visits/${visit.id}?error=invalid`);
+  const before = visit.duration_minutes;
+  await q('UPDATE visits SET duration_minutes = $1 WHERE id = $2', [minutes, visit.id]);
+  await logActivity(req.user.id, 'visit.duration_correct', 'visit', visit.id,
+    `Corrected worked time for visit #${visit.id}: ${before == null ? 'none recorded' : before + ' min'} -> ${minutes} min`);
+  res.redirect(`/visits/${visit.id}`);
 }));
 
 // How many *other* scheduled visits a gardener already has on a day — used to

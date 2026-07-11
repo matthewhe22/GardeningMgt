@@ -16,15 +16,19 @@
   </form>
 </div>
 
-<details class="card">
+<details class="card" <%= (presetPropertyId || presetVisitId) ? 'open' : '' %>>
   <summary><strong>＋ Report an issue</strong></summary>
-  <form method="post" action="/issues" class="form-grid">
+  <% if (presetVisitId) { %>
+    <p class="muted">Reporting from <a href="/visits/<%= presetVisitId %>">visit #<%= presetVisitId %></a> — its site is pre-selected below.</p>
+  <% } %>
+  <form method="post" action="/issues" enctype="multipart/form-data" class="form-grid" data-upload data-draft-label="issue">
+    <input type="hidden" name="visit_id" value="<%= presetVisitId || '' %>">
     <label class="span2">Title <input type="text" name="title" required></label>
     <label class="span2">Description <textarea name="description" rows="3"></textarea></label>
     <label>Property
       <select name="property_id">
         <option value="">—</option>
-        <% properties.forEach(p => { %><option value="<%= p.id %>"><%= p.name %></option><% }) %>
+        <% properties.forEach(p => { %><option value="<%= p.id %>" <%= presetPropertyId === p.id ? 'selected' : '' %>><%= p.name %></option><% }) %>
       </select>
     </label>
     <label>Priority
@@ -42,6 +46,11 @@
       </select>
     </label>
     <% } %>
+    <label class="span2">Photo (optional)
+      <input type="file" name="photos" accept="image/*" capture="environment" multiple>
+    </label>
+    <div class="photo-previews span2" data-upload-previews hidden></div>
+    <p class="upload-status muted span2" data-upload-status hidden></p>
     <button class="btn btn-primary">Report issue</button>
   </form>
 </details>
