@@ -33,22 +33,36 @@ router.get('/', asyncHandler(async (req, res) => {
     q('SELECT id, name FROM users WHERE active ORDER BY name'),
   ]);
   const { rows: issues, total, totalPages } = issuesPage;
+  // Carried over from a visit page's "Report an issue at this site" link, so
+  // the property doesn't have to be re-picked from an alphabetical dropdown
+  // with no context, and the new issue can still be traced back to the visit.
+  const presetPropertyId = Number(req.query.property_id) || null;
+  const presetVisitId = Number(req.query.visit_id) || null;
   res.render('issues/index', {
     title: 'Issues', issues, properties, users, status, search, staff: isStaff(req.user), page, total, totalPages,
+    presetPropertyId, presetVisitId,
   });
 }));
 
-// Anyone can report an issue
-router.post('/', asyncHandler(async (req, res) => {
-  const { title, description, property_id, priority, assigned_to } = req.body;
+// Anyone can report an issue. Accepts an optional photo (same upload/multer
+// setup src/routes/visits.js uses) so a gardener can attach evidence in the
+// same request instead of navigating to the issue afterwards to add one.
+router.post('/', upload.array('photos', 10), asyncHandler(async (req, res) => {
+  assertCsrf(req);
+  const { title, description, property_id, priority, assigned_to, visit_id } = req.body;
   if (!(title || '').trim()) return res.redirect('/issues');
+  const visitId = Number(visit_id) || null;
   const { id } = await q1(`
-    INSERT INTO issues (title, description, property_id, priority, reported_by, assigned_to)
-    VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-    [title.trim(), description || null, property_id || null,
+    INSERT INTO issues (title, description, property_id, visit_id, priority, reported_by, assigned_to)
+    VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+    [title.trim(), description || null, property_id || null, visitId,
       ['low', 'medium', 'high', 'urgent'].includes(priority) ? priority : 'medium',
       req.user.id, assigned_to || null]);
-  await logActivity(req.user.id, 'issue.create', 'issue', id, `Reported issue "${title.trim()}"`);
+  for (const f of req.files || []) {
+    await savePhoto(f, { issueId: id, userId: req.user.id });
+  }
+  await logActivity(req.user.id, 'issue.create', 'issue', id,
+    `Reported issue "${title.trim()}"${(req.files || []).length ? ` with ${req.files.length} photo(s)` : ''}`);
   res.redirect(`/issues/${id}`);
 }));
 

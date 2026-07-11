@@ -1,6 +1,29 @@
 <%- include('partials/header') %>
 <h1>Dashboard <span class="muted">· <%= today %></span></h1>
 
+<% if (overdueVisits.length) { %>
+<div class="card overdue-card">
+  <div class="card-head">
+    <h2>⚠ <%= overdueVisits.length %> overdue visit<%= overdueVisits.length === 1 ? '' : 's' %><% if (staff) { %> (all gardeners)<% } %></h2>
+    <a class="btn btn-sm" href="/visits?upto=<%= today %>">View all →</a>
+  </div>
+  <div class="job-list">
+    <% overdueVisits.forEach(v => { %>
+    <a class="job-row" href="/visits/<%= v.id %>">
+      <span class="job-row-main">
+        <strong><%= v.property_name %></strong>
+        <span class="muted">was <%= v.scheduled_date %> · <%= v.address %></span>
+        <% if (staff) { %><span class="muted"><%= v.gardener_name || 'Unassigned' %></span><% } %>
+      </span>
+      <span class="job-row-meta">
+        <span class="status status-open">overdue</span>
+      </span>
+    </a>
+    <% }) %>
+  </div>
+</div>
+<% } %>
+
 <div class="grid">
   <section class="card">
     <div class="card-head">

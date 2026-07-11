@@ -1,7 +1,8 @@
 <%- include('../partials/header') %>
 <h1>Issue #<%= issue.id %>: <%= issue.title %></h1>
 <p class="muted">Reported by <%= issue.reporter_name || 'unknown' %> on <%= fmtDateTime(issue.created_at) %>
-  <% if (issue.property_name) { %> · <%= issue.property_name %><% } %></p>
+  <% if (issue.property_name) { %> · <%= issue.property_name %><% } %>
+  <% if (issue.visit_id) { %> · <a href="/visits/<%= issue.visit_id %>">from visit #<%= issue.visit_id %></a><% } %></p>
 
 <div class="grid">
   <section class="card">

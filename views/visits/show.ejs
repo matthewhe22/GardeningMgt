@@ -12,6 +12,7 @@
       <span class="status status-in_progress">replacement for <%= job.default_gardener_name %></span>
     <% } %>
   </div>
+  <p class="page-sub"><a class="btn btn-sm" href="/issues?property_id=<%= visit.property_id %>&visit_id=<%= visit.id %>">⚠ Report an issue at this site</a></p>
   <% if (locals.warning === 'busy') { %>
     <p class="alert alert-error">⚠ Heads up: this gardener already has other visits scheduled that day — check for a clash.</p>
   <% } %>
@@ -38,6 +39,10 @@
     <p>Started at <strong><%= fmtDateTime(visit.started_at) %></strong>.</p>
     <p class="muted">Completing records the date &amp; time, notifies your supervisor,
       and files the report and photos.</p>
+    <% if (locals.longRunning) { %>
+      <p class="alert alert-error">⏰ This job has been running for over 4 hours — still working?
+        (If the timer was left on by mistake, a supervisor can correct the recorded hours after you complete the job.)</p>
+    <% } %>
     <form method="post" action="/visits/<%= visit.id %>/timer/stop" class="gps-form mobile-sticky-cta"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
       <input type="hidden" name="lat"><input type="hidden" name="lng">
       <p class="cta-note"><strong><%= photos.length %></strong> photo(s) uploaded for this site so far.
@@ -58,6 +63,18 @@
         <button class="btn">↻ Restart timer</button>
       </form>
     </div>
+    <% if (staff) { %>
+    <details class="manage-duration">
+      <summary class="muted">Correct recorded hours (staff)</summary>
+      <p class="muted">A skipped or forgotten timer can leave the worked time wrong — this
+        feeds invoicing and the hours-worked report, so correct it here rather than editing it
+        anywhere else. The change is logged with who made it and the previous value.</p>
+      <form method="post" action="/visits/<%= visit.id %>/duration" class="filter-row"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+        <label>Minutes worked <input type="number" name="duration_minutes" min="0" step="1" value="<%= visit.duration_minutes || 0 %>" required></label>
+        <button class="btn">Save correction</button>
+      </form>
+    </details>
+    <% } %>
   <% } else { %>
     <h2>⏱ Ready to start</h2>
     <p class="muted">Your GPS position is recorded when you start and finish
@@ -100,12 +117,17 @@
 <div class="grid">
   <section class="card" id="tasks">
     <h2>Tasks</h2>
-    <table class="table">
+    <table class="table table-tasks">
       <% tasks.forEach(t => { %>
       <tr>
-        <td><strong><%= t.title %></strong><% if (t.description) { %><br><span class="muted"><%= t.description %></span><% } %></td>
-        <td><span class="status status-<%= t.status %>"><%= t.status.replace('_',' ') %></span></td>
-        <td>
+        <td class="task-main">
+          <div class="task-title-line">
+            <strong><%= t.title %></strong>
+            <span class="status status-<%= t.status %>"><%= t.status.replace('_',' ') %></span>
+          </div>
+          <% if (t.description) { %><span class="muted"><%= t.description %></span><% } %>
+        </td>
+        <td class="task-status-cell">
           <form method="post" action="/tasks/<%= t.id %>/status" class="inline"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
             <select name="status" data-autosubmit aria-label="Change task status">
               <% ['pending','in_progress','done','blocked'].forEach(s => { %>
@@ -118,7 +140,7 @@
       <% }) %>
     </table>
     <% if (!tasks.length) { %><p class="muted">No tasks for this visit.</p><% } %>
-    <form method="post" action="/visits/<%= visit.id %>/tasks" class="add-row"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+    <form method="post" action="/visits/<%= visit.id %>/tasks" class="add-row" data-draft-label="task"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
       <input type="text" name="title" placeholder="New task…" required>
       <button class="btn">Add</button>
     </form>
@@ -141,7 +163,7 @@
       <% }) %>
     </div>
     <% if (!photos.length) { %><p class="muted">No photos yet — add them before completing the job.</p><% } %>
-    <form method="post" action="/visits/<%= visit.id %>/photos" enctype="multipart/form-data" class="photo-upload" data-upload><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+    <form method="post" action="/visits/<%= visit.id %>/photos" enctype="multipart/form-data" class="photo-upload" data-upload data-draft-label="photo caption"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
       <div class="photo-actions">
         <label class="btn btn-primary photo-pick" data-camera>
           📷 Take photo
@@ -178,7 +200,7 @@
       </div>
     <% }) %>
     <% if (!comments.length) { %><p class="muted">No comments yet.</p><% } %>
-    <form method="post" action="/visits/<%= visit.id %>/comments" enctype="multipart/form-data" class="comment-form" data-upload><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+    <form method="post" action="/visits/<%= visit.id %>/comments" enctype="multipart/form-data" class="comment-form" data-upload data-draft-label="comment"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
       <textarea name="body" rows="2" placeholder="Add a comment…" required></textarea>
       <div class="comment-actions">
         <label class="btn comment-attach photo-pick" data-camera>

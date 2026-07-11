@@ -1,6 +1,10 @@
 // GardeningMgt service worker: app-shell + static caching so the UI loads
-// offline, with a friendly offline fallback for navigations. (Form POSTs are
-// not queued — they require connectivity; the offline page tells the user.)
+// offline, with a friendly offline fallback for navigations. Form POSTs are
+// not queued here — they require connectivity — but public/js/app.js submits
+// every POST via fetch() itself, catches the connectivity failure client-side,
+// and keeps a localStorage draft of whatever was typed so it isn't lost; see
+// the comments there. The offline page (public/offline.html) is honest about
+// this: no job/photo/property data is cached, only this app shell.
 const CACHE = 'gmgt-v3';
 const STATIC = ['/manifest.json', '/icon.svg', '/offline.html'];
 
