@@ -48,6 +48,7 @@ The fail-closed guard only triggers when `VERCEL` or `NODE_ENV=production` is se
 
 7. **Visit page (the core work screen) overflows the phone viewport** once tasks exist — tasks table pushes body width to ~441px; taps on "Complete job"/tab bar drift and mis-hit; the task-status `<select>` renders clipped ("penc…") at ~48px wide. **[corroborated: UX, Gary]** Fix: stack task rows on small screens; wrap visit-page tables in the existing `.table-wrap`.
 8. **Photo pipeline won't scale:** up to 10MB originals served 50-per-page through the serverless function with no thumbnails; whole photos buffered in memory per request; the OneDrive job-completion archive triple-buffers all visit photos (~250MB+ possible in one invocation). **[full-stack]** Fix: generate thumbnails at upload (sharp); stream/loop archive uploads; move originals to the existing S3 mode.
+   **Deliberately deferred** — scoped out of the P2/P3 round; still open.
 9. **Static asset caching is accidentally disabled:** a global `Cache-Control: no-cache` set before `express.static` wins over the intended 7-day cache, making the whole `?v=assetVersion` design dead code — every page load revalidates CSS/JS/icons. **[full-stack]** Fix: scope `no-cache` to HTML; add immutable headers for static paths in vercel.json.
 10. **Reminder cron can permanently lose sends:** rows are marked sent *before* delivery; a timeout mid-send means those reminders never go out. Backfill runs in the same invocation with no `maxDuration` configured. **[full-stack]** Fix: claim→deliver→confirm pattern; split backfill into its own cron; set `maxDuration`.
 11. **Malformed date query params 500 across the app** (`/visits?from=notadate`, `/reports?from=bad`, CSV export — all verified). Any logged-in user, or a hand-edited link, triggers it. **[code engineer]** Fix: validate with the existing `isValidDate()` like `status` already is.
@@ -61,37 +62,65 @@ The fail-closed guard only triggers when `VERCEL` or `NODE_ENV=production` is se
 ## P2 — Medium
 
 16. **No way for a gardener to skip an impossible job** — the server allows it; no UI exposes it. Locked gate = phone the office. **[UX]**
+   **Fixed:** confirm-gated "Skip job" button on the visit page, posting to the existing status-skip gate (`views/visits/show.ejs`, `src/routes/visits.js`).
 17. **"Optimize all routes" gives zero feedback** and silently reorders every gardener's day (including already-completed stops, which the per-day optimizer also reorders). **[UX]**
+   **Fixed:** the redirect now always carries a count/mode summary (rendered regardless of `gardenerId`); reordering is pinned to only `scheduled` visits, leaving completed/in-progress stops' `route_order` untouched (`src/routes/routeplan.js`, `views/routes/index.ejs`).
 18. **No calendar/bulk rescheduling** — a sick day means editing each visit individually; reassignment is buried in a collapsed "Manage job" panel. **[Maria]**
+   **Scoped-down fix:** a multi-select bulk reassign/reschedule action on the existing Visits list (`POST /visits/bulk`, staff-only), not a calendar UI — per explicit scoping decision this round.
 19. **Offline banner covers the sticky primary button** (~25px overlap over Start/Complete). **[corroborated: UX, Gary]**
+   **Fixed:** the banner now measures `.mobile-sticky-cta`'s live bounding-box height and positions itself above it (`public/js/app.js`).
 20. **Terminology tangle:** "Jobs" tab opens /visits, a visit is titled "Job #3", recurring contracts are "jobs" on a page called "Sites" at URL /jobs. **[UX]**
+   **Partially addressed:** the Sites page (`views/jobs/index.ejs`) now consistently calls the recurring booking a "contract" ("One recurring contract per site", "Create contract & schedule first visit", etc.). The bottom-nav/tab "Jobs" label (→ `/visits`) and per-visit "Job #N" heading are unchanged — still open.
 21. **Activity log has no search/filter** and drowns in sign-in noise; `notifications`/`activity_log` grow unbounded (the unread COUNT runs on every request). **[corroborated: Maria, full-stack]**
+   **Fixed:** search/user/category filters on `views/admin/activity.ejs` (category derived via `split_part` on the action prefix); a scheduled `pruneOldRecords()` trims `activity_log` older than 1 year and read notifications older than 90 days (safety-net cap at 1 year regardless of read state) — `src/reminders.js`.
 22. **PWA install is broken on iOS:** SVG-only icon (iOS needs PNG), non-conformant `purpose: "any maskable"`, no screenshots — the installed home-screen icon is blank. **[full-stack]**
+   **Fixed:** real rasterized `icon-192.png`/`icon-512.png`/`icon-512-maskable.png`/`apple-touch-icon.png`, `manifest.json` now has separate `any`/`maskable` entries, `views/partials/header.ejs` points its apple-touch-icon link at the new PNG. (Screenshots still not added.)
 23. **Photos failing magic-byte sniffing are silently discarded** — gardener believes the upload succeeded (may even be the photo gating completion). **[code engineer]**
+   **Fixed:** failed sniffs now surface a `?error=badphoto` alert on the visit/issue photo and comment forms instead of failing silently (`src/routes/visits.js`, `src/routes/issues.js`).
 24. **Naive TIMESTAMP columns assume a UTC DB session** — a non-UTC Postgres setting silently shifts every displayed time. **[code engineer]**
+   **Fixed:** every pooled connection now runs `SET TIME ZONE 'UTC'` on connect (`src/db.js`), independent of the server's Postgres default.
 25. **Pool exhaustion risk with direct DATABASE_URL** on serverless (max 3/instance × many instances vs ~100 connections). **[code engineer]**
+   **Mitigated:** pool `max` tuned down further for the no-pooler Vercel case (3→2); the underlying architectural risk (many serverless instances × direct connections) remains — moving to a real connection pooler is still the complete fix.
 26. **Observability is near-zero:** errors logged without method/URL/user/request-ID, no access logs, no health endpoint. **[full-stack]**
+   **Fixed:** `GET /health` (pool `SELECT 1`), a `req.id`/`X-Request-Id` middleware, and error-handler logs now include method/URL/request-ID/user id (`src/server.js`).
 27. **Env failure modes fail late:** missing DATABASE_URL falls back to localhost:5433 and 500s on first request; non-local DB without `DB_SSL_CA` runs unverified TLS silently. **[code engineer, full-stack]**
+   **Fixed:** DATABASE_URL now fails closed at boot (mirroring the existing SESSION_SECRET guard); a warning is logged when `DB_SSL_CA` is absent on a non-local connection (`src/db.js`).
 28. **GPS captured at page load, not at submit** — start position can be from wherever the page was opened; the dedicated ping endpoint has no client caller (route tracks are two-point lines). **[UX, full-stack]**
+   **Fixed:** page-load GPS capture removed; a `refreshGpsForSubmit()` (3.5s timeout) runs at actual submit time, plus a periodic GPS ping wired to the existing ping endpoint while a visit is open (`public/js/app.js`).
 29. **Dashboard order can disagree with the optimized route order**, and unrouted visits show a "–" in the stop badge. **[Gary, UI]**
+   **Fixed:** unrouted visits now render a hollow `.route-no.unrouted` badge instead of "–" (`views/dashboard.ejs`, `public/css/style.css`); the dashboard's existing `ORDER BY COALESCE(route_order, 999), ...` was already consistent with the route page, so no query change was needed there.
 30. **No client/billing record** — issues and invoices reference a property, not a person with email/billing address. **[Maria]**
+   **Scoped-down fix:** a `contact_email` column on Properties (schema v8), surfaced on invoices/reports with `mailto:` links — not a new Clients entity, per explicit scoping decision this round.
 31. **List pages execute their query twice (thrice on /visits)** via the COUNT pattern with correlated subqueries; fine today, linear cost growth. **[full-stack]**
+   **Not addressed this round** — still open, low urgency.
 32. **Spreadsheet import geocodes inline with sleeps** — can exceed the serverless time limit by design. **[full-stack]**
+   **Fixed:** the batch-geocode logic was extracted into a shared `geocodeMissingBatch()` (`src/geocode.js`) and moved out of the synchronous import-request path; imports no longer geocode inline, and `POST /properties/geocode` is now the explicit, separately-invoked batch action.
 
 ---
 
 ## P3 — Low / polish
 
 - **UI:** polished `.empty` component is dead code (bare "No invoices yet." paragraphs on ~8 pages); whole-row hover underlines through status pills on the dashboard; "Today & overdue" chip wraps into a tall oval at 390px; emoji used as icons (⚡✅📷⚙) against the SVG icon system; conflicting mobile H1 rules (1.9rem wins over intended 1.35rem); duplicated CSS "review fixes" layer redefining tokens/components; three different responsive-table breakpoints (640/700/767); ISO dates and lowercase select values leaking into UI; tiny "view job"/"Mark read" links and a small, confirm-less, green (not red) photo Delete. **[UI, Gary]**
+   **Mostly fixed:** `.empty`/`.empty-icon` is now used across ~15 view files; the dashboard row-hover-underline bug is fixed; the mobile H1 conflict and the duplicated "review fixes" CSS layer are both cleaned up; table breakpoints consolidated to a single 767px; "view job"/"Mark read" are now proper `.btn.btn-sm` tap targets and the photo Delete link is now red (`.link-btn-danger`, confirm-gated).
+   **Still open:** only a handful of icons (route/complete/report/photo actions) were converted to SVG — most of the app (nav brand mark, alerts, status glyphs, the "Today & overdue" chip, etc.) still uses emoji. The "Today & overdue" chip's wrap-into-oval layout bug was not touched. ISO dates/lowercase select values leaking into the UI were not addressed.
 - **Nav duplication:** More-sheet "My profile"/"Notifications" duplicate tab-bar "Me"/"Alerts" under different names. **[UX]**
+   **Fixed:** both entries removed from the More sheet.
 - **No "next stop" handoff** after completing a job. **[UX, Gary]**
+   **Fixed:** a next-stop handoff card now renders on the visit page after completion.
 - **Free-text time windows** accept any typo; one-off visit date doesn't default to today. **[UX]**
+   **Fixed:** `pattern`/`title` HH:MM-HH:MM validation added to time-window inputs; one-off visit scheduling now defaults its date field to today.
 - **Straight-line km** shown to gardeners ("7.1 km (straight-line)") isn't drive distance. **[Gary]**
+   **Fixed:** reworded to "~X km straight-line (actual driving distance will be longer)".
 - **Invoice numbers are globally sequential**, not per-year as the code comment claims. **[code engineer]**
+   **Fixed:** a real per-year counter table (`invoice_number_counters`), atomically incremented via `INSERT ... ON CONFLICT ... RETURNING`; the old global sequence is kept only so already-issued numbers stay valid.
 - **Sync bcrypt** blocks the event loop on self-hosted deploys. **[code engineer]**
+   **Fixed:** `bcrypt.hashSync`/`compareSync` replaced with the async `bcrypt.hash`/`compare` throughout auth and admin user creation.
 - **Reflected-referer redirect** in task status; `/gps` endpoint exempt from CSRF; visit `gardener_id` not role-validated (staff can assign visits to admins/inactive users). **[code engineer]**
+   **Fixed:** task-status redirect now goes through a same-origin `safeRedirectBack()` allowlist; the `/gps` CSRF exemption was removed; visit create/update now validates `gardener_id` against active gardener-role users, mirroring `jobs.js`'s existing check.
 - **Backup/export story:** visits-CSV only; no invoice/issue/photo export; pg_dump bloated by BYTEA photos. **[full-stack]**
+   **Not addressed this round** — still open.
 - **Test-suite gaps:** the verified-good authz/IDOR gates, CSRF, and upload sniffing have zero CI coverage — correct today, unguarded against regression. **[code engineer]**
+   **Fixed:** `test/integration/authz.test.js` (13 sub-tests against real Postgres, IDOR gates for visits/tasks/photos/staff-only pages), `test/integration/csrf.test.js` (4 sub-tests), `test/upload.test.js` (13 sub-tests on `sniffOk()` magic-byte checks).
 
 ---
 
