@@ -15,9 +15,13 @@ function csrfProtection(req, res, next) {
 
   const safe = req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS';
   if (safe) return next();
-  // Background JSON GPS pings carry no form and are same-user low-risk; the
-  // cron endpoint is authenticated by its bearer secret instead.
-  if (/\/gps$/.test(req.path) || req.path.startsWith('/cron/')) return next();
+  // The cron endpoint is authenticated by its bearer secret instead, not a
+  // session/CSRF token. GPS pings used to be exempted here too ("no form,
+  // same-user low-risk"), but there's no real reason a JSON POST from an
+  // authenticated session shouldn't carry the same token as every other
+  // state-changing request — window.CSRF_TOKEN is already exposed in
+  // app.js for exactly this kind of fetch()-based caller.
+  if (req.path.startsWith('/cron/')) return next();
   // Multipart bodies aren't parsed yet here, so the token rides in the query
   // string (app.js appends ?_csrf=… to multipart form actions). Validating it
   // now rejects forged cross-site uploads BEFORE multer buffers megabytes of

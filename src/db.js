@@ -8,6 +8,17 @@ types.setTypeParser(1184, (v) => v.replace('T', ' ').slice(0, 19)); // timestamp
 types.setTypeParser(20, (v) => parseInt(v, 10));           // int8 (COUNT)
 types.setTypeParser(1700, (v) => parseFloat(v));           // numeric (SUM)
 
+// Fail closed: a production-like boot with no DATABASE_URL used to fall
+// through silently to a hardcoded local fallback (nonstandard port 5433), so
+// the app would boot fine and only 500 on the first real query. Mirrors the
+// SESSION_SECRET fail-closed check in server.js — require the env var
+// explicitly instead of inferring "is this production" after the fact.
+if (!process.env.DATABASE_URL && (process.env.VERCEL || process.env.NODE_ENV === 'production')) {
+  throw new Error(
+    'DATABASE_URL must be set — refusing to start without a database connection in production. ' +
+    'Set DATABASE_URL to your Postgres connection string.'
+  );
+}
 const DB_URL = process.env.DATABASE_URL || 'postgresql://postgres@localhost:5433/gardeningmgt';
 const isLocal = /localhost|127\.0\.0\.1/.test(DB_URL);
 // A connection pooler (Supabase pgBouncer on :6543, or any "pooler" host) can
@@ -30,8 +41,32 @@ const pool = new Pool({
       : { rejectUnauthorized: false },
   max: process.env.DB_POOL_MAX
     ? Number(process.env.DB_POOL_MAX)
-    : (process.env.VERCEL ? (usingPooler ? 8 : 3) : 10),
+    : (process.env.VERCEL ? (usingPooler ? 8 : 2) : 10),
 });
+
+// Every timestamp column in SCHEMA is a naive TIMESTAMP (no zone), and
+// src/time.js's toDate() interprets those naive strings as UTC when
+// formatting them for display. That's only correct if the Postgres session
+// itself is running in UTC — which depends on the server/database's
+// configured default TimeZone, not anything this app controls otherwise. Pin
+// every pooled connection to UTC explicitly so display is correct regardless
+// of how the server/database is configured.
+pool.on('connect', (client) => {
+  client.query("SET TIME ZONE 'UTC'").catch((e) =>
+    console.error('[db] failed to set session time zone to UTC:', e.message));
+});
+
+// A hosted DB with no DB_SSL_CA connects with rejectUnauthorized: false —
+// i.e. encrypted but with no certificate-chain verification, so a
+// man-in-the-middle with a self-signed cert would go undetected. That's a
+// deliberate, documented tradeoff (see the ssl: block above) for providers
+// whose CA Node doesn't trust out of the box, but it should be loud, not
+// silent, so it shows up in the logs rather than being discovered later.
+if (!isLocal && !process.env.DB_SSL_CA) {
+  console.warn('[db] WARNING: connecting to a non-local DATABASE_URL with no DB_SSL_CA set — ' +
+    'TLS is encrypted but the server certificate chain is NOT verified (rejectUnauthorized: false). ' +
+    'Set DB_SSL_CA to the provider\'s CA certificate (PEM) to verify the connection.');
+}
 
 // On serverless, many concurrent instances each holding direct connections can
 // exhaust Postgres' connection slots. Warn loudly if we're on Vercel without a
@@ -283,8 +318,20 @@ CREATE INDEX IF NOT EXISTS idx_visits_scheduled ON visits (scheduled_date);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_visits_job_day_scheduled
   ON visits (job_id, scheduled_date) WHERE status = 'scheduled' AND job_id IS NOT NULL;
 
--- Per-year gapless invoice numbers without racing on COUNT(*).
+-- Kept for backward compatibility with already-issued invoice numbers (some
+-- earlier deploys used nextval('invoice_seq') directly for every year, so it
+-- never actually reset per year despite the name/comment above). New numbers
+-- come from invoice_number_counters instead — see below.
 CREATE SEQUENCE IF NOT EXISTS invoice_seq;
+
+-- True per-year gapless invoice numbers: one counter row per year, atomically
+-- incremented with INSERT ... ON CONFLICT ... RETURNING (see
+-- nextInvoiceNumber() in routes/invoices.js), so INV-<year>-0001 actually
+-- restarts each year instead of continuing the previous year's count.
+CREATE TABLE IF NOT EXISTS invoice_number_counters (
+  year   INTEGER PRIMARY KEY,
+  next_n INTEGER NOT NULL DEFAULT 1
+);
 `;
 
 let readyPromise = null;
@@ -343,7 +390,7 @@ function ensureCriticalSchema() {
 
 // Bump when SCHEMA or the migrations below change, so existing databases
 // re-run the DDL exactly once instead of on every serverless cold start.
-const SCHEMA_VERSION = '6';
+const SCHEMA_VERSION = '7';
 
 /**
  * Numeric, forward-only comparison of a stored schema_version against this

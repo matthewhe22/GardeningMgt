@@ -46,4 +46,40 @@ async function geocodeAddress(address, { timeoutMs = 8000 } = {}) {
   }
 }
 
-module.exports = { geocodeAddress, sleep };
+/**
+ * Geocode up to `limit` properties that are missing coordinates, from their
+ * address. Shared by the "Find missing coordinates" admin button, the
+ * spreadsheet import (which no longer geocodes inline — see routes/admin.js),
+ * and the daily cron pass (server.js's /cron/reminders). Deliberately small
+ * and rate-limited (Nominatim's usage policy wants ~1 req/sec) so a caller in
+ * a request/response cycle can bound the time spent; the cron path calls this
+ * repeatedly across days until every property has coordinates.
+ */
+async function geocodeMissingBatch(limit) {
+  const { q, q1 } = require('./db');
+  const missing = await q(
+    `SELECT id, address FROM properties
+     WHERE (lat IS NULL OR lng IS NULL) AND COALESCE(TRIM(address), '') <> ''
+     ORDER BY id LIMIT $1`, [limit]);
+  let done = 0;
+  let failed = 0;
+  for (let i = 0; i < missing.length; i++) {
+    const p = missing[i];
+    try {
+      const geo = await geocodeAddress(p.address);
+      if (geo) {
+        await q('UPDATE properties SET lat = $1, lng = $2 WHERE id = $3', [geo.lat, geo.lng, p.id]);
+        done++;
+      } else { failed++; }
+    } catch (e) {
+      console.error(`[geocode] site #${p.id} failed:`, e.message);
+      failed++;
+    }
+    if (i < missing.length - 1) await sleep(1100); // stay under ~1 req/sec
+  }
+  const { c: remaining } = await q1(
+    `SELECT COUNT(*)::int AS c FROM properties WHERE lat IS NULL OR lng IS NULL`);
+  return { done, failed, remaining };
+}
+
+module.exports = { geocodeAddress, sleep, geocodeMissingBatch };

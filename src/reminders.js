@@ -1,4 +1,4 @@
-const { withTransaction, q, q1 } = require('./db');
+const { withTransaction, q, q1, pool } = require('./db');
 const { logActivity } = require('./activity');
 const { today: businessToday } = require('./time');
 const { sendSms, sendEmail } = require('./notify');
@@ -136,6 +136,36 @@ async function backfillSchedules() {
 }
 
 /**
+ * Retention housekeeping for the two tables that otherwise grow unbounded:
+ *   - activity_log: kept 1 year — plenty for audit/reporting, and this table
+ *     backs the admin activity page that would otherwise get slower every day.
+ *   - notifications: read ones are purged after 90 days (the common case —
+ *     the user has already seen and dismissed them); as a safety net, ANY
+ *     notification (read or not) older than 1 year is also purged, so a
+ *     never-marked-read pile can't grow forever either. This bounds the
+ *     per-request unread-count COUNT(*) in server.js's session middleware.
+ * Uses pool.query directly (not the q() helper) to read rowCount without
+ * pulling every deleted row's data back over the wire.
+ * Only logs when something was actually deleted, so this doesn't spam the
+ * activity log with a "deleted 0 rows" entry every single day.
+ */
+async function pruneOldRecords() {
+  const activityRes = await pool.query(
+    `DELETE FROM activity_log WHERE created_at < now() - interval '1 year'`);
+  const notifRes = await pool.query(`
+    DELETE FROM notifications
+    WHERE (read_at IS NOT NULL AND read_at < now() - interval '90 days')
+       OR created_at < now() - interval '1 year'`);
+  const activityDeleted = activityRes.rowCount || 0;
+  const notifDeleted = notifRes.rowCount || 0;
+  if (activityDeleted || notifDeleted) {
+    await logActivity(null, 'system.prune', null, null,
+      `Pruned ${activityDeleted} old activity_log row(s) and ${notifDeleted} old notification(s)`);
+  }
+  return { activityDeleted, notifDeleted };
+}
+
+/**
  * Daily at 06:00 in the business timezone (BUSINESS_TZ, default
  * Australia/Melbourne) — used by `npm start` on a normal server.
  * On Vercel, the schedule in vercel.json calls /cron/reminders instead.
@@ -147,8 +177,11 @@ function startReminderScheduler() {
     const today = businessToday();
     const sent = await sendRemindersForDate(today);
     await backfillSchedules();
+    await pruneOldRecords();
     if (sent) console.log(`[reminders] auto-sent ${sent} reminder(s) for ${today}`);
   }, { timezone: TZ });
 }
 
-module.exports = { sendRemindersForDate, sendRemindersForDateWith, backfillSchedules, startReminderScheduler };
+module.exports = {
+  sendRemindersForDate, sendRemindersForDateWith, backfillSchedules, pruneOldRecords, startReminderScheduler,
+};

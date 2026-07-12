@@ -7,6 +7,24 @@ const { pageParam, paginate } = require('../pagination');
 
 const router = express.Router();
 
+// Redirect back to wherever the user came from (the tasks list or a visit's
+// detail page both link to this action), but never to an attacker-controlled
+// referer: only follow it if it actually parses as same-origin as this
+// request, otherwise fall back. Same-site session cookies already mitigate
+// the real-world risk, but there's no reason to trust the raw header either.
+function safeRedirectBack(req, res, fallback) {
+  const ref = req.get('referer');
+  if (ref) {
+    try {
+      const refUrl = new URL(ref);
+      if (`${refUrl.protocol}//${refUrl.host}` === `${req.protocol}://${req.get('host')}`) {
+        return res.redirect(ref);
+      }
+    } catch (e) { /* unparseable referer: fall through to fallback */ }
+  }
+  res.redirect(fallback);
+}
+
 router.get('/', asyncHandler(async (req, res) => {
   const staff = isStaff(req.user);
   const status = req.query.status || '';
@@ -53,7 +71,7 @@ router.post('/:id/status', asyncHandler(async (req, res) => {
   await q(`UPDATE tasks SET status = $1, completed_at = CASE WHEN $1 = 'done' THEN now() ELSE NULL END WHERE id = $2`,
     [status, task.id]);
   await logActivity(req.user.id, 'task.status', 'task', task.id, `Task "${task.title}": ${task.status} -> ${status}`);
-  res.redirect(req.get('referer') || '/tasks');
+  safeRedirectBack(req, res, '/tasks');
 }));
 
 module.exports = router;

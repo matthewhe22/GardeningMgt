@@ -19,11 +19,22 @@ function addDays(dateStr, days) {
 }
 
 async function nextInvoiceNumber() {
-  // A DB sequence is atomic, so concurrent creates never collide on the
-  // UNIQUE number (the old COUNT(*) approach raced into 500s).
+  // Per-year counter, atomically incremented-and-read in one statement — the
+  // same INSERT ... ON CONFLICT ... RETURNING pattern already trusted
+  // elsewhere in this codebase for race-safe counters (e.g. the unique
+  // partial indexes on jobs/invoices), so concurrent creates never collide on
+  // the UNIQUE number. Replaces the old single global invoice_seq sequence,
+  // which never actually reset per year despite its comment claiming
+  // otherwise — nextval() just kept counting across year boundaries.
+  // invoice_seq itself is kept in the schema (unused for new numbers) so
+  // already-issued numbers stay valid; see db.js.
   const year = businessYear();
-  const { n } = await q1("SELECT nextval('invoice_seq')::int AS n");
-  return `INV-${year}-${String(n).padStart(4, '0')}`;
+  const { next_n } = await q1(
+    `INSERT INTO invoice_number_counters (year) VALUES ($1)
+     ON CONFLICT (year) DO UPDATE SET next_n = invoice_number_counters.next_n + 1
+     RETURNING next_n`,
+    [year]);
+  return `INV-${year}-${String(next_n).padStart(4, '0')}`;
 }
 
 async function invoiceWithItems(id) {

@@ -28,7 +28,9 @@ router.post('/login', asyncHandler(async (req, res) => {
       { title: 'Sign in', error: 'Too many attempts. Please wait a few minutes and try again.' });
   }
   const user = await q1('SELECT * FROM users WHERE email = $1 AND active', [normEmail]);
-  const passwordOk = bcrypt.compareSync(password || '', user ? user.password_hash : DUMMY_HASH);
+  // Async compare: bcrypt is deliberately slow, and the sync variant blocks
+  // the single Node event loop for that whole duration on every login attempt.
+  const passwordOk = await bcrypt.compare(password || '', user ? user.password_hash : DUMMY_HASH);
   if (!user || !passwordOk) {
     return res.status(401).render('login', { title: 'Sign in', error: 'Invalid email or password.' });
   }

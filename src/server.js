@@ -3,9 +3,9 @@ const crypto = require('crypto');
 const express = require('express');
 const cookieSession = require('cookie-session');
 
-const { q1, ready } = require('./db');
+const { q1, pool, ready } = require('./db');
 const { currentUser, requireLogin, isStaff } = require('./auth');
-const { sendRemindersForDate } = require('./reminders');
+const { sendRemindersForDate, pruneOldRecords } = require('./reminders');
 const { asyncHandler } = require('./asyncHandler');
 const { csrfProtection } = require('./csrf');
 const storage = require('./storage');
@@ -44,6 +44,30 @@ app.set('views', path.join(__dirname, '..', 'views'));
 app.set('view cache', true); // compile each template once, not on every render
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
+
+// A short random ID per request, attached as early as possible and echoed
+// back in a response header, so a user's bug report ("it broke around 3pm")
+// can be correlated to the exact log line the error handler below writes.
+app.use((req, res, next) => {
+  req.id = crypto.randomBytes(4).toString('hex');
+  res.set('X-Request-Id', req.id);
+  next();
+});
+
+// Unauthenticated liveness/readiness probe: confirms the process can actually
+// reach the database, not just that Express is listening — a plain "server
+// up" check would miss a database outage entirely. No auth needed: nothing
+// here is sensitive, and a load balancer/uptime checker won't carry a session
+// cookie. Mounted before the session/CSRF/auth-requiring routes below.
+app.get('/health', asyncHandler(async (req, res) => {
+  try {
+    await pool.query('SELECT 1');
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(`[health] db check failed (request ${req.id}):`, e.message);
+    res.status(503).json({ ok: false });
+  }
+}));
 
 // Baseline security headers. The only external origin is the OpenStreetMap
 // tile server, used for the job-location map snapshot (img-src only).
@@ -129,7 +153,15 @@ app.get('/cron/reminders', asyncHandler(async (req, res) => {
   }
   const today = businessToday();
   const [sent, rolled] = [await sendRemindersForDate(today), await require('./reminders').backfillSchedules()];
-  res.json({ ok: true, date: today, sent, rolled });
+  const pruned = await pruneOldRecords();
+  // Geocode a bounded batch of properties still missing coordinates (e.g.
+  // from a spreadsheet import that intentionally skipped geocoding inline —
+  // see routes/admin.js). Rate-limited the same as the manual "Find missing
+  // coordinates" button; running daily via cron means a large import fills in
+  // over a few days without ever risking a request timeout.
+  const { geocodeMissingBatch } = require('./geocode');
+  const geocoded = await geocodeMissingBatch(Number(process.env.GEOCODE_BATCH || 5));
+  res.json({ ok: true, date: today, sent, rolled, pruned, geocoded });
 }));
 
 // CSRF protection on all state-changing requests (after session is set up).
@@ -187,7 +219,8 @@ app.use((req, res) => {
   res.status(404).render('error', { title: 'Not found', message: 'Page not found.' });
 });
 app.use((err, req, res, next) => {
-  console.error(err);
+  const who = req.user && req.user.id;
+  console.error(`[error] ${req.method} ${req.originalUrl} reqId=${req.id || '-'} user=${who != null ? who : '-'}:`, err);
   // Friendly message for oversized/invalid uploads (multer) instead of a blank 500.
   if (err.code === 'LIMIT_FILE_SIZE') {
     return res.status(413).render('error', { title: 'File too large', message: 'Each photo must be under 10 MB.' });

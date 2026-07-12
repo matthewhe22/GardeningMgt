@@ -195,10 +195,19 @@ router.post('/', requireRole('supervisor'), asyncHandler(async (req, res) => {
   if (!Number(property_id) || !isValidDate(scheduled_date)) {
     return res.redirect('/visits?error=invalid');
   }
+  // The assigned user must actually be an active gardener, not just any
+  // existing user id — mirrors the same check on jobs.js's default-gardener
+  // assignment (routes/jobs.js, "role = 'gardener'").
+  let gardener = null;
+  if (gardener_id) {
+    const g = await q1("SELECT id FROM users WHERE id = $1 AND role = 'gardener' AND active", [Number(gardener_id)]);
+    if (!g) return res.redirect('/visits?error=gardener');
+    gardener = g.id;
+  }
   const { id } = await q1(`
     INSERT INTO visits (property_id, gardener_id, scheduled_date, time_window, notes, created_by)
     VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-    [Number(property_id), gardener_id || null, scheduled_date, time_window || null, notes || null, req.user.id]);
+    [Number(property_id), gardener, scheduled_date, time_window || null, notes || null, req.user.id]);
   await logActivity(req.user.id, 'visit.create', 'visit', id, `Scheduled visit #${id} for ${scheduled_date}`);
   res.redirect(`/visits/${id}`);
 }));
@@ -247,6 +256,13 @@ router.post('/:id/update', requireRole('supervisor'), asyncHandler(async (req, r
   if (!VISIT_STATUSES.includes(status) || !isValidDate(scheduled_date)) {
     return res.redirect(`/visits/${visit.id}?error=invalid`);
   }
+  // Same active-gardener check as the create route above / jobs.js.
+  let gardener = null;
+  if (gardener_id) {
+    const g = await q1("SELECT id FROM users WHERE id = $1 AND role = 'gardener' AND active", [Number(gardener_id)]);
+    if (!g) return res.redirect(`/visits/${visit.id}?error=gardener`);
+    gardener = g.id;
+  }
   // When staff mark a visit completed here, fill timing if missing so the
   // record (and report) is consistent with the timer path.
   const completing = status === 'completed' && visit.status !== 'completed';
@@ -255,7 +271,7 @@ router.post('/:id/update', requireRole('supervisor'), asyncHandler(async (req, r
       duration_minutes = $6,
       finished_at = CASE WHEN $4 = 'completed' AND finished_at IS NULL THEN now() ELSE finished_at END
     WHERE id = $7`,
-    [gardener_id || null, scheduled_date, time_window || null, status, notes || null,
+    [gardener, scheduled_date, time_window || null, status, notes || null,
       duration_minutes ? Math.max(0, Number(duration_minutes) || 0) : visit.duration_minutes, visit.id]);
   await logActivity(req.user.id, 'visit.update', 'visit', visit.id,
     `Updated visit #${visit.id} (status: ${visit.status} -> ${status})`);
@@ -264,7 +280,7 @@ router.post('/:id/update', requireRole('supervisor'), asyncHandler(async (req, r
     await advanceRecurringJob(visit, req.user.id, status === 'completed');
   }
   const busy = status === 'scheduled'
-    ? await dayConflicts(gardener_id ? Number(gardener_id) : null, scheduled_date, visit.id) : 0;
+    ? await dayConflicts(gardener, scheduled_date, visit.id) : 0;
   res.redirect(`/visits/${visit.id}${busy ? '?warning=busy' : ''}`);
 }));
 

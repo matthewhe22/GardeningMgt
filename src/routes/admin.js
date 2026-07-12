@@ -9,7 +9,7 @@ const { sendRemindersForDate } = require('../reminders');
 const { asyncHandler } = require('../asyncHandler');
 const { today: businessToday } = require('../time');
 const { assertCsrf } = require('../csrf');
-const { geocodeAddress, sleep } = require('../geocode');
+const { geocodeAddress, geocodeMissingBatch } = require('../geocode');
 const { pageParam, paginate } = require('../pagination');
 
 // Per-click cap on the backfill so the request stays under the serverless
@@ -84,34 +84,9 @@ router.post('/properties', requireRole('supervisor'), asyncHandler(async (req, r
 // Backfill coordinates for sites that don't have them yet, from their address.
 // Processes a small batch per click (Nominatim ~1 req/sec) and reports how many
 // still remain so the button can be clicked again until it's done.
-// Geocode up to `limit` sites that are missing coordinates, from their address.
-// Shared by the "Find missing coordinates" button and the spreadsheet import.
-async function geocodeMissingBatch(limit) {
-  const missing = await q(
-    `SELECT id, address FROM properties
-     WHERE (lat IS NULL OR lng IS NULL) AND COALESCE(TRIM(address), '') <> ''
-     ORDER BY id LIMIT $1`, [limit]);
-  let done = 0;
-  let failed = 0;
-  for (let i = 0; i < missing.length; i++) {
-    const p = missing[i];
-    try {
-      const geo = await geocodeAddress(p.address);
-      if (geo) {
-        await q('UPDATE properties SET lat = $1, lng = $2 WHERE id = $3', [geo.lat, geo.lng, p.id]);
-        done++;
-      } else { failed++; }
-    } catch (e) {
-      console.error(`[geocode] site #${p.id} failed:`, e.message);
-      failed++;
-    }
-    if (i < missing.length - 1) await sleep(1100); // stay under ~1 req/sec
-  }
-  const { c: remaining } = await q1(
-    `SELECT COUNT(*)::int AS c FROM properties WHERE lat IS NULL OR lng IS NULL`);
-  return { done, failed, remaining };
-}
-
+// geocodeMissingBatch itself lives in ../geocode.js — shared by this button,
+// the daily cron pass (server.js's /cron/reminders), and (previously) the
+// spreadsheet import below, which no longer calls it inline.
 router.post('/properties/geocode', requireRole('supervisor'), asyncHandler(async (req, res) => {
   const { done, failed, remaining } = await geocodeMissingBatch(GEOCODE_BATCH);
   if (done) {
@@ -164,15 +139,13 @@ router.post('/properties/import', requireRole('supervisor'),
     }
     const params = new URLSearchParams({ imported: String(imported) });
     if (errors.length) params.set('errors', errors.slice(0, 10).join(' · '));
-    // Auto-fill coordinates for imported rows that had no Lat/Lng (a bounded
-    // batch so the request doesn't time out — the rest are caught by the
-    // "Find missing coordinates" button, which the banner points to).
-    if (imported) {
-      const geo = await geocodeMissingBatch(GEOCODE_BATCH);
-      params.set('geocoded', String(geo.done));
-      params.set('failed', String(geo.failed));
-      params.set('remaining', String(geo.remaining));
-    }
+    // Imported rows with no Lat/Lng are left with NULL coordinates (the
+    // properties list already flags "missing coordinates" sites) rather than
+    // geocoding them inline here: geocoding is rate-limited to ~1 req/sec and
+    // each lookup can take up to 8s, so doing it inside this request/response
+    // cycle risked a serverless timeout on anything but a tiny sheet. The
+    // daily cron pass (server.js's /cron/reminders) and the "Find missing
+    // coordinates" button both pick up any property still missing coordinates.
     res.redirect(`/admin/properties?${params}`);
   }));
 
@@ -222,7 +195,7 @@ router.post('/users', requireRole(), asyncHandler(async (req, res) => {
   try {
     const { id } = await q1(`
       INSERT INTO users (name, email, password_hash, role, phone) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-      [name.trim(), email.trim().toLowerCase(), bcrypt.hashSync(password, 10), role, phone || null]);
+      [name.trim(), email.trim().toLowerCase(), await bcrypt.hash(password, 10), role, phone || null]);
     await logActivity(req.user.id, 'user.create', 'user', id, `Created ${role} account for ${name.trim()}`);
   } catch (e) {
     if (e.code === '23505') return res.redirect('/admin/users?error=dupemail'); // unique_violation
@@ -273,7 +246,7 @@ router.post('/users/:id/password', requireRole(), asyncHandler(async (req, res) 
   if (!target) return res.redirect('/admin/users');
   const { password } = req.body;
   if (!password || String(password).length < 8) return res.redirect('/admin/users?error=weak');
-  await q('UPDATE users SET password_hash = $1 WHERE id = $2', [bcrypt.hashSync(password, 10), id]);
+  await q('UPDATE users SET password_hash = $1 WHERE id = $2', [await bcrypt.hash(password, 10), id]);
   await logActivity(req.user.id, 'user.password_reset', 'user', id, `Reset password for ${target.name}`);
   res.redirect('/admin/users?reset=1');
 }));
