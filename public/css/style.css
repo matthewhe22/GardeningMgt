@@ -114,7 +114,20 @@ body.authed main.container {
     margin-left: 0;
     padding: 16px 14px calc(92px + env(safe-area-inset-bottom, 0px));
   }
-  body.authed { padding-top: calc(56px + env(safe-area-inset-top, 0px)); } /* room for fixed mobile topbar */
+  body.authed {
+    padding-top: calc(56px + env(safe-area-inset-top, 0px)); /* room for fixed mobile topbar */
+    /* On short pages (little content — e.g. Routes before a gardener/date is
+       picked, an empty Issues list, Profile), the document was shorter than
+       one screen. Mobile Safari never needs to scroll such a page, so it
+       never settles its dynamic toolbar/viewport, and a fixed bottom:0 tabbar
+       ends up pinned to that stale, shorter layout viewport — leaving a gap
+       of page background between the tabbar and the true screen edge (and a
+       laggy re-layout once something finally forces a recalculation). Forcing
+       the body to always be at least one viewport tall keeps the layout
+       viewport stable from first paint on every page. */
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
 
   body.authed h1 { font-size: 1.4rem; }
   body.authed h1 .muted { font-size: 0.55em; }
