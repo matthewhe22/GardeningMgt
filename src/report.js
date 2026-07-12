@@ -3,6 +3,7 @@ const ejs = require('ejs');
 const { q, q1 } = require('./db');
 const { uploadFile, getConfig, getAccessToken } = require('./onedrive');
 const { logActivity } = require('./activity');
+const storage = require('./storage');
 const { renderMapSnapshot, externalMapUrl } = require('./mapSnapshot');
 const { fmtDateTime, fmtDate } = require('./time');
 
@@ -31,15 +32,24 @@ async function loadReportData(visitId) {
 /**
  * Render the report HTML. With inlinePhotos, image bytes are embedded as
  * data URIs so the file is self-contained (for the OneDrive archive copy).
+ * Embeds the small upload-time thumbnail rather than the (up to 10MB) full
+ * original — this is a preview copy alongside the full-resolution files
+ * archiveToOneDrive uploads separately, so there's no need to hold every
+ * original's bytes in memory just to inline them here too.
  */
 async function renderReportHtml(data, { inlinePhotos = false } = {}) {
   let photoSrc = (ph) => `/uploads/${ph.filename}`;
   if (inlinePhotos && data.photos.length) {
-    // One query for all photo bytes (was N+1).
+    // One query for all photo bytes (was N+1) — thumbnails only, so this
+    // stays small even for a job with many photos.
     const ids = data.photos.map((p) => p.id);
-    const rows = await q('SELECT id, data, mime FROM photos WHERE id = ANY($1)', [ids]);
+    const rows = await q('SELECT id, thumb_data, data, mime FROM photos WHERE id = ANY($1)', [ids]);
     const srcs = {};
-    for (const r of rows) srcs[r.id] = `data:${r.mime};base64,${r.data.toString('base64')}`;
+    for (const r of rows) {
+      const bytes = (r.thumb_data && r.thumb_data.length) ? r.thumb_data : r.data;
+      const mime = (r.thumb_data && r.thumb_data.length) ? 'image/jpeg' : r.mime;
+      srcs[r.id] = `data:${mime};base64,${bytes.toString('base64')}`;
+    }
     photoSrc = (ph) => srcs[ph.id] || '';
   }
   // Self-contained location snapshot from the captured GPS: OSM tiles are
@@ -76,11 +86,18 @@ async function archiveToOneDrive(visitId) {
     const ctx = { cfg, token };
     const result = await uploadFile(`${dir}/report.html`, html, 'text/html', ctx);
     if (result.skipped) return; // OneDrive not configured
-    const ids = data.photos.map((p) => p.id);
-    const rows = ids.length
-      ? await q('SELECT id, filename, data, mime FROM photos WHERE id = ANY($1)', [ids]) : [];
-    for (const row of rows) {
-      await uploadFile(`${dir}/${row.filename}`, row.data, row.mime, ctx);
+    // One photo's bytes in memory at a time, not all of them — a job with
+    // many multi-MB photos no longer needs to hold every original at once
+    // just to relay it to OneDrive.
+    for (const p of data.photos) {
+      const row = await q1('SELECT filename, data, mime FROM photos WHERE id = $1', [p.id]);
+      if (!row) continue;
+      // Object-storage mode empties `data` in Postgres — fetch the actual
+      // bytes from the bucket instead of uploading an empty file.
+      const bytes = (storage.enabled() && row.data && row.data.length === 0)
+        ? await storage.getObjectBuffer(row.filename)
+        : row.data;
+      await uploadFile(`${dir}/${row.filename}`, bytes, row.mime, ctx);
     }
     await logActivity(null, 'report.archive', 'visit', visitId,
       `Archived job #${visitId} report and ${data.photos.length} photo(s) to OneDrive`);

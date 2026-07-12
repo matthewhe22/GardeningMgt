@@ -2,7 +2,7 @@
   "regions": ["syd1"],
   "functions": {
     "api/index.js": {
-      "includeFiles": "{views,public,node_modules/pdfkit/js/data}/**",
+      "includeFiles": "{views,public,node_modules/pdfkit/js/data,node_modules/@img,node_modules/sharp}/**",
       "maxDuration": 60
     }
   },

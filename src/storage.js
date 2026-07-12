@@ -53,9 +53,17 @@ async function getObjectStream(filename) {
   return out.Body;
 }
 
+// Buffers one object fully — for callers (e.g. the OneDrive archive) that
+// need to hand the SDK a whole Buffer rather than pipe a stream to a response.
+async function getObjectBuffer(filename) {
+  const { GetObjectCommand } = require('@aws-sdk/client-s3');
+  const out = await getClient().send(new GetObjectCommand({ Bucket: BUCKET, Key: keyFor(filename) }));
+  return Buffer.from(await out.Body.transformToByteArray());
+}
+
 async function deleteObject(filename) {
   const { DeleteObjectCommand } = require('@aws-sdk/client-s3');
   await getClient().send(new DeleteObjectCommand({ Bucket: BUCKET, Key: keyFor(filename) }));
 }
 
-module.exports = { enabled, keyFor, putObject, getObjectStream, deleteObject };
+module.exports = { enabled, keyFor, putObject, getObjectStream, getObjectBuffer, deleteObject };

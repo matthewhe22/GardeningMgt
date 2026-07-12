@@ -227,6 +227,7 @@ CREATE TABLE IF NOT EXISTS photos (
   original_name TEXT,
   mime          TEXT NOT NULL DEFAULT 'image/jpeg',
   data          BYTEA NOT NULL,
+  thumb_data    BYTEA,
   caption       TEXT,
   visit_id      INTEGER REFERENCES visits(id) ON DELETE SET NULL,
   issue_id      INTEGER REFERENCES issues(id) ON DELETE SET NULL,
@@ -391,7 +392,7 @@ function ensureCriticalSchema() {
 
 // Bump when SCHEMA or the migrations below change, so existing databases
 // re-run the DDL exactly once instead of on every serverless cold start.
-const SCHEMA_VERSION = '8';
+const SCHEMA_VERSION = '9';
 
 /**
  * Numeric, forward-only comparison of a stored schema_version against this
@@ -432,6 +433,11 @@ async function runMigrations() {
   await pool.query('ALTER TABLE invoices ADD COLUMN IF NOT EXISTS due_at DATE');
   // Client billing contact, alongside the existing contact_name/contact_phone.
   await pool.query('ALTER TABLE properties ADD COLUMN IF NOT EXISTS contact_email TEXT');
+  // Small JPEG thumbnail generated at upload time (src/upload.js), so gallery
+  // pages stop serving up-to-10MB originals as list-view images. NULL on
+  // existing rows and on any photo whose format sharp couldn't thumbnail —
+  // the serve route (src/server.js) falls back to the original in both cases.
+  await pool.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS thumb_data BYTEA');
   const { c } = (await pool.query('SELECT COUNT(*)::int AS c FROM users')).rows[0];
   if (c === 0) {
     const bcrypt = require('bcryptjs');

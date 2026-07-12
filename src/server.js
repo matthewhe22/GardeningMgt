@@ -172,16 +172,18 @@ app.use(csrfProtection);
 // another gardener's private visit photos by guessing the filename: staff see
 // everything; everyone else sees shared photos, their own uploads, photos on a
 // visit assigned to them, and any issue photo (issues are team-wide).
+function photoAllowed(u, photo) {
+  return isStaff(u) || photo.shared || photo.uploaded_by === u.id
+    || photo.gardener_id === u.id || photo.issue_id != null;
+}
+
 app.get('/uploads/:filename', requireLogin, asyncHandler(async (req, res) => {
   const photo = await q1(`
     SELECT ph.mime, ph.data, ph.shared, ph.uploaded_by, ph.issue_id, v.gardener_id
     FROM photos ph LEFT JOIN visits v ON v.id = ph.visit_id
     WHERE ph.filename = $1`, [req.params.filename]);
   if (!photo) return res.status(404).end();
-  const u = res.locals.user;
-  const allowed = isStaff(u) || photo.shared || photo.uploaded_by === u.id
-    || photo.gardener_id === u.id || photo.issue_id != null;
-  if (!allowed) return res.status(404).end();
+  if (!photoAllowed(res.locals.user, photo)) return res.status(404).end();
   res.set('Content-Type', photo.mime);
   // Filenames are unique, immutable content keys, so the browser can keep them
   // for a long time and never re-fetch — repeat photo views become instant.
@@ -199,6 +201,26 @@ app.get('/uploads/:filename', requireLogin, asyncHandler(async (req, res) => {
     }
   }
   res.send(photo.data);
+}));
+
+// Small JPEG generated at upload (src/upload.js) for gallery/list views, so
+// those pages stop serving up-to-10MB originals as thumbnails. Falls back to
+// the full original for photos uploaded before this existed, or where sharp
+// couldn't decode the source format — callers can always point an <img> at
+// this URL and get the best available image.
+app.get('/uploads/:filename/thumb', requireLogin, asyncHandler(async (req, res) => {
+  const photo = await q1(`
+    SELECT ph.thumb_data, ph.shared, ph.uploaded_by, ph.issue_id, v.gardener_id
+    FROM photos ph LEFT JOIN visits v ON v.id = ph.visit_id
+    WHERE ph.filename = $1`, [req.params.filename]);
+  if (!photo) return res.status(404).end();
+  if (!photoAllowed(res.locals.user, photo)) return res.status(404).end();
+  if (!photo.thumb_data || photo.thumb_data.length === 0) {
+    return res.redirect(`/uploads/${encodeURIComponent(req.params.filename)}`);
+  }
+  res.set('Content-Type', 'image/jpeg');
+  res.set('Cache-Control', 'private, max-age=31536000, immutable');
+  res.send(photo.thumb_data);
 }));
 
 app.use('/', require('./routes/auth'));
