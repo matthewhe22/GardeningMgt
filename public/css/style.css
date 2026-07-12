@@ -21,14 +21,14 @@
   --card:      #ffffff;
   --text:      #1d2620;
   --text-soft: #45514a;
-  --muted:     #707b72;
+  --muted:     #5b665d;
   --border:    #e6e4dc;
   --border-strong: #d6d4ca;
 
   /* semantic */
   --danger:     #c0392b;
   --danger-bg:  #fdecea;
-  --warn:       #9a6700;
+  --warn:       #855600;
   --warn-bg:    #fff4d6;
   --info:       #1d5fbf;
   --info-bg:    #e7f0fc;
@@ -116,7 +116,7 @@ body.authed main.container {
   }
   body.authed { padding-top: calc(56px + env(safe-area-inset-top, 0px)); } /* room for fixed mobile topbar */
 
-  body.authed h1 { font-size: 1.9rem; }
+  body.authed h1 { font-size: 1.4rem; }
   body.authed h1 .muted { font-size: 0.55em; }
 }
 
@@ -487,8 +487,8 @@ details.card[open] > summary::before { transform: rotate(45deg); }
 .stat-row {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  margin-bottom: 24px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  margin-bottom: 14px;
 }
 
 .stat-card {
@@ -518,7 +518,7 @@ details.card[open] > summary::before { transform: rotate(45deg); }
 .stat-icon.blue  { background: var(--info-bg); color: var(--info); }
 
 .stat-value { font-size: 1.45rem; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; }
-.stat-label { font-size: 0.72rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.stat-label { font-size: 0.85rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
 
 @media (max-width: 520px) {
   .stat-row { grid-template-columns: 1fr 1fr; }
@@ -541,7 +541,9 @@ details.card[open] > summary::before { transform: rotate(45deg); }
   margin-bottom: 8px;
   font-size: 20px;
 }
+.empty-icon svg { width: 22px; height: 22px; }
 .empty p { margin: 0; font-size: 0.9rem; }
+.empty .btn, .empty .btn-sm { margin-top: 12px; }
 
 /* --------------------------------------------------------------------------
    Forms
@@ -640,7 +642,7 @@ select {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  min-height: 42px;
+  min-height: 44px;
   padding: 9px 18px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
@@ -683,6 +685,8 @@ select {
   min-height: 32px;
 }
 .link-btn:hover { text-decoration: underline; }
+.link-btn-danger { color: var(--danger); }
+.link-btn-danger:hover { color: #a93226; }
 
 /* --------------------------------------------------------------------------
    Tables
@@ -709,7 +713,7 @@ select {
 .table a { font-weight: 600; }
 
 /* Mobile: stack tagged tables into card-style rows (uses td[data-label]) */
-@media (max-width: 700px) {
+@media (max-width: 767px) {
   .table--stack, .table--stack tbody { display: block; }
   .table--stack tr {
     display: block;
@@ -779,7 +783,7 @@ select {
 }
 
 .status-scheduled, .status-pending, .status-draft { background: var(--info-bg); color: var(--info); }
-.status-in_progress, .status-sent { background: var(--warn-bg); color: var(--warn); }
+.status-in_progress, .status-sent { background: #fdf0d5; color: var(--warn); }
 .status-completed, .status-done, .status-resolved, .status-paid { background: var(--ok-bg); color: var(--ok); }
 .status-skipped, .status-blocked, .status-cancelled, .status-closed, .status-void { background: #ecebe5; color: #6d7570; }
 .status-open { background: #fdeaf0; color: #8e1f4b; }
@@ -832,7 +836,18 @@ select {
   top: 8px;
   left: 8px;
   letter-spacing: 0.01em;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
+.photo-stamp svg { width: 12px; height: 12px; flex: none; }
+
+/* Inline SVG icons used in place of emoji glyphs: buttons/chips get a small
+   fixed size, icons sitting inline in text (headings, summaries) scale with
+   the surrounding font via 1em. */
+.btn svg, .link-btn svg, .chip svg { width: 16px; height: 16px; flex: none; }
+h2 svg, h3 svg, summary svg { width: 1em; height: 1em; vertical-align: -0.15em; flex: none; }
+.muted svg { width: 0.9em; height: 0.9em; vertical-align: -0.1em; }
 
 /* --------------------------------------------------------------------------
    Routes, comments, notifications, alerts, misc
@@ -900,6 +915,7 @@ select {
   background: var(--green-50);
   box-shadow: inset 3px 0 0 var(--green-500);
 }
+.notification-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 
 .alert {
   padding: 12px 16px;
@@ -1025,7 +1041,7 @@ body.anon {
   text-decoration: none; color: var(--text);
   transition: box-shadow 0.12s ease, transform 0.12s ease;
 }
-.job-row:hover { box-shadow: var(--shadow); transform: translateY(-1px); }
+.job-row:hover { box-shadow: var(--shadow); transform: translateY(-1px); text-decoration: none; }
 .job-row-main { display: flex; flex-direction: column; min-width: 0; flex: 1; color: var(--text); text-decoration: none; }
 .job-row-main:hover { text-decoration: none; }
 .job-row-main:hover strong { text-decoration: underline; }
@@ -1091,16 +1107,12 @@ body.anon {
 }
 
 /* --------------------------------------------------------------------------
-   Review fixes: contrast, responsive tables, site-history stats, nav chips
+   Review fixes: responsive tables, site-history stats, nav chips
    -------------------------------------------------------------------------- */
-
-/* WCAG AA: darken muted text and the amber "in progress" pill. */
-:root { --muted: #5b665d; --warn: #855600; }
-.status-in_progress, .status-sent { background: #fdf0d5; color: #855600; }
 
 /* Tables: never clip columns on small screens — scroll horizontally instead. */
 .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-@media (max-width: 640px) {
+@media (max-width: 767px) {
   /* Plain tables scroll sideways; tables opted into .table--stack collapse into
      labelled card rows instead (see the .table--stack rules above). */
   .card > .table:not(.table--stack),
@@ -1111,14 +1123,12 @@ body.anon {
 .chip-link:hover { text-decoration: none; background: var(--green-100); }
 
 /* Site-history stat cards */
-.stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 14px; }
 .stat { text-align: center; }
 .stat-num { font-size: 1.6rem; font-weight: 700; color: var(--green-800); }
-.stat-label { color: var(--muted); font-size: 0.85rem; }
 
-/* Bump default button/control min height to 44px for touch. */
-.btn, select, input[type="date"], input[type="text"], input[type="email"], input[type="password"], input[type="number"] { min-height: 44px; }
-.btn { display: inline-flex; align-items: center; justify-content: center; }
+/* Bump default form-control min height to 44px for touch (.btn already
+   carries the same min-height in its own rule above). */
+select, input[type="date"], input[type="text"], input[type="email"], input[type="password"], input[type="number"] { min-height: 44px; }
 
 /* ==========================================================================
    Mobile-app experience (phones, iOS + Android)
@@ -1272,7 +1282,6 @@ body.anon {
   .job-row-main strong { font-size: 1.05rem; padding-right: 16px; }
 
   /* Larger, friendlier headings and cards on small screens. */
-  h1 { font-size: 1.35rem; }
   .timer-card .btn { min-width: 0; }
 }
 
@@ -1421,7 +1430,7 @@ a, button, .btn, .nav-item, .tab, .photo-pick, label.confirm-line {
 .table-tasks tr:last-child td { border-bottom: 0; }
 .task-title-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .task-status-cell select { width: 100%; }
-@media (max-width: 700px) {
+@media (max-width: 767px) {
   .table-tasks, .table-tasks tbody { display: block; }
   .table-tasks tr {
     display: block;

@@ -6,7 +6,7 @@
     <span class="chip">📅 <%= visit.scheduled_date %><% if (visit.time_window) { %> · <%= visit.time_window %><% } %></span>
     <a class="chip chip-link" href="https://www.google.com/maps/dir/?api=1&destination=<%= encodeURIComponent((visit.lat != null && visit.lng != null) ? (visit.lat + ',' + visit.lng) : (visit.property_name + ', ' + visit.address)) %>" target="_blank" rel="noopener">🧭 Navigate</a>
     <span class="chip">📍 <%= visit.address %></span>
-    <span class="chip">👤 <%= visit.gardener_name || 'Unassigned' %></span>
+    <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.6"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg> <%= visit.gardener_name || 'Unassigned' %></span>
     <span class="status status-<%= visit.status %>"><%= visit.status.replace('_',' ') %></span>
     <% if (locals.job && job.default_gardener_name && visit.gardener_name && job.gardener_id !== visit.gardener_id) { %>
       <span class="status status-in_progress">replacement for <%= job.default_gardener_name %></span>
@@ -51,14 +51,14 @@
         <% if (!photos.length) { %><br><span class="muted">⚠ <a href="#photos">Upload your photos</a> before completing.</span><% } %></p>
       <label class="confirm-line"><input type="checkbox" name="confirm_photos" required>
         I confirm all photos for this site have been uploaded</label>
-      <button class="btn btn-danger btn-block">✔ Complete job</button>
+      <button class="btn btn-danger btn-block"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 5 5L19 7"/></svg> Complete job</button>
     </form>
   <% } else if (visit.finished_at) { %>
     <h2>✅ Job completed</h2>
     <p>Worked <strong><%= visit.duration_minutes %> min</strong>
       (<%= fmtDateTime(visit.started_at) %> → <%= fmtDateTime(visit.finished_at) %>).</p>
     <div class="btn-row">
-      <a class="btn btn-primary" href="/visits/<%= visit.id %>/report" target="_blank">📄 View report</a>
+      <a class="btn btn-primary" href="/visits/<%= visit.id %>/report" target="_blank"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h9l4 4v14H6V3Z"/><path d="M14.5 3.5V8H19"/><path d="M9.5 13H15"/><path d="M9.5 16.5H15"/></svg> View report</a>
       <a class="btn" href="/visits/<%= visit.id %>/report?download=1">⬇ Download PDF</a>
       <form method="post" action="/visits/<%= visit.id %>/timer/start" class="gps-form inline" data-confirm="Restart the timer? This clears the recorded completion time and reopens the job."><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
         <input type="hidden" name="lat"><input type="hidden" name="lng">
@@ -161,7 +161,12 @@
       </tr>
       <% }) %>
     </table>
-    <% if (!tasks.length) { %><p class="muted">No tasks for this visit.</p><% } %>
+    <% if (!tasks.length) { %>
+      <div class="empty">
+        <span class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="4"/><path d="m8.5 12.5 2.5 2.5 5-5.5"/></svg></span>
+        <p>No tasks for this visit.</p>
+      </div>
+    <% } %>
     <form method="post" action="/visits/<%= visit.id %>/tasks" class="add-row" data-draft-label="task"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
       <input type="text" name="title" placeholder="New task…" required>
       <button class="btn">Add</button>
@@ -175,24 +180,29 @@
         <figure class="photo">
           <a href="/uploads/<%= ph.filename %>" target="_blank"><img src="/uploads/<%= ph.filename %>" alt="<%= ph.caption || ph.original_name %>" loading="lazy"></a>
           <figcaption>
-            <span class="photo-stamp">📅 <%= fmtDateTime(ph.created_at) %></span><br>
+            <span class="photo-stamp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M8 3v4M16 3v4M3.5 10h17"/></svg> <%= fmtDateTime(ph.created_at) %></span><br>
             <% if (ph.caption) { %><%= ph.caption %> · <% } %><span class="muted">by <%= ph.uploader_name %></span>
             <% if (staff || ph.uploaded_by === user.id) { %>
-              <form method="post" action="/photos/<%= ph.id %>/delete" class="inline" data-confirm="Delete this photo?"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %><button class="link-btn">Delete</button></form>
+              <form method="post" action="/photos/<%= ph.id %>/delete" class="inline" data-confirm="Delete this photo?"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %><button class="link-btn link-btn-danger">Delete</button></form>
             <% } %>
           </figcaption>
         </figure>
       <% }) %>
     </div>
-    <% if (!photos.length) { %><p class="muted">No photos yet — add them before completing the job.</p><% } %>
+    <% if (!photos.length) { %>
+      <div class="empty">
+        <span class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h3l2-2.5h6L17 7h3a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Z"/><circle cx="12" cy="13" r="3.5"/></svg></span>
+        <p>No photos yet — add them before completing the job.</p>
+      </div>
+    <% } %>
     <form method="post" action="/visits/<%= visit.id %>/photos" enctype="multipart/form-data" class="photo-upload" data-upload data-draft-label="photo caption"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
       <div class="photo-actions">
         <label class="btn btn-primary photo-pick" data-camera>
-          📷 Take photo
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h3l2-2.5h6L17 7h3a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Z"/><circle cx="12" cy="13" r="3.5"/></svg> Take photo
           <input type="file" name="photos" accept="image/*" capture="environment" multiple hidden>
         </label>
         <label class="btn photo-pick" data-library>
-          🖼 Choose from library
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="m4 17 5-5 3.5 3.5L17 10l3 3"/></svg> Choose from library
           <input type="file" name="photos" accept="image/*" multiple hidden>
         </label>
       </div>
@@ -216,17 +226,22 @@
         <% (photosByComment[c.id] || []).forEach(ph => { %>
           <figure class="photo comment-photo">
             <a href="/uploads/<%= ph.filename %>" target="_blank"><img src="/uploads/<%= ph.filename %>" alt="comment photo" loading="lazy"></a>
-            <figcaption><span class="photo-stamp">📅 <%= fmtDateTime(ph.created_at) %></span></figcaption>
+            <figcaption><span class="photo-stamp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M8 3v4M16 3v4M3.5 10h17"/></svg> <%= fmtDateTime(ph.created_at) %></span></figcaption>
           </figure>
         <% }) %>
       </div>
     <% }) %>
-    <% if (!comments.length) { %><p class="muted">No comments yet.</p><% } %>
+    <% if (!comments.length) { %>
+      <div class="empty">
+        <span class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5.5h16v10H9l-4 3.5v-3.5H4Z"/></svg></span>
+        <p>No comments yet.</p>
+      </div>
+    <% } %>
     <form method="post" action="/visits/<%= visit.id %>/comments" enctype="multipart/form-data" class="comment-form" data-upload data-draft-label="comment"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
       <textarea name="body" rows="2" placeholder="Add a comment…" required></textarea>
       <div class="comment-actions">
         <label class="btn comment-attach photo-pick" data-camera>
-          📎 Attach photo
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 12.5 15 4.5a3.2 3.2 0 0 1 4.5 4.5l-9 9a5 5 0 0 1-7-7l8.5-8.5"/></svg> Attach photo
           <input type="file" name="photos" accept="image/*" multiple hidden>
         </label>
         <span class="upload-status muted" data-upload-status hidden></span>
@@ -241,7 +256,7 @@
 <!-- ===== 3. Staff-only management, kept out of the gardener's way ===== -->
 <% if (staff) { %>
 <details class="card manage-card">
-  <summary><strong>⚙ Manage job</strong> <span class="muted">— reassign, reschedule, status, invoice (staff only)</span></summary>
+  <summary><strong><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 13.5a1.6 1.6 0 0 0 .32 1.76l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.6 1.6 0 0 0-1.76-.32 1.6 1.6 0 0 0-.97 1.46V19.5a2 2 0 1 1-4 0v-.09a1.6 1.6 0 0 0-1.05-1.46 1.6 1.6 0 0 0-1.76.32l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.6 1.6 0 0 0 .32-1.76 1.6 1.6 0 0 0-1.46-.97H4.5a2 2 0 1 1 0-4h.09a1.6 1.6 0 0 0 1.46-1.05 1.6 1.6 0 0 0-.32-1.76l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.6 1.6 0 0 0 1.76.32h.09a1.6 1.6 0 0 0 .97-1.46V4.5a2 2 0 1 1 4 0v.09a1.6 1.6 0 0 0 .97 1.46 1.6 1.6 0 0 0 1.76-.32l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.6 1.6 0 0 0-.32 1.76v.09a1.6 1.6 0 0 0 1.46.97h.09a2 2 0 1 1 0 4h-.09a1.6 1.6 0 0 0-1.46.97Z"/></svg> Manage job</strong> <span class="muted">— reassign, reschedule, status, invoice (staff only)</span></summary>
   <form method="post" action="/visits/<%= visit.id %>/update" class="form-grid"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
     <label>Gardener
       <select name="gardener_id">

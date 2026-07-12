@@ -38,7 +38,12 @@
     </tr>
     <% }) %>
   </table>
-  <% if (!entries.length) { %><p class="muted">No activity yet.</p><% } %>
+  <% if (!entries.length) { %>
+    <div class="empty">
+      <span class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg></span>
+      <p>No activity yet.</p>
+    </div>
+  <% } %>
 </div>
 <%- include('../partials/pagination') %>
 <%- include('../partials/footer') %>

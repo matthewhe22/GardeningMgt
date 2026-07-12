@@ -13,7 +13,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="GardeningMgt">
   <meta name="format-detection" content="telephone=no">
-  <link rel="apple-touch-icon" href="/icon.svg">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <% if (locals.csrfToken) { %><meta name="csrf-token" content="<%= csrfToken %>"><% } %>
 </head>
 <body class="<%= locals.user ? 'authed' : 'anon' %>">
@@ -99,11 +99,9 @@
 <label for="nav-toggle" class="sheet-backdrop" aria-hidden="true"></label>
 <div class="sheet" aria-label="More options">
   <div class="sheet-handle"></div>
-  <a href="/profile" class="nav-item<%= active('/profile') %>"><%- icons.me %> My profile</a>
   <a href="/jobs" class="nav-item<%= active('/jobs') %>"><%- icons.repeat %> Sites</a>
   <a href="/tasks" class="nav-item<%= active('/tasks') %>"><%- icons.tasks %> Tasks</a>
   <a href="/photos" class="nav-item<%= active('/photos') %>"><%- icons.photos %> Photos</a>
-  <a href="/notifications" class="nav-item<%= active('/notifications') %>"><%- icons.bell %> Notifications<% if (unreadCount > 0) { %><span class="badge"><%= unreadCount %></span><% } %></a>
   <% if (staffNav) { %>
     <div class="nav-label">Management</div>
     <a href="/invoices" class="nav-item<%= active('/invoices') %>"><%- icons.invoices %> Invoices</a>

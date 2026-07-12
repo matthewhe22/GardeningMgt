@@ -39,12 +39,12 @@
     <form method="post" action="/routes/optimize"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
       <input type="hidden" name="date" value="<%= date %>">
       <input type="hidden" name="gardener_id" value="<%= gardenerId %>">
-      <button class="btn btn-primary">⚡ Optimize this route</button>
+      <button class="btn btn-primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z"/></svg> Optimize this route</button>
     </form>
     <% if (staff) { %>
     <form method="post" action="/routes/optimize-all"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
       <input type="hidden" name="date" value="<%= date %>">
-      <button class="btn">⚡ Optimize all gardeners for <%= date %></button>
+      <button class="btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z"/></svg> Optimize all gardeners for <%= date %></button>
     </form>
     <% } %>
     <% if (totalKm > 0) { %><p>Current route length: <strong>~<%= totalKm.toFixed(1) %> km straight-line</strong>
@@ -62,7 +62,12 @@
     </li>
     <% }) %>
   </ol>
-  <% if (!visits.length) { %><p class="muted">No visits for this gardener on <%= date %>.</p><% } %>
+  <% if (!visits.length) { %>
+    <div class="empty">
+      <span class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4 3 6.5v13L9 17l6 2.5 6-2.5v-13L15 6.5 9 4Z"/><path d="M9 4v13"/><path d="M15 6.5v13"/></svg></span>
+      <p>No visits for this gardener on <%= date %>.</p>
+    </div>
+  <% } %>
 </div>
 <% } else { %>
 <div class="card"><p class="muted">Pick a gardener and date to view and optimize their route.</p></div>

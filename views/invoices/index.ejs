@@ -25,7 +25,12 @@
     </tr>
     <% }) %>
   </table>
-  <% if (!invoices.length) { %><p class="muted">No invoices yet.</p><% } %>
+  <% if (!invoices.length) { %>
+    <div class="empty">
+      <span class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h9l4 4v14H6V3Z"/><path d="M14.5 3.5V8H19"/><path d="M9.5 13H15"/><path d="M9.5 16.5H15"/></svg></span>
+      <p>No invoices yet.</p>
+    </div>
+  <% } %>
 </div>
 <%- include('../partials/pagination') %>
 <%- include('../partials/footer') %>

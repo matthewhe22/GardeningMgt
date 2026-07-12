@@ -62,7 +62,12 @@
 
 <h2><%= properties.length %> site<%= properties.length === 1 ? '' : 's' %></h2>
 <% if (!properties.length) { %>
-  <div class="card"><p class="muted">No sites yet — import a spreadsheet or add one above.</p></div>
+  <div class="card">
+    <div class="empty">
+      <span class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10.5c0 5.5-8 11-8 11s-8-5.5-8-11a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10.5" r="3"/></svg></span>
+      <p>No sites yet — import a spreadsheet or add one above.</p>
+    </div>
+  </div>
 <% } %>
 <% properties.forEach(p => { %>
 <details class="card">

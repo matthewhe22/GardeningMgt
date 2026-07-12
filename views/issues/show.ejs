@@ -49,10 +49,10 @@
       <% photos.forEach(ph => { %>
         <figure class="photo">
           <a href="/uploads/<%= ph.filename %>" target="_blank"><img src="/uploads/<%= ph.filename %>" alt="<%= ph.caption || ph.original_name %>" loading="lazy"></a>
-          <figcaption><span class="photo-stamp">📅 <%= fmtDateTime(ph.created_at) %></span><br>
+          <figcaption><span class="photo-stamp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M8 3v4M16 3v4M3.5 10h17"/></svg> <%= fmtDateTime(ph.created_at) %></span><br>
             <span class="muted">by <%= ph.uploader_name %></span>
             <% if (staff || ph.uploaded_by === user.id) { %>
-              <form method="post" action="/photos/<%= ph.id %>/delete" class="inline" data-confirm="Delete this photo?"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %><button class="link-btn">Delete</button></form>
+              <form method="post" action="/photos/<%= ph.id %>/delete" class="inline" data-confirm="Delete this photo?"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %><button class="link-btn link-btn-danger">Delete</button></form>
             <% } %></figcaption>
         </figure>
       <% }) %>
@@ -60,11 +60,11 @@
     <form method="post" action="/issues/<%= issue.id %>/photos" enctype="multipart/form-data" class="photo-upload" data-upload><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
       <div class="photo-actions">
         <label class="btn btn-primary photo-pick" data-camera>
-          📷 Take photo
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h3l2-2.5h6L17 7h3a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Z"/><circle cx="12" cy="13" r="3.5"/></svg> Take photo
           <input type="file" name="photos" accept="image/*" capture="environment" multiple hidden>
         </label>
         <label class="btn photo-pick" data-library>
-          🖼 Choose from library
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="m4 17 5-5 3.5 3.5L17 10l3 3"/></svg> Choose from library
           <input type="file" name="photos" accept="image/*" multiple hidden>
         </label>
       </div>

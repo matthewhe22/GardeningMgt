@@ -10,14 +10,23 @@
     <div class="notification <%= n.read_at ? '' : 'unread' %>">
       <span class="tag tag-<%= n.type === 'job_summary' ? 'supervisor' : 'gardener' %>"><%= n.type.replace('_',' ') %></span>
       <%= n.message %>
-      <% if (n.visit_id) { %> · <a href="/notifications/<%= n.id %>/open">view job</a><% } %>
-      <% if (!n.read_at) { %>
-        · <form method="post" action="/notifications/<%= n.id %>/read" class="inline"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %><button class="link-btn">Mark read</button></form>
-      <% } %>
       <br><span class="muted"><%= fmtDateTime(n.created_at) %></span>
+      <% if (n.visit_id || !n.read_at) { %>
+      <div class="notification-actions">
+        <% if (n.visit_id) { %><a class="btn btn-sm" href="/notifications/<%= n.id %>/open">View job</a><% } %>
+        <% if (!n.read_at) { %>
+          <form method="post" action="/notifications/<%= n.id %>/read" class="inline"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %><button class="btn btn-sm">Mark read</button></form>
+        <% } %>
+      </div>
+      <% } %>
     </div>
   <% }) %>
-  <% if (!notifications.length) { %><p class="muted">No notifications.</p><% } %>
+  <% if (!notifications.length) { %>
+    <div class="empty">
+      <span class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 9a6 6 0 1 0-12 0c0 5-2 6.5-2 6.5h16S18 14 18 9Z"/><path d="M10 19a2.2 2.2 0 0 0 4 0"/></svg></span>
+      <p>No notifications.</p>
+    </div>
+  <% } %>
 </div>
 <%- include('../partials/pagination') %>
 <%- include('../partials/footer') %>

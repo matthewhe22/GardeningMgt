@@ -133,7 +133,7 @@
       <form method="post" action="/visits/optimize" class="inline"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
         <input type="hidden" name="date" value="<%= group.date %>">
         <input type="hidden" name="gardener_id" value="<%= gardenerId %>">
-        <button class="btn btn-sm">⚡ Optimize route</button>
+        <button class="btn btn-sm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z"/></svg> Optimize route</button>
       </form>
       <% } %>
     </div>
@@ -151,7 +151,7 @@
           <span class="muted"><%= v.address %></span>
         </a>
         <span class="job-row-meta">
-          <span class="muted"><% if (v.time_window) { %><%= v.time_window %><% } %><% if (staff) { %> · 👤 <%= v.gardener_name || 'Unassigned' %><% } %><% if (v.duration_minutes) { %> · <%= v.duration_minutes %> min<% } %></span>
+          <span class="muted"><% if (v.time_window) { %><%= v.time_window %><% } %><% if (staff) { %> · <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.6"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg> <%= v.gardener_name || 'Unassigned' %><% } %><% if (v.duration_minutes) { %> · <%= v.duration_minutes %> min<% } %></span>
           <span class="status status-<%= v.status %>"><%= v.status.replace('_',' ') %></span>
         </span>
         <% if (canReorder) { %>
@@ -172,6 +172,13 @@
   </div>
 <% }) %>
 
-<% if (!visits.length) { %><div class="card"><p class="muted">No visits match this filter.</p></div><% } %>
+<% if (!visits.length) { %>
+<div class="card">
+  <div class="empty">
+    <span class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2.5"/><path d="M8.5 7V5.5A2.5 2.5 0 0 1 11 3h2a2.5 2.5 0 0 1 2.5 2.5V7"/><path d="M3 12.5h18"/></svg></span>
+    <p>No visits match this filter.</p>
+  </div>
+</div>
+<% } %>
 <%- include('../partials/pagination') %>
 <%- include('../partials/footer') %>

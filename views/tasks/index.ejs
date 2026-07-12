@@ -58,7 +58,12 @@
     </tr>
     <% }) %>
   </table>
-  <% if (!tasks.length) { %><p class="muted">No tasks found.</p><% } %>
+  <% if (!tasks.length) { %>
+    <div class="empty">
+      <span class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="4"/><path d="m8.5 12.5 2.5 2.5 5-5.5"/></svg></span>
+      <p>No tasks found.</p>
+    </div>
+  <% } %>
 </div>
 <%- include('../partials/pagination') %>
 <%- include('../partials/footer') %>
