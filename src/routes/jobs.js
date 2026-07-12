@@ -147,7 +147,7 @@ router.post('/:id/update', requireRole('supervisor'), asyncHandler(async (req, r
         AND (gardener_id IS NOT DISTINCT FROM $3)`,
       [gardener, job.id, job.gardener_id]);
   }
-  await logActivity(req.user.id, 'job.update', 'job', job.id, `Updated site job #${job.id}`);
+  await logActivity(req.user.id, 'job.update', 'job', job.id, `Updated site contract #${job.id}`);
   res.redirect('/jobs');
 }));
 
@@ -158,7 +158,7 @@ router.post('/:id/renew', requireRole('supervisor'), asyncHandler(async (req, re
   const years = Number(req.body.contract_years) === 2 ? 2 : 1;
   const newEnd = contractEnd(job.end_date, years);
   await q('UPDATE jobs SET end_date = $1, active = true, renewal_acknowledged = true WHERE id = $2', [newEnd, job.id]);
-  await logActivity(req.user.id, 'job.renew', 'job', job.id, `Renewed job #${job.id} to ${newEnd}`);
+  await logActivity(req.user.id, 'job.renew', 'job', job.id, `Renewed contract #${job.id} to ${newEnd}`);
   res.redirect('/jobs');
 }));
 

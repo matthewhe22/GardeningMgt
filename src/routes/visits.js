@@ -549,7 +549,7 @@ async function advanceRecurringJob(visit, actorId, completed) {
     [job.id, job.property_id, job.gardener_id, next, job.time_window, actorId]);
   if (inserted) {
     await logActivity(null, 'job.roll', 'job', job.id,
-      `Scheduled next ${job.frequency} visit for job #${job.id} on ${next}`);
+      `Scheduled next ${job.frequency} visit for contract #${job.id} on ${next}`);
   }
 }
 

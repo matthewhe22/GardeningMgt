@@ -82,7 +82,8 @@ The fail-closed guard only triggers when `VERCEL` or `NODE_ENV=production` is se
 19. **Offline banner covers the sticky primary button** (~25px overlap over Start/Complete). **[corroborated: UX, Gary]**
    **Fixed:** the banner now measures `.mobile-sticky-cta`'s live bounding-box height and positions itself above it (`public/js/app.js`).
 20. **Terminology tangle:** "Jobs" tab opens /visits, a visit is titled "Job #3", recurring contracts are "jobs" on a page called "Sites" at URL /jobs. **[UX]**
-   **Fixed:** the Sites page (`views/jobs/index.ejs`) consistently calls the recurring booking a "contract"; the bottom-nav/sidebar "Jobs" label now reads "Visits" (`views/partials/header.ejs`); the per-visit browser-tab title, activity-log messages, notification text, and the invoice/photo-gallery cross-links that said "job #N" now consistently say "visit #N" (`src/routes/visits.js`, `src/report.js`, `src/routes/invoices.js`, `views/invoices/show.ejs`, `views/photos/index.ejs`) — this also fixed a pre-existing inconsistency where some of these messages already said "visit #N" and others said "job #N" for the exact same entity. Left as-is: colloquial phrasing like "Complete job"/"Start job"/"Manage job" buttons, which read naturally and aren't the identity collision being described here.
+   **Fixed:** the Sites page (`views/jobs/index.ejs`) consistently calls the recurring booking a "contract"; the bottom-nav/sidebar "Jobs" label now reads "Visits" (`views/partials/header.ejs`); the per-visit browser-tab title, activity-log messages, notification text, and the invoice cross-links that said "job #N" now consistently say "visit #N" (`src/routes/visits.js`, `src/report.js`, `src/routes/invoices.js`, `views/invoices/show.ejs`) — this also fixed a pre-existing inconsistency where some of these messages already said "visit #N" and others said "job #N" for the exact same entity. Left as-is: colloquial phrasing like "Complete job"/"Start job"/"Manage job" buttons, which read naturally and aren't the identity collision being described here.
+   **Follow-up (found in a later end-to-end pass):** `views/photos/index.ejs` was missed in the original sweep above and still showed "job #N" on the photo gallery — fixed then. The same pass also aligned the remaining `jobs`-table activity-log messages (`src/routes/jobs.js`'s `job.update`/`job.renew`, `src/routes/visits.js`'s `job.roll`) to say "contract #N" instead of "job #N", for consistency with the "Contracts" category label already used for these same log entries (`ACTIVITY_CATEGORY_LABELS` in `src/routes/admin.js`).
 21. **Activity log has no search/filter** and drowns in sign-in noise; `notifications`/`activity_log` grow unbounded (the unread COUNT runs on every request). **[corroborated: Maria, full-stack]**
    **Fixed:** search/user/category filters on `views/admin/activity.ejs` (category derived via `split_part` on the action prefix); a scheduled `pruneOldRecords()` trims `activity_log` older than 1 year and read notifications older than 90 days (safety-net cap at 1 year regardless of read state) — `src/reminders.js`.
 22. **PWA install is broken on iOS:** SVG-only icon (iOS needs PNG), non-conformant `purpose: "any maskable"`, no screenshots — the installed home-screen icon is blank. **[full-stack]**
@@ -166,3 +167,10 @@ upload/pagination/thumbnail test coverage — is implemented and verified
 across gardener/admin views at mobile and desktop widths).
 
 Screenshot evidence: `scratchpad/ui-review/`, `ux-review/`, `admin-review/`, `gardener-review/`.
+
+A further full end-to-end pass (gardener/supervisor/admin flows, real Postgres
++ real SMTP catcher, Playwright screenshots) found one real gap that earlier
+rounds had incorrectly claimed as fixed — see the P2-20 follow-up note above —
+now corrected. No other functional defects surfaced; the invoicing/GST/billing
+feature, auto-invoice-on-completion, and the rest of the P0–P3 sweep all
+behaved correctly under live re-verification.
