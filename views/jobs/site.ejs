@@ -2,7 +2,8 @@
 <div class="page-head">
   <h1><%= property.name %></h1>
   <p class="page-sub"><%= property.address %><% if (property.lots != null) { %> · <%= property.lots %> lots<% } %>
-    <% if (property.contact_name) { %> · contact: <%= property.contact_name %> <%= property.contact_phone || '' %><% } %></p>
+    <% if (property.contact_name) { %> · contact: <%= property.contact_name %> <%= property.contact_phone || '' %><% } %>
+    <% if (property.contact_email) { %> · <a href="mailto:<%= property.contact_email %>"><%= property.contact_email %></a><% } %></p>
 </div>
 
 <div class="stat-row">

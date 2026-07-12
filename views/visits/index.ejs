@@ -86,6 +86,40 @@
 </div>
 <% } %>
 
+<% if (staff) { %>
+<!-- Bulk reassign/reschedule: a lightweight alternative to editing each visit
+     one at a time (e.g. a gardener calls in sick and today's remaining visits
+     all need a new gardener). This form has no visible fields of its own —
+     the checkboxes and controls below are wired to it via the HTML `form`
+     attribute, since they live inside the per-day groups, not inside a single
+     wrapping <form> (forms can't nest, and each row already has its own small
+     reorder form). -->
+<form id="bulk-form" method="post" action="/visits/bulk"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %></form>
+<div class="card bulk-bar">
+  <label class="bulk-select-all">
+    <input type="checkbox" data-bulk-select-all> Select all visible
+  </label>
+  <div class="bulk-actions" data-bulk-actions hidden>
+    <span class="bulk-count muted"><span data-bulk-count>0</span> selected</span>
+    <span class="bulk-action-group">
+      <label>Reassign to
+        <select name="gardener_id" form="bulk-form">
+          <option value="">Unassigned</option>
+          <% gardeners.forEach(g => { %><option value="<%= g.id %>"><%= g.name %></option><% }) %>
+        </select>
+      </label>
+      <button class="btn btn-sm" type="submit" form="bulk-form" name="bulk_action" value="reassign">Apply</button>
+    </span>
+    <span class="bulk-action-group">
+      <label>Move to date
+        <input type="date" name="scheduled_date" form="bulk-form">
+      </label>
+      <button class="btn btn-sm" type="submit" form="bulk-form" name="bulk_action" value="reschedule">Apply</button>
+    </span>
+  </div>
+</div>
+<% } %>
+
 <% groups.forEach(group => { %>
   <div class="day-group">
     <div class="day-head">
@@ -107,6 +141,10 @@
     <div class="job-list">
       <% group.items.forEach((v, i) => { %>
       <div class="job-row card" id="v<%= v.id %>">
+        <% if (staff) { %>
+        <input type="checkbox" class="bulk-check" name="visit_ids" value="<%= v.id %>"
+          form="bulk-form" data-bulk-check aria-label="Select <%= v.property_name %> on <%= v.scheduled_date %> for a bulk action">
+        <% } %>
         <span class="route-no"><%= v.route_order || '·' %></span>
         <a class="job-row-main" href="/visits/<%= v.id %>">
           <strong><%= v.property_name %></strong>

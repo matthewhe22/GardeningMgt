@@ -1,6 +1,31 @@
 <%- include('../partials/header') %>
 <h1>Activity log</h1>
 <p class="muted">Every change in the system is recorded here: who did what, and when.</p>
+
+<div class="card">
+  <form method="get" class="filter-row">
+    <label>Search <input type="text" name="search" value="<%= search %>" placeholder="Text in the details column"></label>
+    <label>User
+      <select name="user_id">
+        <option value="">All</option>
+        <% users.forEach(u => { %>
+          <option value="<%= u.id %>" <%= String(u.id) === String(actingUserId) ? 'selected' : '' %>><%= u.name %></option>
+        <% }) %>
+      </select>
+    </label>
+    <label>Category
+      <select name="category">
+        <option value="">All</option>
+        <% categories.forEach(c => { %>
+          <option value="<%= c.value %>" <%= c.value === category ? 'selected' : '' %>><%= c.label %></option>
+        <% }) %>
+      </select>
+    </label>
+    <button class="btn">Filter</button>
+    <% if (search || actingUserId || category) { %><a class="btn btn-sm" href="/admin/activity">✕ Clear</a><% } %>
+  </form>
+</div>
+
 <div class="card">
   <table class="table table--stack">
     <tr class="thead-row"><th>When</th><th>Who</th><th>Action</th><th>Details</th></tr>

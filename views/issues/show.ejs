@@ -3,6 +3,9 @@
 <p class="muted">Reported by <%= issue.reporter_name || 'unknown' %> on <%= fmtDateTime(issue.created_at) %>
   <% if (issue.property_name) { %> · <%= issue.property_name %><% } %>
   <% if (issue.visit_id) { %> · <a href="/visits/<%= issue.visit_id %>">from visit #<%= issue.visit_id %></a><% } %></p>
+<% if (locals.flash === 'badphoto') { %>
+  <p class="alert alert-error">⚠ One or more photos couldn't be uploaded — please check the file and try again.</p>
+<% } %>
 
 <div class="grid">
   <section class="card">

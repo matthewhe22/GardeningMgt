@@ -22,6 +22,8 @@
     <p class="alert alert-error">⚠ Please tick the confirmation box to complete the job.</p>
   <% } else if (locals.flash === 'invalid') { %>
     <p class="alert alert-error">⚠ Some details were invalid — please check and try again.</p>
+  <% } else if (locals.flash === 'badphoto') { %>
+    <p class="alert alert-error">⚠ One or more photos couldn't be uploaded — please check the file and try again.</p>
   <% } %>
   <% if (locals.job) { %>
   <p class="page-sub">🔁 <%= job.frequency %> · <%= job.contract_years %>-year contract

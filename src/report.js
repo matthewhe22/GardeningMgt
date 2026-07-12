@@ -9,7 +9,7 @@ const { fmtDateTime, fmtDate } = require('./time');
 /** Everything needed to render a job completion report. */
 async function loadReportData(visitId) {
   const visit = await q1(`
-    SELECT v.*, p.name AS property_name, p.address, p.lots, p.contact_name,
+    SELECT v.*, p.name AS property_name, p.address, p.lots, p.contact_name, p.contact_email,
            p.lat, p.lng, u.name AS gardener_name
     FROM visits v
     JOIN properties p ON p.id = v.property_id
@@ -160,6 +160,7 @@ async function renderReportPdf(data) {
     heading('Job details');
     row('Site', `${clean(visit.property_name)} - ${clean(visit.address)}${visit.lots != null ? ` (${visit.lots} lots)` : ''}`);
     if (visit.contact_name) row('Site contact', visit.contact_name);
+    if (visit.contact_email) row('Contact email', visit.contact_email);
     row('Gardener', visit.gardener_name || 'Unassigned');
     row('Status', visit.status.replace('_', ' '));
     row('Scheduled date', `${visit.scheduled_date}${visit.time_window ? ` - ${visit.time_window}` : ''}`);
@@ -298,6 +299,7 @@ async function renderInvoicePdf(invoice, business = {}) {
     row('Property', invoice.property_name);
     row('Address', invoice.address);
     if (invoice.contact_name) row('Contact', invoice.contact_name);
+    if (invoice.contact_email) row('Contact email', invoice.contact_email);
     row('Job date', invoice.scheduled_date);
 
     // Line items table

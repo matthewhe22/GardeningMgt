@@ -43,6 +43,7 @@
     <tr><th>Site</th><td><%= visit.property_name %> — <%= visit.address %>
       <% if (visit.lots != null) { %> (<%= visit.lots %> lots)<% } %></td></tr>
     <% if (visit.contact_name) { %><tr><th>Site contact</th><td><%= visit.contact_name %></td></tr><% } %>
+    <% if (visit.contact_email) { %><tr><th>Contact email</th><td><a href="mailto:<%= visit.contact_email %>"><%= visit.contact_email %></a></td></tr><% } %>
     <tr><th>Gardener</th><td><%= visit.gardener_name || 'Unassigned' %></td></tr>
     <tr><th>Status</th><td><span class="pill"><%= visit.status.replace('_',' ') %></span></td></tr>
     <tr><th>Scheduled date</th><td><%= visit.scheduled_date %><% if (visit.time_window) { %> · <%= visit.time_window %><% } %></td></tr>

@@ -1,14 +1,14 @@
 <%- include('../partials/header') %>
 <div class="page-head">
   <h1>Sites</h1>
-  <p class="page-sub">One recurring job per site. The default gardener is assigned to every
+  <p class="page-sub">One recurring contract per site. The default gardener is assigned to every
     occurrence; individual visits can still be reassigned as a replacement. Completing a visit
     automatically schedules the next one per the frequency, within the contract term.</p>
 </div>
 
 <% if (locals.flash) { %>
   <p class="alert alert-error">
-    <% if (flash === 'duplicate') { %>That site already has an active job.
+    <% if (flash === 'duplicate') { %>That site already has an active contract.
     <% } else if (flash === 'gardener') { %>The default gardener must be an active gardener.
     <% } else { %>Some details were invalid — please check and try again.<% } %>
   </p>
@@ -53,7 +53,7 @@
     <% if (user.role === 'admin') { %>
       <label>Gardening fee <input type="number" name="gardening_fee" min="0" step="0.01" placeholder="e.g. 85.00"></label>
     <% } %>
-    <button class="btn btn-primary">Create job &amp; schedule first visit</button>
+    <button class="btn btn-primary">Create contract &amp; schedule first visit</button>
   </form>
 </details>
 <% } %>
@@ -122,7 +122,7 @@
     </tr>
     <% }) %>
   </table>
-  <% if (!jobs.length) { %><p class="muted">No site jobs yet<% if (staff) { %> — create one above<% } %>.</p><% } %>
+  <% if (!jobs.length) { %><p class="muted">No site contracts yet<% if (staff) { %> — create one above<% } %>.</p><% } %>
 </div>
 <%- include('../partials/pagination') %>
 <%- include('../partials/footer') %>

@@ -42,7 +42,7 @@ async function invoiceWithItems(id) {
   const [invoice, items] = await Promise.all([
     q1(`
     SELECT inv.*, v.scheduled_date, v.duration_minutes, p.name AS property_name, p.address,
-           p.contact_name, u.name AS gardener_name
+           p.contact_name, p.contact_email, u.name AS gardener_name
     FROM invoices inv
     JOIN visits v ON v.id = inv.visit_id
     JOIN properties p ON p.id = v.property_id

@@ -189,6 +189,40 @@ router.post('/optimize', asyncHandler(async (req, res) => {
   res.redirect(backToList(date, gardenerId));
 }));
 
+// Bulk reassign / reschedule from the Jobs list: a lightweight alternative to
+// editing each visit's detail page one at a time — e.g. a gardener calls in
+// sick and today's remaining visits all need a new gardener in one action.
+// Not a calendar view; just applies one of two actions to a checked set of
+// visit ids and logs a single summarizing activity entry (not one per visit).
+router.post('/bulk', requireRole('supervisor'), asyncHandler(async (req, res) => {
+  const ids = [].concat(req.body.visit_ids || []).map(Number).filter(Number.isInteger);
+  if (!ids.length) return res.redirect('/visits?error=invalid');
+
+  if (req.body.bulk_action === 'reassign') {
+    // Same active-gardener check as the single-visit create/update routes above.
+    let gardener = null;
+    if (req.body.gardener_id) {
+      const g = await q1("SELECT id, name FROM users WHERE id = $1 AND role = 'gardener' AND active", [Number(req.body.gardener_id)]);
+      if (!g) return res.redirect('/visits?error=gardener');
+      gardener = g;
+    }
+    const updated = await q('UPDATE visits SET gardener_id = $1 WHERE id = ANY($2::int[]) RETURNING id',
+      [gardener ? gardener.id : null, ids]);
+    await logActivity(req.user.id, 'visit.bulk_reassign', 'visit', null,
+      `Reassigned ${updated.length} visit(s) to ${gardener ? gardener.name : 'Unassigned'}`);
+  } else if (req.body.bulk_action === 'reschedule') {
+    const date = req.body.scheduled_date;
+    if (!isValidDate(date)) return res.redirect('/visits?error=invalid');
+    const updated = await q('UPDATE visits SET scheduled_date = $1, route_order = NULL WHERE id = ANY($2::int[]) RETURNING id',
+      [date, ids]);
+    await logActivity(req.user.id, 'visit.bulk_reschedule', 'visit', null,
+      `Moved ${updated.length} visit(s) to ${date}`);
+  } else {
+    return res.redirect('/visits?error=invalid');
+  }
+  res.redirect('/visits');
+}));
+
 // Manually nudge a visit up/down within its day's visiting sequence.
 router.post('/:id/move', asyncHandler(async (req, res) => {
   const visit = await getVisit(req.params.id);
@@ -521,12 +555,14 @@ router.post('/:id/comments', upload.array('photos', 10), asyncHandler(async (req
   if (!visit || !canSeeVisit(req.user, visit)) return res.redirect('/visits');
   const body = (req.body.body || '').trim();
   const files = req.files || [];
+  let badPhoto = false;
   if (body || files.length) {
     const comment = await q1(
       'INSERT INTO visit_comments (visit_id, user_id, body) VALUES ($1, $2, $3) RETURNING id',
       [visit.id, req.user.id, body || '(photo)']);
     for (const f of files) {
-      await savePhoto(f, { visitId: visit.id, commentId: comment.id, userId: req.user.id });
+      const saved = await savePhoto(f, { visitId: visit.id, commentId: comment.id, userId: req.user.id });
+      if (!saved) badPhoto = true;
     }
     await logActivity(req.user.id, 'visit.comment', 'visit', visit.id,
       `Commented on job #${visit.id}${files.length ? ` with ${files.length} photo(s)` : ''}`);
@@ -543,7 +579,7 @@ router.post('/:id/comments', upload.array('photos', 10), asyncHandler(async (req
         [visit.gardener_id, visit.id, 'comment', message]);
     }
   }
-  res.redirect(`/visits/${visit.id}#comments`);
+  res.redirect(`/visits/${visit.id}${badPhoto ? '?error=badphoto' : ''}#comments`);
 }));
 
 // Photo upload for a job
@@ -552,14 +588,17 @@ router.post('/:id/photos', upload.array('photos', 10), asyncHandler(async (req, 
   const visit = await getVisit(req.params.id);
   if (!visit || !canSeeVisit(req.user, visit)) return res.redirect('/visits');
   const shared = req.body.shared === 'on' || req.body.shared === '1';
+  let saved = 0;
+  let badPhoto = false;
   for (const f of req.files || []) {
-    await savePhoto(f, { caption: req.body.caption || null, visitId: visit.id, userId: req.user.id, shared });
+    const filename = await savePhoto(f, { caption: req.body.caption || null, visitId: visit.id, userId: req.user.id, shared });
+    if (filename) saved++; else badPhoto = true;
   }
-  if ((req.files || []).length) {
+  if (saved) {
     await logActivity(req.user.id, 'photo.upload', 'visit', visit.id,
-      `Uploaded ${req.files.length} photo(s) to job #${visit.id}`);
+      `Uploaded ${saved} photo(s) to job #${visit.id}`);
   }
-  res.redirect(`/visits/${visit.id}#photos`);
+  res.redirect(`/visits/${visit.id}${badPhoto ? '?error=badphoto' : ''}#photos`);
 }));
 
 // Add a task to a visit

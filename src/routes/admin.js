@@ -20,14 +20,42 @@ const router = express.Router();
 
 // --- Activity log & bulk reminders: supervisors and admins ---
 
+// Every action logged so far is "<category>.<verb>" (e.g. 'auth.login',
+// 'visit.timer.stop') — group the filter dropdown by that category prefix
+// rather than hardcoding the full list, so it stays in sync with whatever
+// logActivity() calls actually exist across the codebase.
+const ACTIVITY_CATEGORY_LABELS = {
+  auth: 'Login/logout', visit: 'Visits', job: 'Contracts', invoice: 'Invoicing',
+  issue: 'Issues', property: 'Sites', task: 'Tasks', user: 'Users',
+  route: 'Routing', settings: 'Settings', photo: 'Photos', report: 'Reports',
+};
+
 router.get('/activity', requireRole('supervisor'), asyncHandler(async (req, res) => {
   const page = pageParam(req);
+  const search = (req.query.search || '').trim();
+  const actingUserId = Number(req.query.user_id) || '';
+  const category = (req.query.category || '').trim();
+  const where = [];
+  const args = [];
+  if (search) { args.push(`%${search}%`); where.push(`a.details ILIKE $${args.length}`); }
+  if (actingUserId) { args.push(actingUserId); where.push(`a.user_id = $${args.length}`); }
+  if (category) { args.push(`${category}.%`); where.push(`a.action LIKE $${args.length}`); }
+  const baseWhere = where.length ? 'WHERE ' + where.join(' AND ') : '';
   const activitySql = `
     SELECT a.*, u.name AS user_name FROM activity_log a
     LEFT JOIN users u ON u.id = a.user_id
+    ${baseWhere}
     ORDER BY a.created_at DESC, a.id DESC`;
-  const { rows: entries, total, totalPages } = await paginate(q, activitySql, [], page);
-  res.render('admin/activity', { title: 'Activity log', entries, page, total, totalPages });
+  const [{ rows: entries, total, totalPages }, users, categoryRows] = await Promise.all([
+    paginate(q, activitySql, args, page),
+    q('SELECT id, name FROM users ORDER BY name'),
+    q(`SELECT DISTINCT split_part(action, '.', 1) AS cat FROM activity_log ORDER BY cat`),
+  ]);
+  const categories = categoryRows.map((r) => ({ value: r.cat, label: ACTIVITY_CATEGORY_LABELS[r.cat] || r.cat }));
+  res.render('admin/activity', {
+    title: 'Activity log', entries, page, total, totalPages,
+    search, actingUserId, category, users, categories,
+  });
 }));
 
 router.post('/reminders/bulk', requireRole('supervisor'), asyncHandler(async (req, res) => {
@@ -60,7 +88,7 @@ router.get('/properties', requireRole('supervisor'), asyncHandler(async (req, re
 }));
 
 router.post('/properties', requireRole('supervisor'), asyncHandler(async (req, res) => {
-  const { name, address, contact_name, contact_phone, lat, lng, lots, notes } = req.body;
+  const { name, address, contact_name, contact_phone, contact_email, lat, lng, lots, notes } = req.body;
   if (!(name || '').trim() || !(address || '').trim()) return res.redirect('/admin/properties');
   // Coordinates power route optimization. If they weren't entered, derive them
   // from the address automatically (best-effort — a save never fails on this).
@@ -72,10 +100,13 @@ router.post('/properties', requireRole('supervisor'), asyncHandler(async (req, r
       if (geo) { latN = geo.lat; lngN = geo.lng; }
     } catch (e) { console.error('[geocode] create lookup failed:', e.message); }
   }
+  // NOTE: contact_email is written assuming a `contact_email TEXT` column
+  // exists on `properties` (matching contact_name/contact_phone exactly) —
+  // this INSERT will error until that column is added via a migration.
   const { id } = await q1(`
-    INSERT INTO properties (name, address, contact_name, contact_phone, lat, lng, lots, notes)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-    [name.trim(), address.trim(), contact_name || null, contact_phone || null,
+    INSERT INTO properties (name, address, contact_name, contact_phone, contact_email, lat, lng, lots, notes)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+    [name.trim(), address.trim(), contact_name || null, contact_phone || null, contact_email || null,
       latN, lngN, lots ? Math.round(Number(lots)) : null, notes || null]);
   await logActivity(req.user.id, 'property.create', 'property', id, `Added site "${name.trim()}"`);
   res.redirect('/admin/properties');
@@ -155,7 +186,7 @@ router.post('/properties/:id/update', requireRole('supervisor'), asyncHandler(as
   const id = Number(req.params.id);
   const existing = await q1('SELECT id FROM properties WHERE id = $1', [id]);
   if (!existing) return res.redirect('/admin/properties');
-  const { name, address, contact_name, contact_phone, lat, lng, lots, notes } = req.body;
+  const { name, address, contact_name, contact_phone, contact_email, lat, lng, lots, notes } = req.body;
   if (!(name || '').trim() || !(address || '').trim()) return res.redirect('/admin/properties');
   const redetect = req.body.regeocode === 'on';
   let latN = (!redetect && lat) ? Number(lat) : null;
@@ -166,10 +197,13 @@ router.post('/properties/:id/update', requireRole('supervisor'), asyncHandler(as
       if (g) { latN = g.lat; lngN = g.lng; }
     } catch (e) { console.error('[geocode] update lookup failed:', e.message); }
   }
+  // NOTE: contact_email assumes a `contact_email TEXT` column on `properties`
+  // (matching contact_name/contact_phone exactly) — errors until that
+  // migration lands; see the create route above for the same note.
   await q(`
     UPDATE properties SET name = $1, address = $2, contact_name = $3, contact_phone = $4,
-      lat = $5, lng = $6, lots = $7, notes = $8 WHERE id = $9`,
-    [name.trim(), address.trim(), contact_name || null, contact_phone || null,
+      contact_email = $5, lat = $6, lng = $7, lots = $8, notes = $9 WHERE id = $10`,
+    [name.trim(), address.trim(), contact_name || null, contact_phone || null, contact_email || null,
       latN, lngN, lots ? Math.round(Number(lots)) : null, notes || null, id]);
   await logActivity(req.user.id, 'property.update', 'property', id, `Updated site "${name.trim()}"`);
   res.redirect('/admin/properties');

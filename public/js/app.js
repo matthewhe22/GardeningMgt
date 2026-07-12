@@ -45,6 +45,33 @@ document.querySelectorAll('[data-confirm]').forEach((el) => {
   el.addEventListener(evt, (e) => { if (!window.confirm(msg)) e.preventDefault(); });
 });
 
+// --- Bulk reassign/reschedule on the Jobs list (views/visits/index.ejs) ---
+// The per-row checkboxes and the "select all visible" checkbox aren't inside
+// the bulk <form> itself (they live inside each day-group's row markup, and
+// are associated to the form via the HTML `form="bulk-form"` attribute), so
+// wire them up here rather than relying on any form-level change event.
+(() => {
+  const checks = document.querySelectorAll('[data-bulk-check]');
+  if (!checks.length) return;
+  const selectAll = document.querySelector('[data-bulk-select-all]');
+  const actions = document.querySelector('[data-bulk-actions]');
+  const countEl = document.querySelector('[data-bulk-count]');
+  const refresh = () => {
+    const n = document.querySelectorAll('[data-bulk-check]:checked').length;
+    if (countEl) countEl.textContent = String(n);
+    if (actions) actions.hidden = n === 0;
+    if (selectAll) selectAll.checked = n > 0 && n === checks.length;
+  };
+  checks.forEach((c) => c.addEventListener('change', refresh));
+  if (selectAll) {
+    selectAll.addEventListener('change', () => {
+      checks.forEach((c) => { c.checked = selectAll.checked; });
+      refresh();
+    });
+  }
+  refresh();
+})();
+
 // --- Prevent double-submit: disable submit buttons once a form is submitted ---
 document.querySelectorAll('form').forEach((form) => {
   form.addEventListener('submit', (e) => {

@@ -1064,6 +1064,15 @@ body.anon {
 .reorder-btn:hover:not(:disabled) { background: var(--bg); border-color: #c6c4ba; }
 .reorder-btn:disabled { opacity: 0.35; cursor: default; }
 
+/* Bulk reassign/reschedule bar on the Jobs list */
+.bulk-check { flex: none; width: 18px; height: 18px; margin: 0; cursor: pointer; }
+.bulk-bar { display: flex; flex-direction: column; gap: 10px; }
+.bulk-select-all { display: flex; align-items: center; gap: 8px; margin: 0; cursor: pointer; }
+.bulk-actions { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-end; border-top: 1px solid var(--border); padding-top: 12px; }
+.bulk-count { white-space: nowrap; }
+.bulk-action-group { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+.bulk-action-group label { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; margin: 0; }
+
 .btn-sm { min-height: 36px; padding: 6px 12px; font-size: 0.82rem; box-shadow: none; }
 
 .pagination {

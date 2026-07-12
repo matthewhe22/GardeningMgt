@@ -31,6 +31,7 @@
     <label>Address <input type="text" name="address" required></label>
     <label>Contact name <input type="text" name="contact_name"></label>
     <label>Contact phone <input type="text" name="contact_phone"></label>
+    <label>Contact email <input type="email" name="contact_email"></label>
     <label># of lots <input type="number" name="lots" min="0"></label>
     <label>Latitude <span class="muted">(optional)</span> <input type="number" name="lat" step="any" placeholder="auto from address"></label>
     <label>Longitude <span class="muted">(optional)</span> <input type="number" name="lng" step="any" placeholder="auto from address"></label>
@@ -68,6 +69,9 @@
   <summary>
     <strong><%= p.name %></strong>
     <span class="muted">· <%= p.address %></span>
+    <% if (p.contact_email) { %>
+      <span class="muted">· <a href="mailto:<%= p.contact_email %>"><%= p.contact_email %></a></span>
+    <% } %>
     <% if (p.lat != null && p.lng != null) { %>
       <span class="status status-completed"><%= p.lat.toFixed(4) %>, <%= p.lng.toFixed(4) %></span>
     <% } else { %>
@@ -79,6 +83,7 @@
     <label>Address <input type="text" name="address" value="<%= p.address %>" required></label>
     <label>Contact name <input type="text" name="contact_name" value="<%= p.contact_name || '' %>"></label>
     <label>Contact phone <input type="text" name="contact_phone" value="<%= p.contact_phone || '' %>"></label>
+    <label>Contact email <input type="email" name="contact_email" value="<%= p.contact_email || '' %>"></label>
     <label># of lots <input type="number" name="lots" min="0" value="<%= p.lots != null ? p.lots : '' %>"></label>
     <label class="span2">&nbsp;</label>
     <label>Latitude <input type="number" name="lat" step="any" value="<%= p.lat != null ? p.lat : '' %>"></label>

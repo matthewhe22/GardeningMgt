@@ -58,12 +58,14 @@ router.post('/', upload.array('photos', 10), asyncHandler(async (req, res) => {
     [title.trim(), description || null, property_id || null, visitId,
       ['low', 'medium', 'high', 'urgent'].includes(priority) ? priority : 'medium',
       req.user.id, assigned_to || null]);
+  let badPhoto = false;
   for (const f of req.files || []) {
-    await savePhoto(f, { issueId: id, userId: req.user.id });
+    const saved = await savePhoto(f, { issueId: id, userId: req.user.id });
+    if (!saved) badPhoto = true;
   }
   await logActivity(req.user.id, 'issue.create', 'issue', id,
     `Reported issue "${title.trim()}"${(req.files || []).length ? ` with ${req.files.length} photo(s)` : ''}`);
-  res.redirect(`/issues/${id}`);
+  res.redirect(`/issues/${id}${badPhoto ? '?error=badphoto' : ''}`);
 }));
 
 router.get('/:id', asyncHandler(async (req, res) => {
@@ -85,7 +87,10 @@ router.get('/:id', asyncHandler(async (req, res) => {
     LEFT JOIN users u ON u.id = ph.uploaded_by WHERE ph.issue_id = $1 ORDER BY ph.created_at DESC`, [issue.id]),
     q('SELECT id, name FROM users WHERE active ORDER BY name'),
   ]);
-  res.render('issues/show', { title: `Issue #${issue.id}`, issue, comments, photos, users, staff: isStaff(req.user) });
+  res.render('issues/show', {
+    title: `Issue #${issue.id}`, issue, comments, photos, users, staff: isStaff(req.user),
+    flash: req.query.error || null,
+  });
 }));
 
 // Only staff change an issue's status/priority/assignment.
@@ -128,14 +133,17 @@ router.post('/:id/photos', upload.array('photos', 10), asyncHandler(async (req, 
   if (!Number.isInteger(id)) return res.status(404).render('error', { title: 'Not found', message: 'Issue not found.' });
   const issue = await q1('SELECT id FROM issues WHERE id = $1', [id]);
   if (!issue) return res.status(404).render('error', { title: 'Not found', message: 'Issue not found.' });
+  let saved = 0;
+  let badPhoto = false;
   for (const f of req.files || []) {
-    await savePhoto(f, { caption: req.body.caption || null, issueId: id, userId: req.user.id });
+    const filename = await savePhoto(f, { caption: req.body.caption || null, issueId: id, userId: req.user.id });
+    if (filename) saved++; else badPhoto = true;
   }
-  if ((req.files || []).length) {
+  if (saved) {
     await logActivity(req.user.id, 'photo.upload', 'issue', id,
-      `Uploaded ${req.files.length} photo(s) to issue #${id}`);
+      `Uploaded ${saved} photo(s) to issue #${id}`);
   }
-  res.redirect(`/issues/${id}#photos`);
+  res.redirect(`/issues/${id}${badPhoto ? '?error=badphoto' : ''}#photos`);
 }));
 
 module.exports = router;
