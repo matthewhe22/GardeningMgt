@@ -17,8 +17,13 @@
     { "src": "/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ],
   "shortcuts": [
-    { "name": "Today's jobs", "short_name": "Jobs", "url": "/visits" },
+    { "name": "Today's visits", "short_name": "Visits", "url": "/visits" },
     { "name": "My routes", "short_name": "Routes", "url": "/routes" },
     { "name": "Report an issue", "short_name": "Issues", "url": "/issues" }
+  ],
+  "screenshots": [
+    { "src": "/screenshots/dashboard-narrow.png", "sizes": "390x844", "type": "image/png", "form_factor": "narrow", "label": "Today's visits at a glance" },
+    { "src": "/screenshots/visit-narrow.png", "sizes": "390x844", "type": "image/png", "form_factor": "narrow", "label": "Log photos, run the timer, and complete a visit in the field" },
+    { "src": "/screenshots/reports-wide.png", "sizes": "1280x800", "type": "image/png", "form_factor": "wide", "label": "Manage sites, invoices, and reports from a desktop" }
   ]
 }

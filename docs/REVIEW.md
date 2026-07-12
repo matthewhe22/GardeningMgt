@@ -76,7 +76,7 @@ The fail-closed guard only triggers when `VERCEL` or `NODE_ENV=production` is se
 21. **Activity log has no search/filter** and drowns in sign-in noise; `notifications`/`activity_log` grow unbounded (the unread COUNT runs on every request). **[corroborated: Maria, full-stack]**
    **Fixed:** search/user/category filters on `views/admin/activity.ejs` (category derived via `split_part` on the action prefix); a scheduled `pruneOldRecords()` trims `activity_log` older than 1 year and read notifications older than 90 days (safety-net cap at 1 year regardless of read state) — `src/reminders.js`.
 22. **PWA install is broken on iOS:** SVG-only icon (iOS needs PNG), non-conformant `purpose: "any maskable"`, no screenshots — the installed home-screen icon is blank. **[full-stack]**
-   **Fixed:** real rasterized `icon-192.png`/`icon-512.png`/`icon-512-maskable.png`/`apple-touch-icon.png`, `manifest.json` now has separate `any`/`maskable` entries, `views/partials/header.ejs` points its apple-touch-icon link at the new PNG. (Screenshots still not added.)
+   **Fixed:** real rasterized `icon-192.png`/`icon-512.png`/`icon-512-maskable.png`/`apple-touch-icon.png`, `manifest.json` now has separate `any`/`maskable` entries, `views/partials/header.ejs` points its apple-touch-icon link at the new PNG. `manifest.json` now also has a `screenshots` array (two `narrow`/mobile shots — dashboard and a visit in progress — and one `wide`/desktop shot of Reports) for the richer install UI Chrome/Android shows when screenshots are present; verified all three files are served correctly and the manifest is valid JSON.
 23. **Photos failing magic-byte sniffing are silently discarded** — gardener believes the upload succeeded (may even be the photo gating completion). **[code engineer]**
    **Fixed:** failed sniffs now surface a `?error=badphoto` alert on the visit/issue photo and comment forms instead of failing silently (`src/routes/visits.js`, `src/routes/issues.js`).
 24. **Naive TIMESTAMP columns assume a UTC DB session** — a non-UTC Postgres setting silently shifts every displayed time. **[code engineer]**
@@ -126,11 +126,33 @@ The fail-closed guard only triggers when `VERCEL` or `NODE_ENV=production` is se
 
 ---
 
-## Suggested fix order
+## Current status
 
-1. **Field-trust bundle (P0-1, 13, 14, 19):** offline draft protection + issue-form photo + timer corrections — this is what makes gardeners adopt the app.
-2. **Office bundle (P0-2, P0-3, 18, 21, 30):** password reset/user editing + sendable invoices — what Maria needs to go live.
-3. **Platform hardening (P0-4/5/6, 8–11, 15):** CSRF server-side rendering, migration strategy, session secret, photo thumbnails, static caching, cron delivery, date validation, NUMERIC money.
-4. **Polish sweep (P2/P3 UI+UX items):** mostly small template/CSS diffs; the UI reviewer's H1–H3 and Gary's touch-target list give the exact files and lines.
+Every P0, P1, P2, and P3 finding above has been addressed except three genuinely
+open items, none of which block day-to-day use:
+
+1. **Invoicing has no email-send action** (P0-3) — the PDF is download-only,
+   not delivered to the client automatically; invoicing also remains strictly
+   one-per-visit (no monthly/consolidated multi-visit invoice).
+2. **Pool exhaustion risk is mitigated, not eliminated** (P2-25) — the pool
+   `max` was tuned down for the no-pooler Vercel case, but the underlying
+   architectural risk (many serverless instances × direct Postgres
+   connections) needs a real connection pooler (e.g. PgBouncer, or a
+   provider's built-in pooler) to fully close, which is an infrastructure
+   decision rather than an app-code change.
+3. **`scripts/backup.js`'s "no S3" path is documentation, not automation** —
+   without object storage configured, keeping full photo bytes backed up
+   still requires manually running an occasional uncensored `pg_dump`
+   alongside the routine metadata-only backup; there's no scheduled job for it.
+
+Everything else — offline draft protection, password reset/user editing,
+CSRF server-side rendering, the migration/session-secret/DATABASE_URL
+fail-closed guards, photo thumbnails (verified live on the production Vercel
+deployment), static caching, cron delivery, date validation, NUMERIC money,
+the full P2/P3 UI/UX polish sweep (terminology, emoji→SVG, chip layout,
+pagination, CSV exports, PWA icons/screenshots), and the new authz/CSRF/
+upload/pagination/thumbnail test coverage — is implemented and verified
+(automated tests, real-Postgres/real-HTTP checks, and Playwright screenshots
+across gardener/admin views at mobile and desktop widths).
 
 Screenshot evidence: `scratchpad/ui-review/`, `ux-review/`, `admin-review/`, `gardener-review/`.
