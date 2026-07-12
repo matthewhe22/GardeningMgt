@@ -64,4 +64,4 @@ async function savePhoto(file, { caption = null, visitId = null, issueId = null,
   return filename;
 }
 
-module.exports = { upload, savePhoto };
+module.exports = { upload, savePhoto, sniffOk };
