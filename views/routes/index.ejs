@@ -20,7 +20,7 @@
 
 <% if (locals.allCount != null) { %>
   <% if (locals.allCount > 0) { %>
-    <p class="alert alert-ok">✓ Optimized <%= allCount %> gardener<%= allCount === 1 ? '' : 's' %>'
+    <p class="alert alert-ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 5 5L19 7"/></svg> Optimized <%= allCount %> gardener<%= allCount === 1 ? '' : 's' %>'
       route<%= allCount === 1 ? '' : 's' %> for <%= date %> (<%= allVisits %> visit<%= allVisits === 1 ? '' : 's' %> reordered).
       <% if (locals.optimized === 'straight') { %>Note: the road-distance service was unavailable for at least one
         gardener, so that route was ordered by straight-line distance instead.<% } %></p>
@@ -30,7 +30,7 @@
 <% } %>
 <% if (gardenerId) { %>
 <% if (locals.optimized === 'road') { %>
-  <p class="alert alert-ok">✓ Route optimized by driving distance (road network).</p>
+  <p class="alert alert-ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 5 5L19 7"/></svg> Route optimized by driving distance (road network).</p>
 <% } else if (locals.optimized === 'straight') { %>
   <p class="alert alert-error">Route optimized by straight-line distance — the road-distance service was unavailable, so this is an approximation.</p>
 <% } %>
@@ -58,7 +58,7 @@
       — <%= v.address %>
       <% if (v.time_window) { %><span class="muted">(<%= v.time_window %>)</span><% } %>
       <span class="status status-<%= v.status %>"><%= v.status.replace('_',' ') %></span>
-      <% if (v.lat == null) { %><span class="muted">⚠ no coordinates — left at end of route</span><% } %>
+      <% if (v.lat == null) { %><span class="muted"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg> no coordinates — left at end of route</span><% } %>
     </li>
     <% }) %>
   </ol>

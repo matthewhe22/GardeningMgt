@@ -235,7 +235,7 @@ router.post('/:id/move', asyncHandler(async (req, res) => {
     [ids[idx], ids[swap]] = [ids[swap], ids[idx]];
     await applyRouteOrder(ids);
     await logActivity(req.user.id, 'route.reorder', 'visit', visit.id,
-      `Moved job #${visit.id} ${req.body.dir === 'up' ? 'earlier' : 'later'} in the ${visit.scheduled_date} route`);
+      `Moved visit #${visit.id} ${req.body.dir === 'up' ? 'earlier' : 'later'} in the ${visit.scheduled_date} route`);
   }
   res.redirect(backToList(visit.scheduled_date, visit.gardener_id) + `#v${visit.id}`);
 }));
@@ -304,7 +304,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
   const longRunning = !!(visit.started_at && !visit.finished_at &&
     (Date.now() - toDate(visit.started_at).getTime()) > LONG_RUNNING_MS);
   res.render('visits/show', {
-    title: `Job #${visit.id} — ${visit.property_name}`,
+    title: `Visit #${visit.id} — ${visit.property_name}`,
     visit, tasks, photos, comments, photosByComment, invoice, gardeners, gpsPoints, job, nextVisit,
     staff: isStaff(req.user), flash: req.query.error || null, warning: req.query.warning || null,
     longRunning,
@@ -387,7 +387,7 @@ router.post('/:id/reschedule', asyncHandler(async (req, res) => {
   if (isValidDate(date)) {
     await q('UPDATE visits SET scheduled_date = $1, route_order = NULL WHERE id = $2', [date, visit.id]);
     await logActivity(req.user.id, 'visit.reschedule', 'visit', visit.id,
-      `Moved job #${visit.id} from ${visit.scheduled_date} to ${date}`);
+      `Moved visit #${visit.id} from ${visit.scheduled_date} to ${date}`);
     busy = await dayConflicts(visit.gardener_id, date, visit.id);
   }
   res.redirect(`/visits/${visit.id}${busy ? '?warning=busy' : ''}`);
@@ -473,11 +473,11 @@ router.post('/:id/timer/stop', asyncHandler(async (req, res) => {
   const [, , { dc, tc }] = await Promise.all([
     recordGps(visit.id, req.user.id, req.body, 'finish'),
     logActivity(req.user.id, 'visit.timer.stop', 'visit', visit.id,
-      `Finished job #${visit.id} in ${gate.duration_minutes} min`),
+      `Finished visit #${visit.id} in ${gate.duration_minutes} min`),
     q1("SELECT COUNT(*) FILTER (WHERE status = 'done')::int AS dc, COUNT(*)::int AS tc FROM tasks WHERE visit_id = $1",
       [visit.id]),
   ]);
-  const summary = `Job #${visit.id} completed by ${req.user.name} at ${visit.property_name}: ` +
+  const summary = `Visit #${visit.id} completed by ${req.user.name} at ${visit.property_name}: ` +
     `${gate.duration_minutes} min, tasks ${dc}/${tc} done, ${pc} photo(s).`;
   // Notifying staff and advancing the recurring contract are independent too.
   await Promise.all([
@@ -565,9 +565,9 @@ router.post('/:id/comments', upload.array('photos', 10), asyncHandler(async (req
       if (!saved) badPhoto = true;
     }
     await logActivity(req.user.id, 'visit.comment', 'visit', visit.id,
-      `Commented on job #${visit.id}${files.length ? ` with ${files.length} photo(s)` : ''}`);
+      `Commented on visit #${visit.id}${files.length ? ` with ${files.length} photo(s)` : ''}`);
 
-    const message = `${req.user.name} commented on job #${visit.id} (${visit.property_name}): ` +
+    const message = `${req.user.name} commented on visit #${visit.id} (${visit.property_name}): ` +
       `${body.slice(0, 120)}${files.length ? ` [${files.length} photo(s)]` : ''}`;
     if (req.user.id === visit.gardener_id) {
       await pool.query(`
@@ -596,7 +596,7 @@ router.post('/:id/photos', upload.array('photos', 10), asyncHandler(async (req, 
   }
   if (saved) {
     await logActivity(req.user.id, 'photo.upload', 'visit', visit.id,
-      `Uploaded ${saved} photo(s) to job #${visit.id}`);
+      `Uploaded ${saved} photo(s) to visit #${visit.id}`);
   }
   res.redirect(`/visits/${visit.id}${badPhoto ? '?error=badphoto' : ''}#photos`);
 }));
@@ -611,7 +611,7 @@ router.post('/:id/tasks', asyncHandler(async (req, res) => {
       INSERT INTO tasks (visit_id, assignee_id, title, description, created_by)
       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
       [visit.id, visit.gardener_id, title, req.body.description || null, req.user.id]);
-    await logActivity(req.user.id, 'task.create', 'task', id, `Added task "${title}" to job #${visit.id}`);
+    await logActivity(req.user.id, 'task.create', 'task', id, `Added task "${title}" to visit #${visit.id}`);
   }
   res.redirect(`/visits/${visit.id}#tasks`);
 }));

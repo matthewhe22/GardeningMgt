@@ -74,6 +74,18 @@ is set):
 To move photos already in the database into the bucket, run once after
 configuring the vars: `npm run migrate:photos`.
 
+## Backups
+
+`npm run backup [output-dir]` (requires `pg_dump` on PATH and `DATABASE_URL`
+set) writes a full schema+data dump of every table *except* photo image bytes,
+plus a second file with the photos table's own metadata (filename, caption,
+visit/issue link, timestamps) — so a routine backup isn't multiple times
+larger than the rest of the database just from `photos.data`/`thumb_data`.
+The actual image bytes are recoverable from S3 if `S3_BUCKET` is configured
+(see above); without S3, run an occasional full `pg_dump` (no
+`--exclude-table-data`) alongside the routine backups if you need the photo
+bytes themselves preserved too.
+
 ## Run locally / on a normal server
 
 The app refuses to start without `SESSION_SECRET` set (it signs the session

@@ -3,30 +3,30 @@
 <div class="page-head job-head">
   <h1><%= visit.property_name %></h1>
   <div class="chips">
-    <span class="chip">📅 <%= visit.scheduled_date %><% if (visit.time_window) { %> · <%= visit.time_window %><% } %></span>
-    <a class="chip chip-link" href="https://www.google.com/maps/dir/?api=1&destination=<%= encodeURIComponent((visit.lat != null && visit.lng != null) ? (visit.lat + ',' + visit.lng) : (visit.property_name + ', ' + visit.address)) %>" target="_blank" rel="noopener">🧭 Navigate</a>
-    <span class="chip">📍 <%= visit.address %></span>
+    <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M8 3v4M16 3v4M3.5 10h17"/></svg> <%= visit.scheduled_date %><% if (visit.time_window) { %> · <%= visit.time_window %><% } %></span>
+    <a class="chip chip-link" href="https://www.google.com/maps/dir/?api=1&destination=<%= encodeURIComponent((visit.lat != null && visit.lng != null) ? (visit.lat + ',' + visit.lng) : (visit.property_name + ', ' + visit.address)) %>" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m15 9-2 6-6 2 2-6 6-2Z"/></svg> Navigate</a>
+    <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s7-6.5 7-11.5A7 7 0 0 0 5 9.5C5 14.5 12 21 12 21Z"/><circle cx="12" cy="9.5" r="2.3"/></svg> <%= visit.address %></span>
     <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.6"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg> <%= visit.gardener_name || 'Unassigned' %></span>
     <span class="status status-<%= visit.status %>"><%= visit.status.replace('_',' ') %></span>
     <% if (locals.job && job.default_gardener_name && visit.gardener_name && job.gardener_id !== visit.gardener_id) { %>
       <span class="status status-in_progress">replacement for <%= job.default_gardener_name %></span>
     <% } %>
   </div>
-  <p class="page-sub"><a class="btn btn-sm" href="/issues?property_id=<%= visit.property_id %>&visit_id=<%= visit.id %>">⚠ Report an issue at this site</a></p>
+  <p class="page-sub"><a class="btn btn-sm" href="/issues?property_id=<%= visit.property_id %>&visit_id=<%= visit.id %>"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg> Report an issue at this site</a></p>
   <% if (locals.warning === 'busy') { %>
-    <p class="alert alert-error">⚠ Heads up: this gardener already has other visits scheduled that day — check for a clash.</p>
+    <p class="alert alert-error"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg> Heads up: this gardener already has other visits scheduled that day — check for a clash.</p>
   <% } %>
   <% if (locals.flash === 'photos') { %>
-    <p class="alert alert-error">⚠ Add at least one photo for this site before completing the job.</p>
+    <p class="alert alert-error"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg> Add at least one photo for this site before completing the job.</p>
   <% } else if (locals.flash === 'confirm') { %>
-    <p class="alert alert-error">⚠ Please tick the confirmation box to complete the job.</p>
+    <p class="alert alert-error"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg> Please tick the confirmation box to complete the job.</p>
   <% } else if (locals.flash === 'invalid') { %>
-    <p class="alert alert-error">⚠ Some details were invalid — please check and try again.</p>
+    <p class="alert alert-error"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg> Some details were invalid — please check and try again.</p>
   <% } else if (locals.flash === 'badphoto') { %>
-    <p class="alert alert-error">⚠ One or more photos couldn't be uploaded — please check the file and try again.</p>
+    <p class="alert alert-error"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg> One or more photos couldn't be uploaded — please check the file and try again.</p>
   <% } %>
   <% if (locals.job) { %>
-  <p class="page-sub">🔁 <%= job.frequency %> · <%= job.contract_years %>-year contract
+  <p class="page-sub"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg> <%= job.frequency %> · <%= job.contract_years %>-year contract
     (<%= job.start_date %> → <%= job.end_date %>)
     · last completed: <%= job.last_completed_at ? fmtDateTime(job.last_completed_at) : 'never' %>
     <% if (staff) { %> · <a href="/jobs/site/<%= visit.property_id %>">site history</a><% } %>
@@ -37,7 +37,7 @@
 <!-- ===== 1. The job action: start / complete ===== -->
 <div class="card timer-card"<% if (visit.started_at && !visit.finished_at) { %> data-gps-ping-visit="<%= visit.id %>"<% } %>>
   <% if (visit.started_at && !visit.finished_at) { %>
-    <h2>⏱ Job running</h2>
+    <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2"/><path d="M9 2h6"/></svg> Job running</h2>
     <p>Started at <strong><%= fmtDateTime(visit.started_at) %></strong>.</p>
     <p class="muted">Completing records the date &amp; time, notifies your supervisor,
       and files the report and photos.</p>
@@ -48,31 +48,31 @@
     <form method="post" action="/visits/<%= visit.id %>/timer/stop" class="gps-form mobile-sticky-cta"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
       <input type="hidden" name="lat"><input type="hidden" name="lng">
       <p class="cta-note"><strong><%= photos.length %></strong> photo(s) uploaded for this site so far.
-        <% if (!photos.length) { %><br><span class="muted">⚠ <a href="#photos">Upload your photos</a> before completing.</span><% } %></p>
+        <% if (!photos.length) { %><br><span class="muted"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg> <a href="#photos">Upload your photos</a> before completing.</span><% } %></p>
       <label class="confirm-line"><input type="checkbox" name="confirm_photos" required>
         I confirm all photos for this site have been uploaded</label>
       <button class="btn btn-danger btn-block"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 5 5L19 7"/></svg> Complete job</button>
     </form>
   <% } else if (visit.finished_at) { %>
-    <h2>✅ Job completed</h2>
+    <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 5 5L19 7"/></svg> Job completed</h2>
     <p>Worked <strong><%= visit.duration_minutes %> min</strong>
       (<%= fmtDateTime(visit.started_at) %> → <%= fmtDateTime(visit.finished_at) %>).</p>
     <div class="btn-row">
       <a class="btn btn-primary" href="/visits/<%= visit.id %>/report" target="_blank"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h9l4 4v14H6V3Z"/><path d="M14.5 3.5V8H19"/><path d="M9.5 13H15"/><path d="M9.5 16.5H15"/></svg> View report</a>
-      <a class="btn" href="/visits/<%= visit.id %>/report?download=1">⬇ Download PDF</a>
+      <a class="btn" href="/visits/<%= visit.id %>/report?download=1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 19.5h16"/></svg> Download PDF</a>
       <form method="post" action="/visits/<%= visit.id %>/timer/start" class="gps-form inline" data-confirm="Restart the timer? This clears the recorded completion time and reopens the job."><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
         <input type="hidden" name="lat"><input type="hidden" name="lng">
-        <button class="btn">↻ Restart timer</button>
+        <button class="btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v5h-5"/></svg> Restart timer</button>
       </form>
     </div>
     <% if (locals.nextVisit) { %>
     <div class="next-stop-card">
-      <h3 class="next-stop-title">➡ Next stop</h3>
+      <h3 class="next-stop-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h16"/><path d="m13 5 7 7-7 7"/></svg> Next stop</h3>
       <p><strong><%= nextVisit.property_name %></strong> — <%= nextVisit.address %>
         <% if (nextVisit.time_window) { %><span class="muted">(<%= nextVisit.time_window %>)</span><% } %></p>
       <div class="btn-row">
         <a class="btn btn-primary" href="/visits/<%= nextVisit.id %>">Open job</a>
-        <a class="btn" href="https://www.google.com/maps/dir/?api=1&destination=<%= encodeURIComponent((nextVisit.lat != null && nextVisit.lng != null) ? (nextVisit.lat + ',' + nextVisit.lng) : (nextVisit.property_name + ', ' + nextVisit.address)) %>" target="_blank" rel="noopener">🧭 Navigate</a>
+        <a class="btn" href="https://www.google.com/maps/dir/?api=1&destination=<%= encodeURIComponent((nextVisit.lat != null && nextVisit.lng != null) ? (nextVisit.lat + ',' + nextVisit.lng) : (nextVisit.property_name + ', ' + nextVisit.address)) %>" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m15 9-2 6-6 2 2-6 6-2Z"/></svg> Navigate</a>
       </div>
     </div>
     <% } %>
@@ -89,7 +89,7 @@
     </details>
     <% } %>
   <% } else { %>
-    <h2>⏱ Ready to start</h2>
+    <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2"/><path d="M9 2h6"/></svg> Ready to start</h2>
     <p class="muted">Your GPS position is recorded when you start and finish
       (if location access is allowed).</p>
     <form method="post" action="/visits/<%= visit.id %>/timer/start" class="gps-form mobile-sticky-cta"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
@@ -103,13 +103,13 @@
       data-confirm="Mark this job as skipped? Use this only if the job genuinely can't be done today (e.g. site inaccessible, no one home). Your supervisor will see it as skipped.">
       <% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
       <input type="hidden" name="status" value="skipped">
-      <button class="btn btn-block skip-job-btn" type="submit">✕ Can't do this job</button>
+      <button class="btn btn-block skip-job-btn" type="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg> Can't do this job</button>
     </form>
   <% } %>
 
   <% if (locals.mapSvg && (visit.started_at || gpsPoints.length)) { %>
     <div class="map-snapshot">
-      <h3 class="map-snapshot-title">📍 Job location</h3>
+      <h3 class="map-snapshot-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s7-6.5 7-11.5A7 7 0 0 0 5 9.5C5 14.5 12 21 12 21Z"/><circle cx="12" cy="9.5" r="2.3"/></svg> Job location</h3>
       <%- mapSvg %>
       <p class="muted">From the GPS captured on this visit.<% if (locals.mapLink) { %>
         · <a href="<%= mapLink %>" target="_blank" rel="noopener">Open in map ↗</a><% } %></p>

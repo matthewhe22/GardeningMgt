@@ -123,7 +123,7 @@ router.post('/', asyncHandler(async (req, res) => {
     }
     throw e;
   }
-  await logActivity(req.user.id, 'invoice.create', 'invoice', invoiceId, `Created invoice ${number} for job #${visitId}`);
+  await logActivity(req.user.id, 'invoice.create', 'invoice', invoiceId, `Created invoice ${number} for visit #${visitId}`);
   res.redirect(`/invoices/${invoiceId}`);
 }));
 

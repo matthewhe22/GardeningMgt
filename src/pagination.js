@@ -8,10 +8,14 @@ function pageParam(req) {
 }
 
 /**
- * Page a full SELECT (no LIMIT/OFFSET/trailing semicolon) via `q`. The same
- * query is wrapped as a subquery to compute a matching total count, so
- * callers don't have to hand-maintain a second near-duplicate WHERE clause
- * just to know how many pages there are.
+ * Page a full SELECT (no LIMIT/OFFSET/trailing semicolon) via `q`. The page
+ * of rows and the matching total count come back from a single query — a
+ * `COUNT(*) OVER()` window function riding along on the same LIMIT/OFFSET
+ * pass — instead of running the whole query twice, so callers don't have to
+ * hand-maintain a second near-duplicate WHERE clause just to know how many
+ * pages there are. The window function doesn't reorder rows (no PARTITION/
+ * ORDER BY on the OVER() clause), so the inner SQL's own ORDER BY still
+ * determines the page's row order.
  *
  * @param {Function} q query-all-rows helper (from db.js)
  * @param {string} sql a full SELECT ... ORDER BY ..., no LIMIT/OFFSET
@@ -21,11 +25,24 @@ function pageParam(req) {
  */
 async function paginate(q, sql, args, page, pageSize = PAGE_SIZE) {
   const offset = (page - 1) * pageSize;
-  const [rows, countRows] = await Promise.all([
-    q(`${sql} LIMIT $${args.length + 1} OFFSET $${args.length + 2}`, [...args, pageSize, offset]),
-    q(`SELECT COUNT(*)::int AS c FROM (${sql}) paginate_count`, args),
-  ]);
-  const total = countRows[0].c;
+  const rows = await q(
+    `SELECT paginate_t.*, COUNT(*) OVER()::int AS __paginate_total
+     FROM (${sql}) paginate_t
+     LIMIT $${args.length + 1} OFFSET $${args.length + 2}`,
+    [...args, pageSize, offset]
+  );
+  let total;
+  if (rows.length) {
+    total = rows[0].__paginate_total;
+    for (const r of rows) delete r.__paginate_total;
+  } else {
+    // LIMIT/OFFSET produced no rows on this page (typically a stale/
+    // out-of-range ?page= past the last one) — COUNT(*) OVER() has nothing
+    // to ride along on in that case, so fall back to a plain count query
+    // just for this rare edge case.
+    const countRows = await q(`SELECT COUNT(*)::int AS c FROM (${sql}) paginate_count`, args);
+    total = countRows[0].c;
+  }
   return { rows, page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
 }
 

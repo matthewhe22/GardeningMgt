@@ -6,7 +6,9 @@
     <label>From <input type="date" name="from" value="<%= from %>"></label>
     <label>To <input type="date" name="to" value="<%= to %>"></label>
     <button class="btn">Run report</button>
-    <a class="btn" href="/reports/export.csv?from=<%= from %>&to=<%= to %>">⬇ Download CSV</a>
+    <a class="btn" href="/reports/export.csv?from=<%= from %>&to=<%= to %>"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 19.5h16"/></svg> Visits CSV</a>
+    <a class="btn" href="/reports/export-invoices.csv?from=<%= from %>&to=<%= to %>"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 19.5h16"/></svg> Invoices CSV</a>
+    <a class="btn" href="/reports/export-issues.csv?from=<%= from %>&to=<%= to %>"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 19.5h16"/></svg> Issues CSV</a>
   </form>
 </div>
 

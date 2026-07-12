@@ -100,13 +100,13 @@ async function archiveToOneDrive(visitId) {
       await uploadFile(`${dir}/${row.filename}`, bytes, row.mime, ctx);
     }
     await logActivity(null, 'report.archive', 'visit', visitId,
-      `Archived job #${visitId} report and ${data.photos.length} photo(s) to OneDrive`);
+      `Archived visit #${visitId} report and ${data.photos.length} photo(s) to OneDrive`);
   } catch (e) {
     // Detail goes to server logs only; the activity log gets a generic note so
     // Graph error bodies (which can echo tokens/ids) never persist in the DB.
-    console.error(`[onedrive] archive of job #${visitId} failed:`, e.message);
+    console.error(`[onedrive] archive of visit #${visitId} failed:`, e.message);
     await logActivity(null, 'report.archive_failed', 'visit', visitId,
-      `OneDrive archive failed for job #${visitId} (see server logs)`).catch(() => {});
+      `OneDrive archive failed for visit #${visitId} (see server logs)`).catch(() => {});
   }
 }
 

@@ -8,7 +8,10 @@
 
 <% if (locals.saved) { %><p class="alert alert-ok">Settings saved.</p><% } %>
 <% if (locals.test) { %>
-  <p class="alert <%= test.ok ? 'alert-ok' : 'alert-error' %>"><%= test.ok ? '✅' : '❌' %> <%= test.message %></p>
+  <p class="alert <%= test.ok ? 'alert-ok' : 'alert-error' %>">
+    <% if (test.ok) { %><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 5 5L19 7"/></svg>
+    <% } else { %><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+    <% } %> <%= test.message %></p>
 <% } %>
 
 <div class="card">

@@ -8,11 +8,11 @@
   <p class="alert alert-error">Some rows were skipped: <%= importErrors %></p>
 <% } %>
 <% if (locals.geocoded !== undefined && geocoded !== null) { %>
-  <p class="alert alert-ok">Found coordinates for <%= geocoded %> site(s)<% if (Number(geoFailed) > 0) { %> · <%= geoFailed %> address(es) couldn't be matched<% } %><% if (Number(remaining) > 0) { %> · <strong><%= remaining %> still missing</strong> — click “Find missing coordinates” again to continue<% } else { %> · all sites now have coordinates 🎉<% } %>.</p>
+  <p class="alert alert-ok">Found coordinates for <%= geocoded %> site(s)<% if (Number(geoFailed) > 0) { %> · <%= geoFailed %> address(es) couldn't be matched<% } %><% if (Number(remaining) > 0) { %> · <strong><%= remaining %> still missing</strong> — click “Find missing coordinates” again to continue<% } else { %> · all sites now have coordinates<% } %>.</p>
 <% } %>
 
 <details class="card">
-  <summary><strong>📥 Import sites from Excel / CSV</strong></summary>
+  <summary><strong><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 19.5h16"/></svg> Import sites from Excel / CSV</strong></summary>
   <form method="post" action="/admin/properties/import" enctype="multipart/form-data" class="filter-row"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
     <input type="file" name="file" accept=".xlsx,.csv" required>
     <button class="btn btn-primary">Upload &amp; import</button>
@@ -47,7 +47,7 @@
     <h2>Coordinates</h2>
     <% if (missingCoords > 0) { %>
     <form method="post" action="/admin/properties/geocode" class="inline"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
-      <button class="btn btn-primary">📍 Find missing coordinates</button>
+      <button class="btn btn-primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s7-6.5 7-11.5A7 7 0 0 0 5 9.5C5 14.5 12 21 12 21Z"/><circle cx="12" cy="9.5" r="2.3"/></svg> Find missing coordinates</button>
     </form>
     <% } %>
   </div>
@@ -56,7 +56,7 @@
       dropped to the end of any optimized route. Click the button to look them up from their
       addresses (processed in small batches — click again if any remain).</p>
   <% } else { %>
-    <p class="muted">✓ Every site has coordinates — route optimization can use them all.</p>
+    <p class="muted"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 5 5L19 7"/></svg> Every site has coordinates — route optimization can use them all.</p>
   <% } %>
 </div>
 
@@ -80,7 +80,7 @@
     <% if (p.lat != null && p.lng != null) { %>
       <span class="status status-completed"><%= p.lat.toFixed(4) %>, <%= p.lng.toFixed(4) %></span>
     <% } else { %>
-      <span class="status status-open">⚠ no coordinates</span>
+      <span class="status status-open"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg> no coordinates</span>
     <% } %>
   </summary>
   <form method="post" action="/admin/properties/<%= p.id %>/update" class="form-grid"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
@@ -94,7 +94,7 @@
     <label>Latitude <input type="number" name="lat" step="any" value="<%= p.lat != null ? p.lat : '' %>"></label>
     <label>Longitude <input type="number" name="lng" step="any" value="<%= p.lng != null ? p.lng : '' %>"></label>
     <label class="span2 confirm-line"><input type="checkbox" name="regeocode">
-      ↻ Re-detect coordinates from the address (overrides the lat/lng above)</label>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v5h-5"/></svg> Re-detect coordinates from the address (overrides the lat/lng above)</label>
     <label class="span2">Notes <input type="text" name="notes" value="<%= p.notes || '' %>"></label>
     <button class="btn btn-primary">Save changes</button>
   </form>

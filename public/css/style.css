@@ -845,9 +845,12 @@ select {
 /* Inline SVG icons used in place of emoji glyphs: buttons/chips get a small
    fixed size, icons sitting inline in text (headings, summaries) scale with
    the surrounding font via 1em. */
-.btn svg, .link-btn svg, .chip svg { width: 16px; height: 16px; flex: none; }
+.btn svg, .link-btn svg, .chip svg, .status svg { width: 14px; height: 14px; flex: none; }
 h2 svg, h3 svg, summary svg { width: 1em; height: 1em; vertical-align: -0.15em; flex: none; }
 .muted svg { width: 0.9em; height: 0.9em; vertical-align: -0.1em; }
+/* Fallback for every other inline icon spot (table cells, alerts, plain
+   paragraphs) not covered by a more specific rule above. */
+svg { width: 1em; height: 1em; vertical-align: -0.125em; }
 
 /* --------------------------------------------------------------------------
    Routes, comments, notifications, alerts, misc
@@ -1103,7 +1106,12 @@ body.anon {
   .job-row-meta { align-items: flex-start; flex-direction: row; gap: 10px; width: 100%; order: 4; padding-left: 38px; }
   .reorder { flex-direction: row; order: 5; width: 100%; padding-left: 38px; gap: 8px; }
   .reorder-btn { width: 46px; height: 38px; font-size: 0.85rem; }
-  .quick-chip { flex: 1; justify-content: center; min-height: 40px; font-size: 0.9rem; }
+  /* No flex:1/equal-width split here: with 3 chips sharing a narrow row,
+     forcing equal width squeezed "Today & overdue" until its text wrapped
+     onto a second line inside the pill, which (with border-radius: 999px)
+     rendered as a tall oval instead of a pill. Let each chip size to its own
+     text and wrap onto a second row via .chips' existing flex-wrap instead. */
+  .quick-chip { min-height: 40px; font-size: 0.9rem; white-space: nowrap; }
 }
 
 /* --------------------------------------------------------------------------

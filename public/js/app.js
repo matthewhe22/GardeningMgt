@@ -146,10 +146,14 @@ function netMsgEl(form) {
   return el;
 }
 
+const WARN_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg>';
+const CHECK_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 5 5L19 7"/></svg>';
+
 function showNetError(form) {
   const el = netMsgEl(form);
   el.hidden = false;
-  el.textContent = "⚠ Couldn't save — your text is kept. Try again when you have signal.";
+  // Fixed, static markup only — never interpolates user input, so innerHTML here carries no XSS risk.
+  el.innerHTML = WARN_ICON_SVG + " Couldn't save — your text is kept. Try again when you have signal.";
 }
 
 function hideNetError(form) {
@@ -330,8 +334,9 @@ document.querySelectorAll('form[data-upload]').forEach((form) => {
 
     if (status) {
       status.hidden = files.length === 0;
-      status.textContent = files.length
-        ? (files.length === 1 ? '✓ 1 photo ready to upload' : `✓ ${files.length} photos ready to upload`)
+      // Count is the only interpolated value (a number, not user text) — safe for innerHTML.
+      status.innerHTML = files.length
+        ? CHECK_ICON_SVG + (files.length === 1 ? ' 1 photo ready to upload' : ` ${files.length} photos ready to upload`)
         : '';
     }
 
@@ -355,7 +360,7 @@ document.querySelectorAll('form[data-upload]').forEach((form) => {
           // e.g. iPhone HEIC that the browser can't render — show a placeholder.
           const span = document.createElement('span');
           span.className = 'preview-file';
-          span.textContent = '🖼';
+          span.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h3l2-2.5h6L17 7h3a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Z"/><circle cx="12" cy="13" r="3.5"/></svg>';
           fig.appendChild(span);
         }
         const cap = document.createElement('figcaption');
@@ -414,7 +419,7 @@ function showNet() {
     if (!bar) {
       bar = document.createElement('div');
       bar.id = 'net-offline';
-      bar.textContent = '⚠ Offline — changes won’t save until you reconnect';
+      bar.innerHTML = WARN_ICON_SVG + ' Offline — changes won’t save until you reconnect';
       document.body.appendChild(bar);
     }
     // Sit above the bottom tab bar (and the iOS home indicator) by default —

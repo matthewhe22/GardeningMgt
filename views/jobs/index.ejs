@@ -70,7 +70,7 @@
       </td>
       <td data-label="Frequency"><span class="status status-scheduled"><%= j.frequency %></span></td>
       <td class="muted" data-label="Contract"><%= j.contract_years %> yr<br><%= j.start_date %> → <%= j.end_date %></td>
-      <td data-label="Gardener"><%= j.gardener_name || '⚠ Unassigned' %></td>
+      <td data-label="Gardener"><% if (j.gardener_name) { %><%= j.gardener_name %><% } else { %><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg> Unassigned<% } %></td>
       <td class="muted" data-label="Last completed"><%= j.last_completed_at ? fmtDateTime(j.last_completed_at) : 'never' %></td>
       <td data-label="Next visit">
         <% if (j.next_visit_date) { %>

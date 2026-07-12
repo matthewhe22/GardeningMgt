@@ -8,6 +8,7 @@
     "seed": "node scripts/seed.js",
     "geocode": "node scripts/geocode.js",
     "migrate:photos": "node scripts/migrate-photos-to-s3.js",
+    "backup": "node scripts/backup.js",
     "test": "node --test",
     "test:integration": "node --test --test-concurrency=1 \"test/integration/**/*.test.js\""
   },

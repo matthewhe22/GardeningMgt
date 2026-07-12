@@ -1,22 +1,22 @@
 <%- include('../partials/header') %>
 <h1><%= invoice.number %> <span class="status status-<%= invoice.status %>"><%= invoice.status %></span></h1>
 <% if (error === 'duplicate') { %>
-<p class="alert alert-error">Can't set that status: another live invoice already exists for this job. Void or update that one first.</p>
+<p class="alert alert-error">Can't set that status: another live invoice already exists for this visit. Void or update that one first.</p>
 <% } else if (error === 'hasitems') { %>
 <p class="alert alert-error">Can't delete this invoice: it already has line items. Void it instead.</p>
 <% } else if (error === 'notdraft') { %>
 <p class="alert alert-error">Only a draft invoice can be deleted. Void it instead.</p>
 <% } %>
 <p class="muted">
-  <%= invoice.property_name %>, <%= invoice.address %> · Job on <%= invoice.scheduled_date %>
-  (<a href="/visits/<%= invoice.visit_id %>">job #<%= invoice.visit_id %></a>)
+  <%= invoice.property_name %>, <%= invoice.address %> · Visit on <%= invoice.scheduled_date %>
+  (<a href="/visits/<%= invoice.visit_id %>">visit #<%= invoice.visit_id %></a>)
   <% if (invoice.gardener_name) { %> · Gardener: <%= invoice.gardener_name %><% } %>
   <% if (invoice.contact_email) { %> · Contact: <a href="mailto:<%= invoice.contact_email %>"><%= invoice.contact_email %></a><% } %>
-  <% if (invoice.due_at) { %> · Due <%= invoice.due_at %><% } %>
+  <% if (invoice.due_at) { %> · Due <%= fmtDate(invoice.due_at) %><% } %>
   <% if (invoice.issued_at) { %> · Issued <%= fmtDateTime(invoice.issued_at) %><% } %>
   <% if (invoice.paid_at) { %> · Paid <%= fmtDateTime(invoice.paid_at) %><% } %>
 </p>
-<p><a class="btn" href="/invoices/<%= invoice.id %>/pdf">⬇ Download PDF</a></p>
+<p><a class="btn" href="/invoices/<%= invoice.id %>/pdf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 19.5h16"/></svg> Download PDF</a></p>
 
 <div class="card">
   <table class="table table--stack">
@@ -30,7 +30,7 @@
       <td data-label="Remove">
         <% if (invoice.status === 'draft') { %>
         <form method="post" action="/invoices/<%= invoice.id %>/items/<%= it.id %>/delete" class="inline" data-confirm="Remove this line item?"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
-          <button class="link-btn">✕</button>
+          <button class="link-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
         </form>
         <% } %>
       </td>

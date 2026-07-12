@@ -11,7 +11,7 @@
   <form method="post" action="/admin/reminders/bulk" class="filter-row"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
     <label>Date <input type="date" name="date" value="<%= date %>"></label>
     <label><input type="checkbox" name="force"> Re-send even if already reminded</label>
-    <button class="btn btn-primary">📣 Send bulk reminders</button>
+    <button class="btn btn-primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10v4a1 1 0 0 0 1 1h2l7 4V5L6 9H4a1 1 0 0 0-1 1Z"/><path d="M16.5 8.5a4 4 0 0 1 0 7"/><path d="M19 6a7.5 7.5 0 0 1 0 12"/></svg> Send bulk reminders</button>
   </form>
 </div>
 
@@ -21,10 +21,10 @@
     <tr><th>Gardener</th><th>Property</th><th>Window</th><th>Reminder</th></tr>
     <% pending.forEach(v => { %>
     <tr>
-      <td><%= v.gardener_name || '⚠ Unassigned' %></td>
+      <td><% if (v.gardener_name) { %><%= v.gardener_name %><% } else { %><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg> Unassigned<% } %></td>
       <td><a href="/visits/<%= v.id %>"><%= v.property_name %></a></td>
       <td class="muted"><%= v.time_window || '—' %></td>
-      <td><%= v.reminder_sent_at ? '✅ ' + fmtDateTime(v.reminder_sent_at) : 'not sent' %></td>
+      <td><% if (v.reminder_sent_at) { %><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 5 5L19 7"/></svg> <%= fmtDateTime(v.reminder_sent_at) %><% } else { %>not sent<% } %></td>
     </tr>
     <% }) %>
   </table>
