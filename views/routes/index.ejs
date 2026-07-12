@@ -18,6 +18,16 @@
   </form>
 </div>
 
+<% if (locals.allCount != null) { %>
+  <% if (locals.allCount > 0) { %>
+    <p class="alert alert-ok">✓ Optimized <%= allCount %> gardener<%= allCount === 1 ? '' : 's' %>'
+      route<%= allCount === 1 ? '' : 's' %> for <%= date %> (<%= allVisits %> visit<%= allVisits === 1 ? '' : 's' %> reordered).
+      <% if (locals.optimized === 'straight') { %>Note: the road-distance service was unavailable for at least one
+        gardener, so that route was ordered by straight-line distance instead.<% } %></p>
+  <% } else { %>
+    <p class="alert alert-error">No gardeners had visits scheduled on <%= date %> — nothing to optimize.</p>
+  <% } %>
+<% } %>
 <% if (gardenerId) { %>
 <% if (locals.optimized === 'road') { %>
   <p class="alert alert-ok">✓ Route optimized by driving distance (road network).</p>
@@ -37,7 +47,8 @@
       <button class="btn">⚡ Optimize all gardeners for <%= date %></button>
     </form>
     <% } %>
-    <% if (totalKm > 0) { %><p>Current route length: <strong><%= totalKm.toFixed(1) %> km</strong> (straight-line)</p><% } %>
+    <% if (totalKm > 0) { %><p>Current route length: <strong>~<%= totalKm.toFixed(1) %> km straight-line</strong>
+      <span class="muted">(actual driving distance will be longer)</span></p><% } %>
   </div>
 
   <ol class="route-list">

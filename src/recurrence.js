@@ -85,7 +85,16 @@ function isValidDate(s) {
   return fmt(toUTC(s)) === s;
 }
 
+// A free-text "time window" (e.g. "08:00-10:00") displayed as-is on route
+// plans and job lists — validate the shape server-side too, since the
+// client-side `pattern` attribute on these inputs is only a UX nicety and
+// can't be trusted alone.
+const TIME_WINDOW_RE = /^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/;
+function isValidTimeWindow(s) {
+  return TIME_WINDOW_RE.test(s || '');
+}
+
 module.exports = {
   nextDate, occurrence, nextOccurrenceAfter, nextOccurrenceOnOrAfter, occurrencesBetween,
-  contractEnd, isValidDate, FREQUENCIES,
+  contractEnd, isValidDate, isValidTimeWindow, FREQUENCIES,
 };

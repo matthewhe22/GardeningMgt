@@ -850,6 +850,16 @@ select {
   font-size: 0.78rem;
   font-weight: 700;
 }
+/* A visit not yet placed on an optimized route has no stop number — a hollow
+   outline reads as "not routed" instead of a filled badge with a bare dash
+   glyph that's easy to mistake for a real stop number (e.g. "1"). */
+.route-no.unrouted {
+  min-width: 10px;
+  width: 10px;
+  height: 10px;
+  background: transparent;
+  border: 2px solid var(--border);
+}
 
 .route-list { padding-left: 0; margin: 16px 0 0; counter-reset: stop; list-style: none; }
 .route-list li {
@@ -1186,6 +1196,24 @@ body.anon {
    On desktop these stay as normal in-card buttons. */
 .cta-spacer { display: none; }
 .cta-note { margin: 0 0 8px; }
+
+/* Gardener's "can't do this job" escape hatch — deliberately muted so it never
+   visually competes with the primary Start/Complete action above it. */
+.skip-job-form { margin-top: 10px; }
+.skip-job-btn { color: var(--muted, #6b6b6b); border-color: var(--border); background: transparent; }
+.skip-job-btn:hover { color: #a93226; border-color: #a93226; background: rgba(169, 50, 38, 0.06); }
+
+/* Forward-looking handoff shown right after a job is completed. */
+.next-stop-card {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--green-100);
+  background: var(--green-50);
+  border-radius: 12px;
+}
+.next-stop-title { margin: 0 0 4px; font-size: 0.95rem; }
+.next-stop-card p { margin: 0 0 8px; }
+.next-stop-card .btn-row { margin: 0; }
 
 @media (max-width: 767px) {
   .mobile-sticky-cta {

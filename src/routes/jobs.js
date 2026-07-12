@@ -2,7 +2,7 @@ const express = require('express');
 const { q, q1, withTransaction } = require('../db');
 const { requireRole, isStaff } = require('../auth');
 const { logActivity } = require('../activity');
-const { contractEnd, occurrencesBetween, FREQUENCIES, isValidDate } = require('../recurrence');
+const { contractEnd, occurrencesBetween, FREQUENCIES, isValidDate, isValidTimeWindow } = require('../recurrence');
 const { today: businessToday } = require('../time');
 const { asyncHandler } = require('../asyncHandler');
 const { pageParam, paginate } = require('../pagination');
@@ -62,7 +62,8 @@ router.get('/', asyncHandler(async (req, res) => {
 // Create a recurring job and pre-generate its forward schedule (transactional).
 router.post('/', requireRole('supervisor'), asyncHandler(async (req, res) => {
   const { property_id, gardener_id, frequency, contract_years, start_date, time_window, gardening_fee } = req.body;
-  if (!Number(property_id) || !isValidDate(start_date) || !FREQUENCIES.includes(frequency)) {
+  if (!Number(property_id) || !isValidDate(start_date) || !FREQUENCIES.includes(frequency) ||
+    (time_window && !isValidTimeWindow(time_window))) {
     return res.redirect('/jobs?error=invalid');
   }
   // Only an admin can set the fee — a supervisor posting this field (or
@@ -115,6 +116,7 @@ router.post('/:id/update', requireRole('supervisor'), asyncHandler(async (req, r
   const job = await q1('SELECT * FROM jobs WHERE id = $1', [req.params.id]);
   if (!job) return res.redirect('/jobs');
   const { gardener_id, frequency, time_window, active, gardening_fee } = req.body;
+  if (time_window && !isValidTimeWindow(time_window)) return res.redirect('/jobs?error=invalid');
   let gardener = null;
   if (gardener_id) {
     const g = await q1("SELECT id FROM users WHERE id = $1 AND role = 'gardener' AND active", [Number(gardener_id)]);

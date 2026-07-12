@@ -4,6 +4,13 @@
   <p class="page-sub">Visits grouped by day, nearest first. Tap a job to start the timer, upload photos and complete it.</p>
 </div>
 
+<% if (locals.flash) { %>
+  <p class="alert alert-error">
+    <% if (flash === 'gardener') { %>The gardener must be an active gardener.
+    <% } else { %>Some details were invalid — please check and try again.<% } %>
+  </p>
+<% } %>
+
 <div class="card">
   <%
     // Build a /visits link that keeps the current gardener filter, with the
@@ -59,8 +66,9 @@
         <% gardeners.forEach(g => { %><option value="<%= g.id %>"><%= g.name %></option><% }) %>
       </select>
     </label>
-    <label>Date <input type="date" name="scheduled_date" required></label>
-    <label>Time window <input type="text" name="time_window" placeholder="08:00-10:00"></label>
+    <label>Date <input type="date" name="scheduled_date" value="<%= today %>" required></label>
+    <label>Time window <input type="text" name="time_window" placeholder="08:00-10:00"
+      pattern="([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d" title="Format HH:MM-HH:MM, e.g. 08:00-10:00"></label>
     <label class="span2">Notes <input type="text" name="notes"></label>
     <button class="btn btn-primary">Schedule visit</button>
   </form>

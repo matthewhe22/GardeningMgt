@@ -33,7 +33,7 @@
 </div>
 
 <!-- ===== 1. The job action: start / complete ===== -->
-<div class="card timer-card">
+<div class="card timer-card"<% if (visit.started_at && !visit.finished_at) { %> data-gps-ping-visit="<%= visit.id %>"<% } %>>
   <% if (visit.started_at && !visit.finished_at) { %>
     <h2>⏱ Job running</h2>
     <p>Started at <strong><%= fmtDateTime(visit.started_at) %></strong>.</p>
@@ -63,6 +63,17 @@
         <button class="btn">↻ Restart timer</button>
       </form>
     </div>
+    <% if (locals.nextVisit) { %>
+    <div class="next-stop-card">
+      <h3 class="next-stop-title">➡ Next stop</h3>
+      <p><strong><%= nextVisit.property_name %></strong> — <%= nextVisit.address %>
+        <% if (nextVisit.time_window) { %><span class="muted">(<%= nextVisit.time_window %>)</span><% } %></p>
+      <div class="btn-row">
+        <a class="btn btn-primary" href="/visits/<%= nextVisit.id %>">Open job</a>
+        <a class="btn" href="https://www.google.com/maps/dir/?api=1&destination=<%= encodeURIComponent((nextVisit.lat != null && nextVisit.lng != null) ? (nextVisit.lat + ',' + nextVisit.lng) : (nextVisit.property_name + ', ' + nextVisit.address)) %>" target="_blank" rel="noopener">🧭 Navigate</a>
+      </div>
+    </div>
+    <% } %>
     <% if (staff) { %>
     <details class="manage-duration">
       <summary class="muted">Correct recorded hours (staff)</summary>
@@ -82,6 +93,15 @@
     <form method="post" action="/visits/<%= visit.id %>/timer/start" class="gps-form mobile-sticky-cta"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
       <input type="hidden" name="lat"><input type="hidden" name="lng">
       <button class="btn btn-primary btn-block">▶ Start job</button>
+    </form>
+  <% } %>
+
+  <% if (!staff && !visit.finished_at) { %>
+    <form method="post" action="/visits/<%= visit.id %>/status" class="skip-job-form"
+      data-confirm="Mark this job as skipped? Use this only if the job genuinely can't be done today (e.g. site inaccessible, no one home). Your supervisor will see it as skipped.">
+      <% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+      <input type="hidden" name="status" value="skipped">
+      <button class="btn btn-block skip-job-btn" type="submit">✕ Can't do this job</button>
     </form>
   <% } %>
 
@@ -230,7 +250,8 @@
       </select>
     </label>
     <label>Date <input type="date" name="scheduled_date" value="<%= visit.scheduled_date %>" required></label>
-    <label>Time window <input type="text" name="time_window" value="<%= visit.time_window || '' %>"></label>
+    <label>Time window <input type="text" name="time_window" value="<%= visit.time_window || '' %>" placeholder="08:00-10:00"
+      pattern="([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d" title="Format HH:MM-HH:MM, e.g. 08:00-10:00"></label>
     <label>Status
       <select name="status">
         <% ['scheduled','in_progress','completed','skipped','cancelled'].forEach(s => { %>

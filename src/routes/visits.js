@@ -3,7 +3,7 @@ const { q, q1, pool, withTransaction } = require('../db');
 const { requireRole, isStaff } = require('../auth');
 const { logActivity } = require('../activity');
 const { upload, savePhoto } = require('../upload');
-const { nextOccurrenceAfter, isValidDate } = require('../recurrence');
+const { nextOccurrenceAfter, isValidDate, isValidTimeWindow } = require('../recurrence');
 const { loadReportData, renderReportHtml, renderReportPdf, archiveToOneDrive } = require('../report');
 const { asyncHandler } = require('../asyncHandler');
 const { assertCsrf } = require('../csrf');
@@ -127,6 +127,7 @@ router.get('/', asyncHandler(async (req, res) => {
     date, upto, showAll, status, from, to, search, gardenerId, today: todayStr,
     canReorder: !!gardenerId && !filtered, page, totalPages,
     total: totalDays, totalLabel: totalDays === 1 ? 'day' : 'days', totalVisits,
+    flash: req.query.error || null,
   });
 }));
 
@@ -136,18 +137,31 @@ router.get('/', asyncHandler(async (req, res) => {
 
 function loadDayOrder(gardenerId, date) {
   return q(`
-    SELECT v.id, p.lat, p.lng
+    SELECT v.id, v.status, v.route_order, p.lat, p.lng
     FROM visits v JOIN properties p ON p.id = v.property_id
     WHERE v.gardener_id = $1 AND v.scheduled_date = $2 AND v.status <> 'cancelled'
     ORDER BY COALESCE(v.route_order, 999), v.id`, [gardenerId, date]);
 }
 
-async function applyRouteOrder(orderedIds) {
+async function applyRouteOrder(orderedIds, startAt = 1) {
   await withTransaction(async (tx) => {
     for (let i = 0; i < orderedIds.length; i++) {
-      await tx.q('UPDATE visits SET route_order = $1 WHERE id = $2', [i + 1, orderedIds[i]]);
+      await tx.q('UPDATE visits SET route_order = $1 WHERE id = $2', [startAt + i, orderedIds[i]]);
     }
   });
+}
+
+// Stops already in progress or completed (or otherwise no longer plain
+// "scheduled") reflect real-world order and shouldn't be reshuffled by a
+// later re-optimize (e.g. re-running this after lunch) — only the
+// still-scheduled remainder of the day is up for reordering. Pinned stops
+// keep their existing route_order; the reorderable ones are numbered to
+// continue on right after them.
+function splitDayForReorder(day) {
+  const pinned = day.filter((v) => v.status !== 'scheduled');
+  const reorderable = day.filter((v) => v.status === 'scheduled');
+  const startAt = pinned.reduce((m, v) => (v.route_order != null ? Math.max(m, v.route_order) : m), 0) + 1;
+  return { pinned, reorderable, startAt };
 }
 
 function backToList(date, gardenerId) {
@@ -163,11 +177,14 @@ router.post('/optimize', asyncHandler(async (req, res) => {
   const gardenerId = isStaff(req.user) ? Number(req.body.gardener_id) : req.user.id;
   if (!gardenerId || !isValidDate(date)) return res.redirect('/visits');
   const day = await loadDayOrder(gardenerId, date);
-  if (day.length) {
-    const { orderedIds, lengthKm, mode } = await optimizeRouteRoad(day.map((v) => ({ id: v.id, lat: v.lat, lng: v.lng })));
-    await applyRouteOrder(orderedIds);
+  const { pinned, reorderable, startAt } = splitDayForReorder(day);
+  if (reorderable.length) {
+    const { orderedIds, lengthKm, mode } = await optimizeRouteRoad(reorderable.map((v) => ({ id: v.id, lat: v.lat, lng: v.lng })));
+    await applyRouteOrder(orderedIds, startAt);
     await logActivity(req.user.id, 'route.optimize', 'visit', null,
-      `Optimized route (${mode === 'road' ? 'road distance' : 'straight-line'}) for gardener #${gardenerId} on ${date}: ${orderedIds.length} stops, ~${lengthKm.toFixed(1)} km`);
+      `Optimized route (${mode === 'road' ? 'road distance' : 'straight-line'}) for gardener #${gardenerId} on ${date}: ` +
+      `${orderedIds.length} stops, ~${lengthKm.toFixed(1)} km` +
+      (pinned.length ? ` (${pinned.length} already in-progress/completed stop(s) left in place)` : ''));
   }
   res.redirect(backToList(date, gardenerId));
 }));
@@ -192,7 +209,8 @@ router.post('/:id/move', asyncHandler(async (req, res) => {
 // Create (staff only)
 router.post('/', requireRole('supervisor'), asyncHandler(async (req, res) => {
   const { property_id, gardener_id, scheduled_date, time_window, notes } = req.body;
-  if (!Number(property_id) || !isValidDate(scheduled_date)) {
+  if (!Number(property_id) || !isValidDate(scheduled_date) ||
+    (time_window && !isValidTimeWindow(time_window))) {
     return res.redirect('/visits?error=invalid');
   }
   // The assigned user must actually be an active gardener, not just any
@@ -221,7 +239,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
   }
   // All of these are independent of one another — fetch them concurrently so
   // the page costs one round-trip's worth of latency instead of eight.
-  const [tasks, photos, comments, commentPhotos, invoice, gardeners, gpsPoints, job] = await Promise.all([
+  const [tasks, photos, comments, commentPhotos, invoice, gardeners, gpsPoints, job, nextVisit] = await Promise.all([
     q('SELECT t.*, u.name AS assignee_name FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id WHERE t.visit_id = $1 ORDER BY t.id', [visit.id]),
     q('SELECT ph.id, ph.filename, ph.caption, ph.original_name, ph.created_at, ph.uploaded_by, u.name AS uploader_name FROM photos ph LEFT JOIN users u ON u.id = ph.uploaded_by WHERE ph.visit_id = $1 AND ph.visit_comment_id IS NULL ORDER BY ph.created_at DESC', [visit.id]),
     q('SELECT c.*, u.name AS author_name, u.role AS author_role FROM visit_comments c LEFT JOIN users u ON u.id = c.user_id WHERE c.visit_id = $1 ORDER BY c.created_at', [visit.id]),
@@ -231,6 +249,17 @@ router.get('/:id', asyncHandler(async (req, res) => {
     q('SELECT * FROM gps_points WHERE visit_id = $1 ORDER BY recorded_at', [visit.id]),
     visit.job_id
       ? q1('SELECT j.*, u.name AS default_gardener_name FROM jobs j LEFT JOIN users u ON u.id = j.gardener_id WHERE j.id = $1', [visit.job_id])
+      : Promise.resolve(null),
+    // Forward-looking handoff for a just-completed job: the same gardener's
+    // next still-scheduled stop that day, in route/time order. Only useful
+    // once this visit is done, and only when it's actually assigned to someone.
+    (visit.finished_at && visit.gardener_id)
+      ? q1(`
+        SELECT v.id, v.time_window, p.name AS property_name, p.address, p.lat, p.lng
+        FROM visits v JOIN properties p ON p.id = v.property_id
+        WHERE v.gardener_id = $1 AND v.scheduled_date = $2 AND v.status = 'scheduled' AND v.id <> $3
+        ORDER BY COALESCE(v.route_order, 999), v.time_window, v.id
+        LIMIT 1`, [visit.gardener_id, visit.scheduled_date, visit.id])
       : Promise.resolve(null),
   ]);
   const photosByComment = {};
@@ -242,7 +271,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
     (Date.now() - toDate(visit.started_at).getTime()) > LONG_RUNNING_MS);
   res.render('visits/show', {
     title: `Job #${visit.id} — ${visit.property_name}`,
-    visit, tasks, photos, comments, photosByComment, invoice, gardeners, gpsPoints, job,
+    visit, tasks, photos, comments, photosByComment, invoice, gardeners, gpsPoints, job, nextVisit,
     staff: isStaff(req.user), flash: req.query.error || null, warning: req.query.warning || null,
     longRunning,
   });
@@ -253,7 +282,8 @@ router.post('/:id/update', requireRole('supervisor'), asyncHandler(async (req, r
   const visit = await getVisit(req.params.id);
   if (!visit) return res.redirect('/visits');
   const { gardener_id, scheduled_date, time_window, status, notes, duration_minutes } = req.body;
-  if (!VISIT_STATUSES.includes(status) || !isValidDate(scheduled_date)) {
+  if (!VISIT_STATUSES.includes(status) || !isValidDate(scheduled_date) ||
+    (time_window && !isValidTimeWindow(time_window))) {
     return res.redirect(`/visits/${visit.id}?error=invalid`);
   }
   // Same active-gardener check as the create route above / jobs.js.

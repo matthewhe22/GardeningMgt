@@ -48,7 +48,8 @@
       </select>
     </label>
     <label>First visit date <input type="date" name="start_date" required></label>
-    <label>Time window <input type="text" name="time_window" placeholder="08:00-10:00"></label>
+    <label>Time window <input type="text" name="time_window" placeholder="08:00-10:00"
+      pattern="([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d" title="Format HH:MM-HH:MM, e.g. 08:00-10:00"></label>
     <% if (user.role === 'admin') { %>
       <label>Gardening fee <input type="number" name="gardening_fee" min="0" step="0.01" placeholder="e.g. 85.00"></label>
     <% } %>
@@ -106,7 +107,8 @@
                 <% }) %>
               </select>
             </label>
-            <label>Time window <input type="text" name="time_window" value="<%= j.time_window || '' %>"></label>
+            <label>Time window <input type="text" name="time_window" value="<%= j.time_window || '' %>" placeholder="08:00-10:00"
+              pattern="([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d" title="Format HH:MM-HH:MM, e.g. 08:00-10:00"></label>
             <% if (user.role === 'admin') { %>
               <label>Gardening fee <input type="number" name="gardening_fee" min="0" step="0.01"
                 value="<%= j.gardening_fee != null ? j.gardening_fee : '' %>" placeholder="e.g. 85.00"></label>

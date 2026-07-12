@@ -165,31 +165,54 @@ document.querySelectorAll('form').forEach((form) => {
   });
 });
 
+// --- Fresh GPS position at the moment of submit (mobile field use) ---------
+// Previously this only resolved navigator.geolocation.getCurrentPosition once
+// when a .gps-form's page first loaded — a gardener who opens the visit page
+// while still driving would record whatever (stale, or nothing if the fix
+// arrived late) position happened to be current at load time, not when they
+// actually tap Start/Complete. Re-requesting right before the real submit
+// fixes that, capped to a short timeout so a slow or denied prompt never
+// blocks the submission itself — it just goes out without coordinates.
+// Returns a promise the fetch-based submit flow below awaits before building
+// the request body.
+const GPS_SUBMIT_TIMEOUT_MS = 3500;
+function refreshGpsForSubmit(form) {
+  if (!form.classList.contains('gps-form') || !('geolocation' in navigator)) return Promise.resolve();
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => { if (!done) { done = true; resolve(); } };
+    const timer = setTimeout(finish, GPS_SUBMIT_TIMEOUT_MS);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        clearTimeout(timer);
+        const lat = form.querySelector('input[name="lat"]');
+        const lng = form.querySelector('input[name="lng"]');
+        if (lat) lat.value = pos.coords.latitude;
+        if (lng) lng.value = pos.coords.longitude;
+        finish();
+      },
+      () => { clearTimeout(timer); finish(); }, // denied/unavailable — submit without coordinates
+      { enableHighAccuracy: true, timeout: GPS_SUBMIT_TIMEOUT_MS, maximumAge: 0 }
+    );
+  });
+}
+
 // Intercept every POST form submit: save a draft, send it via fetch, and
 // react to the outcome ourselves instead of letting the browser navigate.
 document.querySelectorAll('form').forEach((form) => {
   if ((form.method || '').toLowerCase() !== 'post') return;
   form.addEventListener('submit', (e) => {
     if (e.defaultPrevented) return; // e.g. a data-confirm was cancelled
-    // Because this now waits on a network round-trip instead of navigating
-    // away immediately, the page stays interactive for that whole window —
+    // Because this now waits on a network round-trip (and, for .gps-form,
+    // a fresh geolocation read first) instead of navigating away
+    // immediately, the page stays interactive for that whole window —
     // long enough for two almost-simultaneous taps to both reach here before
     // the existing disable-the-button guard (a setTimeout(0), below) takes
     // effect. Close that gap with a synchronous re-entrancy flag...
     if (form.dataset.gmgtSubmitting === '1') return;
     form.dataset.gmgtSubmitting = '1';
     e.preventDefault();
-    saveDraft(form);
     hideNetError(form);
-
-    // Multipart forms (photo uploads) must stay multipart; everything else
-    // must stay application/x-www-form-urlencoded — a plain FormData body
-    // is ALWAYS sent as multipart by fetch regardless of the form's own
-    // enctype, which would silently break every non-file POST route (their
-    // body-parser only understands urlencoded bodies). URLSearchParams
-    // bodies are sent as urlencoded automatically.
-    const isMultipart = (form.enctype || '').toLowerCase().includes('multipart');
-    const body = isMultipart ? new FormData(form) : new URLSearchParams(new FormData(form));
 
     // ...and, belt-and-braces, disable the submit button immediately rather
     // than on the next tick (unlike the older double-submit guard below, a
@@ -199,68 +222,69 @@ document.querySelectorAll('form').forEach((form) => {
     const submitBtn = form.querySelector('button[type="submit"], button:not([type])');
     if (submitBtn) { submitBtn.disabled = true; submitBtn.dataset.busy = '1'; }
 
-    fetch(form.action, { method: 'POST', body, credentials: 'same-origin' })
-      .then((res) => {
-        clearDraft(form);
-        if (res.redirected) {
-          // Normal redirect-after-POST: follow it like a native submit would.
-          // fetch() strips the URL fragment from a followed redirect (unlike a
-          // real browser navigation), so a server redirect to e.g.
-          // "/visits/5#comments" arrives here as plain "/visits/5" — recover
-          // the anchor from the section the form itself lives in (this app's
-          // views consistently wrap each such form in <section id="...">) so
-          // the page still jumps back to the right card instead of the top.
-          const section = form.closest('[id]');
-          const hash = section ? '#' + section.id : '';
-          const target = new URL(res.url, location.href);
-          const samePage = target.origin + target.pathname + target.search ===
-            location.origin + location.pathname + location.search;
-          if (samePage) {
-            // Changing only the fragment on the SAME path is a same-document
-            // navigation in every browser — it would not reload, so the
-            // comment/photo/task that was just saved would never appear.
-            // Set the anchor first (harmless, no reload by itself) then force
-            // a real reload to pick up the new server-rendered state.
-            if (hash) window.location.hash = hash.slice(1);
-            window.location.reload();
-          } else {
-            window.location.href = target.href + hash;
-          }
-          return;
-        }
-        // The handler rendered directly (success or an in-page error like an
-        // invalid login or a 404) without redirecting — show exactly what it
-        // returned, the same way a native form submission would, instead of
-        // guessing a URL to navigate to.
-        return res.text().then((html) => {
-          document.open();
-          document.write(html);
-          document.close();
-        });
-      })
-      .catch(() => {
-        // A real connectivity failure: nothing reached the server. Keep the
-        // draft, re-enable the button so the user can retry, and say so
-        // in-page rather than showing the browser's own error page.
-        reEnableSubmit(form);
-        showNetError(form);
-      });
-  });
-});
+    refreshGpsForSubmit(form).then(() => {
+      // Save the draft only once the (possibly lat/lng-updated) fields are
+      // final — hidden lat/lng inputs aren't draftable fields themselves
+      // (see DRAFT_FIELD_TYPES) so this ordering doesn't change what's saved.
+      saveDraft(form);
 
-// --- GPS capture on start/finish timer forms (mobile field use) ---
-document.querySelectorAll('form.gps-form').forEach((form) => {
-  if (!('geolocation' in navigator)) return;
-  navigator.geolocation.getCurrentPosition(
-    (pos) => {
-      const lat = form.querySelector('input[name="lat"]');
-      const lng = form.querySelector('input[name="lng"]');
-      if (lat) lat.value = pos.coords.latitude;
-      if (lng) lng.value = pos.coords.longitude;
-    },
-    () => {}, // user denied or unavailable — submit without coordinates
-    { enableHighAccuracy: true, timeout: 8000 }
-  );
+      // Multipart forms (photo uploads) must stay multipart; everything else
+      // must stay application/x-www-form-urlencoded — a plain FormData body
+      // is ALWAYS sent as multipart by fetch regardless of the form's own
+      // enctype, which would silently break every non-file POST route (their
+      // body-parser only understands urlencoded bodies). URLSearchParams
+      // bodies are sent as urlencoded automatically.
+      const isMultipart = (form.enctype || '').toLowerCase().includes('multipart');
+      const body = isMultipart ? new FormData(form) : new URLSearchParams(new FormData(form));
+
+      fetch(form.action, { method: 'POST', body, credentials: 'same-origin' })
+        .then((res) => {
+          clearDraft(form);
+          if (res.redirected) {
+            // Normal redirect-after-POST: follow it like a native submit would.
+            // fetch() strips the URL fragment from a followed redirect (unlike a
+            // real browser navigation), so a server redirect to e.g.
+            // "/visits/5#comments" arrives here as plain "/visits/5" — recover
+            // the anchor from the section the form itself lives in (this app's
+            // views consistently wrap each such form in <section id="...">) so
+            // the page still jumps back to the right card instead of the top.
+            const section = form.closest('[id]');
+            const hash = section ? '#' + section.id : '';
+            const target = new URL(res.url, location.href);
+            const samePage = target.origin + target.pathname + target.search ===
+              location.origin + location.pathname + location.search;
+            if (samePage) {
+              // Changing only the fragment on the SAME path is a same-document
+              // navigation in every browser — it would not reload, so the
+              // comment/photo/task that was just saved would never appear.
+              // Set the anchor first (harmless, no reload by itself) then force
+              // a real reload to pick up the new server-rendered state.
+              if (hash) window.location.hash = hash.slice(1);
+              window.location.reload();
+            } else {
+              window.location.href = target.href + hash;
+            }
+            return;
+          }
+          // The handler rendered directly (success or an in-page error like an
+          // invalid login or a 404) without redirecting — show exactly what it
+          // returned, the same way a native form submission would, instead of
+          // guessing a URL to navigate to.
+          return res.text().then((html) => {
+            document.open();
+            document.write(html);
+            document.close();
+          });
+        })
+        .catch(() => {
+          // A real connectivity failure: nothing reached the server. Keep the
+          // draft, re-enable the button so the user can retry, and say so
+          // in-page rather than showing the browser's own error page.
+          reEnableSubmit(form);
+          showNetError(form);
+        });
+    });
+  });
 });
 
 // --- Photo capture preview: show thumbnails of what was taken/selected ---
@@ -327,6 +351,35 @@ if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
 }
 
+// --- Periodic GPS ping while a job is running (mobile field use) -----------
+// The server already exposes POST /visits/:id/gps for exactly this ("GPS ping
+// while working, called periodically by the mobile UI" — src/routes/visits.js)
+// but nothing ever called it: only the start/finish timer captured a position.
+// While this page shows a running job's timer card (visits/show.ejs stamps it
+// with data-gps-ping-visit), ping every few minutes so a long visit leaves a
+// trail rather than just two points. Kept simple: no background sync, this
+// only runs while the tab stays open on this page.
+(function () {
+  const GPS_PING_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+  const pingEl = document.querySelector('[data-gps-ping-visit]');
+  if (!pingEl || !('geolocation' in navigator)) return;
+  const visitId = pingEl.getAttribute('data-gps-ping-visit');
+  setInterval(() => {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const body = new URLSearchParams({
+          lat: String(pos.coords.latitude),
+          lng: String(pos.coords.longitude),
+          _csrf: window.CSRF_TOKEN,
+        });
+        fetch(`/visits/${visitId}/gps`, { method: 'POST', body, credentials: 'same-origin' }).catch(() => {});
+      },
+      () => {}, // no fix this cycle (denied/unavailable/timed out) — just try again next interval
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
+    );
+  }, GPS_PING_INTERVAL_MS);
+})();
+
 // Lightweight offline indicator so field users know saves won't go through.
 function showNet() {
   let bar = document.getElementById('net-offline');
@@ -335,15 +388,30 @@ function showNet() {
       bar = document.createElement('div');
       bar.id = 'net-offline';
       bar.textContent = '⚠ Offline — changes won’t save until you reconnect';
-      // Sit above the bottom tab bar (and the iOS home indicator) so it never
-      // hides navigation while a field user is offline.
-      bar.style.cssText = 'position:fixed;left:0;right:0;bottom:calc(62px + env(safe-area-inset-bottom,0px));z-index:39;background:#855600;color:#fff;text-align:center;padding:8px;font-size:0.85rem';
       document.body.appendChild(bar);
     }
+    // Sit above the bottom tab bar (and the iOS home indicator) by default —
+    // but if a page also has the fixed sticky primary action button (the
+    // Start/Complete job CTA on visits/show.ejs), that shares the exact same
+    // "above the tab bar" offset, and this bar's higher z-index would sit on
+    // top of it, covering the primary action while offline. Measure the CTA
+    // (if present) and sit above IT instead, recomputed on every toggle since
+    // the CTA's own height can change (e.g. the long-running-job warning).
+    const cta = document.querySelector('.mobile-sticky-cta');
+    const baseOffset = 'calc(62px + env(safe-area-inset-bottom, 0px))';
+    const bottom = cta
+      ? `calc(${Math.ceil(cta.getBoundingClientRect().height)}px + ${baseOffset})`
+      : baseOffset;
+    bar.style.cssText = `position:fixed;left:0;right:0;bottom:${bottom};z-index:39;background:#855600;color:#fff;text-align:center;padding:8px;font-size:0.85rem`;
   } else if (bar) {
     bar.remove();
   }
 }
 window.addEventListener('online', showNet);
 window.addEventListener('offline', showNet);
+// The sticky CTA's height can change after load (e.g. a photo-count note
+// wrapping to a second line) — recheck shortly after load too, not just on
+// network-state changes, so the offline bar (if already showing, e.g. after a
+// reload while offline) tracks it.
 showNet();
+window.addEventListener('resize', () => { if (!navigator.onLine) showNet(); });

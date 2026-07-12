@@ -48,7 +48,11 @@
     <div class="job-list">
       <% todayVisits.forEach(v => { %>
       <a class="job-row" href="/visits/<%= v.id %>">
-        <span class="route-no"><%= v.route_order || '–' %></span>
+        <% if (v.route_order) { %>
+          <span class="route-no"><%= v.route_order %></span>
+        <% } else { %>
+          <span class="route-no unrouted" title="Not yet on an optimized route" aria-hidden="true"></span>
+        <% } %>
         <span class="job-row-main">
           <strong><%= v.property_name %></strong>
           <span class="muted"><%= v.address %><% if (v.time_window) { %> · <%= v.time_window %><% } %></span>
