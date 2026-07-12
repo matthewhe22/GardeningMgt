@@ -124,6 +124,7 @@ CREATE TABLE IF NOT EXISTS properties (
   address       TEXT NOT NULL,
   contact_name  TEXT,
   contact_phone TEXT,
+  contact_email TEXT,
   lat           REAL,
   lng           REAL,
   lots          INTEGER,
@@ -390,7 +391,7 @@ function ensureCriticalSchema() {
 
 // Bump when SCHEMA or the migrations below change, so existing databases
 // re-run the DDL exactly once instead of on every serverless cold start.
-const SCHEMA_VERSION = '7';
+const SCHEMA_VERSION = '8';
 
 /**
  * Numeric, forward-only comparison of a stored schema_version against this
@@ -429,6 +430,8 @@ async function runMigrations() {
   await pool.query('ALTER TABLE invoice_items ALTER COLUMN quantity TYPE NUMERIC(10,2), ALTER COLUMN unit_price TYPE NUMERIC(10,2)');
   // Invoice due date, so the invoice PDF/print view can show it.
   await pool.query('ALTER TABLE invoices ADD COLUMN IF NOT EXISTS due_at DATE');
+  // Client billing contact, alongside the existing contact_name/contact_phone.
+  await pool.query('ALTER TABLE properties ADD COLUMN IF NOT EXISTS contact_email TEXT');
   const { c } = (await pool.query('SELECT COUNT(*)::int AS c FROM users')).rows[0];
   if (c === 0) {
     const bcrypt = require('bcryptjs');
