@@ -6,6 +6,14 @@
     or unavailable — failures are recorded in the activity log.</p>
 </div>
 
+<% if (locals.dbPoolerRisk) { %>
+  <p class="alert alert-error"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg>
+    Running on Vercel with a direct (non-pooler) database connection. Under real traffic this can
+    exhaust Postgres' connection slots and take the whole app down at once. Point
+    <code>DATABASE_URL</code> at your provider's connection pooler (e.g. Supabase's port 6543, or
+    Neon's "-pooler" host) — once switched, set <code>REQUIRE_DB_POOLER=1</code> to make this a
+    hard boot-time failure instead of a warning.</p>
+<% } %>
 <% if (locals.saved) { %><p class="alert alert-ok">Settings saved.</p><% } %>
 <% if (locals.test) { %>
   <p class="alert <%= test.ok ? 'alert-ok' : 'alert-error' %>">

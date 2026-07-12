@@ -82,7 +82,7 @@ The fail-closed guard only triggers when `VERCEL` or `NODE_ENV=production` is se
 24. **Naive TIMESTAMP columns assume a UTC DB session** — a non-UTC Postgres setting silently shifts every displayed time. **[code engineer]**
    **Fixed:** every pooled connection now runs `SET TIME ZONE 'UTC'` on connect (`src/db.js`), independent of the server's Postgres default.
 25. **Pool exhaustion risk with direct DATABASE_URL** on serverless (max 3/instance × many instances vs ~100 connections). **[code engineer]**
-   **Mitigated:** pool `max` tuned down further for the no-pooler Vercel case (3→2); the underlying architectural risk (many serverless instances × direct connections) remains — moving to a real connection pooler is still the complete fix.
+   **Fixed (detection/guardrail; the actual pooler is still an infra choice):** the app cannot install a connection pooler for you — that's a `DATABASE_URL` change (Supabase's port 6543, Neon's "-pooler" host, or a self-hosted PgBouncer) outside app code — but the risk was previously a single easy-to-miss `console.warn` at cold start. Now: exported `dbPoolerRisk` (`src/db.js`) is surfaced on `GET /health` (`{"warning":"db_pool_exhaustion_risk"}`) and as a visible admin-only banner on the Settings page (`views/admin/settings.ejs`), so it's discoverable without digging through cold-start logs. Added an opt-in hard guardrail: `REQUIRE_DB_POOLER=1` refuses to boot on Vercel with a non-pooler `DATABASE_URL` (same fail-closed pattern as `SESSION_SECRET`/`DATABASE_URL`-missing) — off by default so it can never surprise-break an existing deploy that hasn't switched its connection string yet. Also broadened pooler detection to catch a self-hosted PgBouncer's default port (`:6432`), previously only `:6543`/`"pooler."`/`?pgbouncer=true` were recognized. Verified via `test/dbPoolerRisk.test.js` (7 sub-tests spawning real subprocesses) covering local/non-Vercel exemption, direct-vs-pooler detection for Supabase/Neon/self-hosted PgBouncer URL shapes, and both the warn-only and `REQUIRE_DB_POOLER=1` fail-closed paths.
 26. **Observability is near-zero:** errors logged without method/URL/user/request-ID, no access logs, no health endpoint. **[full-stack]**
    **Fixed:** `GET /health` (pool `SELECT 1`), a `req.id`/`X-Request-Id` middleware, and error-handler logs now include method/URL/request-ID/user id (`src/server.js`).
 27. **Env failure modes fail late:** missing DATABASE_URL falls back to localhost:5433 and 500s on first request; non-local DB without `DB_SSL_CA` runs unverified TLS silently. **[code engineer, full-stack]**
@@ -128,22 +128,22 @@ The fail-closed guard only triggers when `VERCEL` or `NODE_ENV=production` is se
 
 ## Current status
 
-Every P0, P1, P2, and P3 finding above has been addressed except three genuinely
-open items, none of which block day-to-day use:
+Every P0, P1, P2, and P3 finding above has been addressed except two genuinely
+open items, neither of which blocks day-to-day use:
 
 1. **Invoicing has no email-send action** (P0-3) — the PDF is download-only,
    not delivered to the client automatically; invoicing also remains strictly
    one-per-visit (no monthly/consolidated multi-visit invoice).
-2. **Pool exhaustion risk is mitigated, not eliminated** (P2-25) — the pool
-   `max` was tuned down for the no-pooler Vercel case, but the underlying
-   architectural risk (many serverless instances × direct Postgres
-   connections) needs a real connection pooler (e.g. PgBouncer, or a
-   provider's built-in pooler) to fully close, which is an infrastructure
-   decision rather than an app-code change.
-3. **`scripts/backup.js`'s "no S3" path is documentation, not automation** —
+2. **`scripts/backup.js`'s "no S3" path is documentation, not automation** —
    without object storage configured, keeping full photo bytes backed up
    still requires manually running an occasional uncensored `pg_dump`
    alongside the routine metadata-only backup; there's no scheduled job for it.
+
+Pool exhaustion (P2-25) has as much of a code-side fix as code can provide:
+detection, a `GET /health` + admin-Settings-page warning, and an opt-in
+`REQUIRE_DB_POOLER=1` hard guardrail. Actually closing the gap still requires
+pointing `DATABASE_URL` at a real pooler — that's a `DATABASE_URL` value the
+deployer sets, not something the app can do on its own.
 
 Everything else — offline draft protection, password reset/user editing,
 CSRF server-side rendering, the migration/session-secret/DATABASE_URL

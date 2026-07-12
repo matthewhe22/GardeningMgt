@@ -117,7 +117,8 @@ Demo accounts (after seeding):
 
 | Env var | Default | Purpose |
 |---|---|---|
-| `DATABASE_URL` | local dev value | PostgreSQL connection string (required in production) |
+| `DATABASE_URL` | local dev value | PostgreSQL connection string (required in production). On Vercel, this should be your provider's **pooler** connection string (Supabase port 6543, Neon's "-pooler" host) — a direct connection means every serverless instance opens its own independent pool, which can exhaust Postgres' connection slots under real traffic and take the whole app down at once. A direct URL on Vercel logs a warning and shows on `GET /health` and the admin Settings page until switched |
+| `REQUIRE_DB_POOLER` | unset | Set to `1` once `DATABASE_URL` is confirmed to be a pooler URL, to turn the above from a warning into a hard boot-time failure — catches a future misconfiguration (e.g. an env var accidentally reverted) instead of silently reintroducing the risk |
 | `SESSION_SECRET` | none | Signs the session cookie. **Required** — the app refuses to start without it (or without `ALLOW_INSECURE_SECRET=1`), since a known secret lets anyone forge a signed admin session cookie |
 | `ALLOW_INSECURE_SECRET` | unset | Set to `1` to let the app boot with the built-in insecure default secret/key when `SESSION_SECRET`/`SETTINGS_KEY` aren't set. **Local dev only** — never set this in any deployment reachable over the network |
 | `CRON_SECRET` | unset | If set, `/cron/reminders` requires `Authorization: Bearer <secret>` |

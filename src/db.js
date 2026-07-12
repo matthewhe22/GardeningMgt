@@ -21,12 +21,31 @@ if (!process.env.DATABASE_URL && (process.env.VERCEL || process.env.NODE_ENV ===
 }
 const DB_URL = process.env.DATABASE_URL || 'postgresql://postgres@localhost:5433/gardeningmgt';
 const isLocal = /localhost|127\.0\.0\.1/.test(DB_URL);
-// A connection pooler (Supabase pgBouncer on :6543, or any "pooler" host) can
+// A connection pooler (Supabase's pgBouncer on :6543, Neon's "-pooler" host,
+// a self-hosted pgBouncer on its default :6432, or ?pgbouncer=true) can
 // absorb more connections safely, so we open a few more per instance to get
 // more out of the parallel (Promise.all) page queries. On a direct connection
 // we stay conservative to avoid exhausting Postgres across serverless
 // instances. DB_POOL_MAX overrides explicitly.
-const usingPooler = /pgbouncer=true|:6543\b|pooler\./i.test(DB_URL);
+const usingPooler = /pgbouncer=true|:6543\b|:6432\b|pooler\./i.test(DB_URL);
+// On Vercel, every serverless instance opens its own independent pool — a
+// direct (non-pooler) DATABASE_URL means N concurrent instances can each hold
+// up to `max` connections with no coordination between them, so a real
+// traffic spike can exhaust Postgres' connection slots and 500 the whole app
+// at once (see docs/REVIEW.md, P2-25). Exposed so /health and the admin
+// Settings page can surface this beyond just a cold-start log line.
+const dbPoolerRisk = !!(process.env.VERCEL && !usingPooler && !isLocal);
+// Opt-in hard guardrail once you've confirmed DATABASE_URL is a pooled
+// connection string: refuses to boot instead of just warning. Off by default
+// so flipping in this stricter check can never surprise-break an existing
+// deploy that hasn't switched yet.
+if (dbPoolerRisk && process.env.REQUIRE_DB_POOLER === '1') {
+  throw new Error(
+    'REQUIRE_DB_POOLER=1 is set, but DATABASE_URL does not look like a pooled connection string ' +
+    '(no :6543/:6432/"pooler."/?pgbouncer=true) — refusing to start on Vercel with a direct connection. ' +
+    'Point DATABASE_URL at your provider\'s pooler (e.g. Supabase port 6543, or Neon\'s "-pooler" host).'
+  );
+}
 const pool = new Pool({
   connectionString: DB_URL,
   // Hosted Postgres (e.g. the Supabase pooler) presents a certificate signed
@@ -68,13 +87,12 @@ if (!isLocal && !process.env.DB_SSL_CA) {
     'Set DB_SSL_CA to the provider\'s CA certificate (PEM) to verify the connection.');
 }
 
-// On serverless, many concurrent instances each holding direct connections can
-// exhaust Postgres' connection slots. Warn loudly if we're on Vercel without a
-// pooler so this scaling cliff shows up in the logs rather than as random 500s.
-if (process.env.VERCEL && !usingPooler && !isLocal) {
+if (dbPoolerRisk) {
   console.warn('[db] WARNING: running on Vercel with a direct (non-pooler) DATABASE_URL. ' +
-    'Use the connection pooler to avoid exhausting Postgres connections under serverless ' +
-    'concurrency (e.g. Supabase port 6543 with ?pgbouncer=true, or a host containing "pooler").');
+    'Under real concurrency this can exhaust Postgres\' connection slots and 500 the whole app at ' +
+    'once. Point DATABASE_URL at your provider\'s pooler (e.g. Supabase port 6543, or Neon\'s ' +
+    '"-pooler" host) — this also shows on GET /health and the admin Settings page until fixed. ' +
+    'Once switched, set REQUIRE_DB_POOLER=1 to make this a hard boot-time failure instead of a warning.');
 }
 
 /** All rows. */
@@ -527,4 +545,4 @@ function readySkipInit() {
   return skipInitPromise;
 }
 
-module.exports = { pool, q, q1, ready, withTransaction };
+module.exports = { pool, q, q1, ready, withTransaction, dbPoolerRisk };

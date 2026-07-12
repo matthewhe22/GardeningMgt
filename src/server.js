@@ -3,7 +3,7 @@ const crypto = require('crypto');
 const express = require('express');
 const cookieSession = require('cookie-session');
 
-const { q1, pool, ready } = require('./db');
+const { q1, pool, ready, dbPoolerRisk } = require('./db');
 const { currentUser, requireLogin, isStaff } = require('./auth');
 const { sendRemindersForDate, pruneOldRecords } = require('./reminders');
 const { asyncHandler } = require('./asyncHandler');
@@ -62,7 +62,7 @@ app.use((req, res, next) => {
 app.get('/health', asyncHandler(async (req, res) => {
   try {
     await pool.query('SELECT 1');
-    res.json({ ok: true });
+    res.json({ ok: true, ...(dbPoolerRisk ? { warning: 'db_pool_exhaustion_risk' } : {}) });
   } catch (e) {
     console.error(`[health] db check failed (request ${req.id}):`, e.message);
     res.status(503).json({ ok: false });
@@ -129,6 +129,7 @@ app.use(asyncHandler(async (req, res, next) => {
   // Timestamp formatters for views (render every time in the business timezone).
   res.locals.fmtDateTime = fmtDateTime;
   res.locals.fmtDate = fmtDate;
+  res.locals.dbPoolerRisk = dbPoolerRisk;
   // Build a link to another page of the current list, keeping every other
   // filter/search query param as-is — used by the shared pagination partial.
   // req.path is relative to the mounting router (e.g. "/" for GET /visits),
