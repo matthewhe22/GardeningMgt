@@ -172,6 +172,11 @@ body.authed main.container {
   font-size: 18px;
   flex: none;
 }
+/* An uploaded logo (admin Settings page) replaces the emoji mark above — drop
+   the placeholder tile background/border so the logo's own art shows cleanly
+   against the surrounding bar instead of sitting in a colored box. */
+.brand-mark.has-logo { background: none; border: none; }
+.brand-mark img { width: 100%; height: 100%; object-fit: contain; }
 
 .sidebar-nav { padding: 8px 12px; flex: 1; }
 
@@ -631,6 +636,17 @@ select {
   .form-grid { grid-template-columns: 1fr; }
   .form-grid .span2 { grid-column: span 1; }
 }
+
+.brand-preview { display: flex; align-items: center; gap: 10px; }
+.brand-preview-img {
+  max-width: 160px;
+  max-height: 48px;
+  border-radius: 6px;
+  background:
+    linear-gradient(45deg, #eee 25%, transparent 25%, transparent 75%, #eee 75%) 0 0/16px 16px,
+    linear-gradient(45deg, #eee 25%, #fff 25%, #fff 75%, #eee 75%) 8px 8px/16px 16px;
+}
+.brand-preview-favicon { max-width: 40px; max-height: 40px; }
 
 .filter-row {
   display: flex;

@@ -310,6 +310,8 @@ router.post('/users/:id/toggle', requireRole(), asyncHandler(async (req, res) =>
 const { getSettings, setSetting, INVOICE_SETTING_KEYS } = require('../settings');
 const { testConnection: testOneDrive, SETTING_KEYS: ONEDRIVE_SETTING_KEYS } = require('../onedrive');
 const { testConnection: testEmail, SETTING_KEYS: EMAIL_SETTING_KEYS } = require('../email');
+const { getBranding, saveLogo, saveFavicon, clearLogo, clearFavicon } = require('../branding');
+const { upload: imageUpload } = require('../upload');
 
 // Settings whose masked placeholder ('********') means "leave as-is, don't
 // overwrite the stored secret" — mirrors the onedrive_client_secret pattern.
@@ -317,10 +319,10 @@ const MASKED_SETTING_KEYS = new Set(['onedrive_client_secret', 'invoice_payment_
 const ALL_SETTING_KEYS = [...ONEDRIVE_SETTING_KEYS, ...INVOICE_SETTING_KEYS, ...EMAIL_SETTING_KEYS];
 
 router.get('/settings', requireRole(), asyncHandler(async (req, res) => {
-  const settings = await getSettings(ALL_SETTING_KEYS);
+  const [settings, branding] = await Promise.all([getSettings(ALL_SETTING_KEYS), getBranding()]);
   res.render('admin/settings', {
-    title: 'Settings', settings,
-    saved: req.query.saved, test: null, emailTest: null,
+    title: 'Settings', settings, branding,
+    saved: req.query.saved, brandingError: req.query.brandingError || null, test: null, emailTest: null,
   });
 }));
 
@@ -336,20 +338,46 @@ router.post('/settings', requireRole(), asyncHandler(async (req, res) => {
 }));
 
 router.post('/settings/test', requireRole(), asyncHandler(async (req, res) => {
-  const settings = await getSettings(ALL_SETTING_KEYS);
+  const [settings, branding] = await Promise.all([getSettings(ALL_SETTING_KEYS), getBranding()]);
   const test = await testOneDrive();
   // Log only pass/fail — the message can contain Graph error detail.
   await logActivity(req.user.id, 'settings.test', 'settings', null,
     `OneDrive connection test: ${test.ok ? 'OK' : 'failed'}`);
-  res.render('admin/settings', { title: 'Settings', settings, saved: null, test, emailTest: null });
+  res.render('admin/settings', { title: 'Settings', settings, branding, saved: null, brandingError: null, test, emailTest: null });
 }));
 
 router.post('/settings/test-email', requireRole(), asyncHandler(async (req, res) => {
-  const settings = await getSettings(ALL_SETTING_KEYS);
+  const [settings, branding] = await Promise.all([getSettings(ALL_SETTING_KEYS), getBranding()]);
   const emailTest = await testEmail();
   await logActivity(req.user.id, 'settings.test', 'settings', null,
     `Email (SMTP) connection test: ${emailTest.ok ? 'OK' : 'failed'}`);
-  res.render('admin/settings', { title: 'Settings', settings, saved: null, test: null, emailTest });
+  res.render('admin/settings', { title: 'Settings', settings, branding, saved: null, brandingError: null, test: null, emailTest });
 }));
+
+// Logo (shown in the sidebar/topbar) and favicon (browser tab icon) — each
+// re-encoded and resized server-side (src/branding.js) so any reasonable
+// image works regardless of its original size/format.
+router.post('/settings/branding', requireRole(),
+  imageUpload.fields([{ name: 'logo', maxCount: 1 }, { name: 'favicon', maxCount: 1 }]),
+  asyncHandler(async (req, res) => {
+    assertCsrf(req); // defence in depth — see csrf.js's comment on multipart bodies
+    const logoFile = req.files?.logo?.[0];
+    const faviconFile = req.files?.favicon?.[0];
+    let error = null;
+
+    if (req.body.remove_logo === 'on') await clearLogo();
+    else if (logoFile) {
+      const r = await saveLogo(logoFile);
+      if (!r.ok) error = r.message;
+    }
+    if (req.body.remove_favicon === 'on') await clearFavicon();
+    else if (faviconFile) {
+      const r = await saveFavicon(faviconFile);
+      if (!r.ok) error = error || r.message;
+    }
+
+    await logActivity(req.user.id, 'settings.update', 'settings', null, 'Updated branding (logo/favicon)');
+    res.redirect(error ? `/admin/settings?brandingError=${encodeURIComponent(error)}` : '/admin/settings?saved=1');
+  }));
 
 module.exports = router;

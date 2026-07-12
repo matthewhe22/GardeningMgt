@@ -10,6 +10,7 @@ const { asyncHandler } = require('./asyncHandler');
 const { csrfProtection } = require('./csrf');
 const storage = require('./storage');
 const { today: businessToday, fmtDateTime, fmtDate } = require('./time');
+const { getBranding } = require('./branding');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -117,15 +118,17 @@ app.use(cookieSession({
 }));
 
 // Ensure schema exists (no-op after first call), then resolve the user and
-// unread notification count for every request. Both lookups key off the
-// session's userId, so run them in parallel — one DB round trip of latency
-// instead of two on every page.
+// unread notification count for every request, alongside the admin-configurable
+// logo/favicon (shown in every page's <head> and nav, including the anonymous
+// login page) — run everything in parallel rather than as sequential round trips.
 app.use(asyncHandler(async (req, res, next) => {
   await ready();
-  const user = await currentUser(req);
+  const [user, branding] = await Promise.all([currentUser(req), getBranding()]);
   res.locals.user = user;
   res.locals.unreadCount = user ? user.unread_count : 0;
   res.locals.currentPath = req.path;
+  res.locals.brandLogo = branding.logo;
+  res.locals.brandFavicon = branding.favicon;
   // Timestamp formatters for views (render every time in the business timezone).
   res.locals.fmtDateTime = fmtDateTime;
   res.locals.fmtDate = fmtDate;

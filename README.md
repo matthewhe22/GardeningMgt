@@ -21,6 +21,7 @@ normal Node.js server.
 | Invoicing per job (pre-filled from the site's gardening fee), with per-site billing name/address/email and a GST-inclusive breakdown | **Invoices** (staff), **Properties** |
 | Automatic invoice creation + emailing (PDF attached) to the site's billing address when a job completes | Job page, **Properties**, **Settings** (email/SMTP) |
 | Reporting (visits, hours per gardener, issues, invoice totals) | **Reports** (staff) |
+| Custom logo (sidebar/top bar) and browser tab favicon, uploaded as an image and re-encoded server-side | **Settings** (admin) |
 
 ## Roles
 

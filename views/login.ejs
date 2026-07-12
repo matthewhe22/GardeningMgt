@@ -2,7 +2,7 @@
 <div class="auth-wrap">
   <div class="auth-card card">
     <div class="auth-brand">
-      <span class="brand-mark" aria-hidden="true">🌱</span>
+      <span class="brand-mark<%= locals.brandLogo ? ' has-logo' : '' %>" aria-hidden="true"><%- include('partials/brandmark') %></span>
       <h1>GardeningMgt</h1>
       <p class="muted">Sign in to manage your gardening jobs.</p>
     </div>

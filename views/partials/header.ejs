@@ -13,7 +13,13 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="GardeningMgt">
   <meta name="format-detection" content="telephone=no">
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <% if (locals.brandFavicon) { %>
+    <link rel="icon" type="image/png" href="<%= brandFavicon %>">
+    <link rel="apple-touch-icon" href="<%= brandFavicon %>">
+  <% } else { %>
+    <link rel="icon" type="image/svg+xml" href="/icon.svg">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <% } %>
   <% if (locals.csrfToken) { %><meta name="csrf-token" content="<%= csrfToken %>"><% } %>
 </head>
 <body class="<%= locals.user ? 'authed' : 'anon' %>">
@@ -43,7 +49,7 @@
   };
 %>
 <aside class="sidebar">
-  <a class="sidebar-brand" href="/"><span class="brand-mark">🌱</span> GardeningMgt</a>
+  <a class="sidebar-brand" href="/"><span class="brand-mark<%= locals.brandLogo ? ' has-logo' : '' %>"><%- include('./brandmark') %></span> GardeningMgt</a>
   <nav class="sidebar-nav" aria-label="Main navigation">
     <div class="nav-label">Workspace</div>
     <a href="/" class="nav-item<%= active('/') %>"><%- icons.home %> Dashboard</a>
@@ -80,7 +86,7 @@
 </aside>
 
 <header class="topbar">
-  <a class="topbar-brand" href="/"><span class="brand-mark">🌱</span> GardeningMgt</a>
+  <a class="topbar-brand" href="/"><span class="brand-mark<%= locals.brandLogo ? ' has-logo' : '' %>"><%- include('./brandmark') %></span> GardeningMgt</a>
   <label for="nav-toggle" class="topbar-action" role="button" aria-label="More menu"><%- icons.more %></label>
 </header>
 
