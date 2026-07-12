@@ -88,7 +88,8 @@ router.get('/properties', requireRole('supervisor'), asyncHandler(async (req, re
 }));
 
 router.post('/properties', requireRole('supervisor'), asyncHandler(async (req, res) => {
-  const { name, address, contact_name, contact_phone, contact_email, lat, lng, lots, notes } = req.body;
+  const { name, address, contact_name, contact_phone, contact_email, lat, lng, lots, notes,
+    billing_name, billing_address, billing_email } = req.body;
   if (!(name || '').trim() || !(address || '').trim()) return res.redirect('/admin/properties');
   // Coordinates power route optimization. If they weren't entered, derive them
   // from the address automatically (best-effort — a save never fails on this).
@@ -100,14 +101,16 @@ router.post('/properties', requireRole('supervisor'), asyncHandler(async (req, r
       if (geo) { latN = geo.lat; lngN = geo.lng; }
     } catch (e) { console.error('[geocode] create lookup failed:', e.message); }
   }
-  // NOTE: contact_email is written assuming a `contact_email TEXT` column
-  // exists on `properties` (matching contact_name/contact_phone exactly) —
-  // this INSERT will error until that column is added via a migration.
+  // gst_applicable defaults true (the common case); unchecked checkboxes
+  // aren't sent by the browser at all, so its absence means "off".
+  const gstApplicable = req.body.gst_applicable === 'on';
   const { id } = await q1(`
-    INSERT INTO properties (name, address, contact_name, contact_phone, contact_email, lat, lng, lots, notes)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+    INSERT INTO properties (name, address, contact_name, contact_phone, contact_email, lat, lng, lots, notes,
+      billing_name, billing_address, billing_email, gst_applicable)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
     [name.trim(), address.trim(), contact_name || null, contact_phone || null, contact_email || null,
-      latN, lngN, lots ? Math.round(Number(lots)) : null, notes || null]);
+      latN, lngN, lots ? Math.round(Number(lots)) : null, notes || null,
+      billing_name || null, billing_address || null, billing_email || null, gstApplicable]);
   await logActivity(req.user.id, 'property.create', 'property', id, `Added site "${name.trim()}"`);
   res.redirect('/admin/properties');
 }));
@@ -186,7 +189,8 @@ router.post('/properties/:id/update', requireRole('supervisor'), asyncHandler(as
   const id = Number(req.params.id);
   const existing = await q1('SELECT id FROM properties WHERE id = $1', [id]);
   if (!existing) return res.redirect('/admin/properties');
-  const { name, address, contact_name, contact_phone, contact_email, lat, lng, lots, notes } = req.body;
+  const { name, address, contact_name, contact_phone, contact_email, lat, lng, lots, notes,
+    billing_name, billing_address, billing_email } = req.body;
   if (!(name || '').trim() || !(address || '').trim()) return res.redirect('/admin/properties');
   const redetect = req.body.regeocode === 'on';
   let latN = (!redetect && lat) ? Number(lat) : null;
@@ -197,14 +201,15 @@ router.post('/properties/:id/update', requireRole('supervisor'), asyncHandler(as
       if (g) { latN = g.lat; lngN = g.lng; }
     } catch (e) { console.error('[geocode] update lookup failed:', e.message); }
   }
-  // NOTE: contact_email assumes a `contact_email TEXT` column on `properties`
-  // (matching contact_name/contact_phone exactly) — errors until that
-  // migration lands; see the create route above for the same note.
+  const gstApplicable = req.body.gst_applicable === 'on';
   await q(`
     UPDATE properties SET name = $1, address = $2, contact_name = $3, contact_phone = $4,
-      contact_email = $5, lat = $6, lng = $7, lots = $8, notes = $9 WHERE id = $10`,
+      contact_email = $5, lat = $6, lng = $7, lots = $8, notes = $9,
+      billing_name = $10, billing_address = $11, billing_email = $12, gst_applicable = $13
+    WHERE id = $14`,
     [name.trim(), address.trim(), contact_name || null, contact_phone || null, contact_email || null,
-      latN, lngN, lots ? Math.round(Number(lots)) : null, notes || null, id]);
+      latN, lngN, lots ? Math.round(Number(lots)) : null, notes || null,
+      billing_name || null, billing_address || null, billing_email || null, gstApplicable, id]);
   await logActivity(req.user.id, 'property.update', 'property', id, `Updated site "${name.trim()}"`);
   res.redirect('/admin/properties');
 }));
@@ -303,18 +308,19 @@ router.post('/users/:id/toggle', requireRole(), asyncHandler(async (req, res) =>
 // --- App settings (OneDrive archiving, invoice letterhead): admin only ---
 
 const { getSettings, setSetting, INVOICE_SETTING_KEYS } = require('../settings');
-const { testConnection, SETTING_KEYS } = require('../onedrive');
+const { testConnection: testOneDrive, SETTING_KEYS: ONEDRIVE_SETTING_KEYS } = require('../onedrive');
+const { testConnection: testEmail, SETTING_KEYS: EMAIL_SETTING_KEYS } = require('../email');
 
 // Settings whose masked placeholder ('********') means "leave as-is, don't
 // overwrite the stored secret" — mirrors the onedrive_client_secret pattern.
-const MASKED_SETTING_KEYS = new Set(['onedrive_client_secret', 'invoice_payment_details']);
-const ALL_SETTING_KEYS = [...SETTING_KEYS, ...INVOICE_SETTING_KEYS];
+const MASKED_SETTING_KEYS = new Set(['onedrive_client_secret', 'invoice_payment_details', 'smtp_password']);
+const ALL_SETTING_KEYS = [...ONEDRIVE_SETTING_KEYS, ...INVOICE_SETTING_KEYS, ...EMAIL_SETTING_KEYS];
 
 router.get('/settings', requireRole(), asyncHandler(async (req, res) => {
   const settings = await getSettings(ALL_SETTING_KEYS);
   res.render('admin/settings', {
     title: 'Settings', settings,
-    saved: req.query.saved, test: null,
+    saved: req.query.saved, test: null, emailTest: null,
   });
 }));
 
@@ -331,11 +337,19 @@ router.post('/settings', requireRole(), asyncHandler(async (req, res) => {
 
 router.post('/settings/test', requireRole(), asyncHandler(async (req, res) => {
   const settings = await getSettings(ALL_SETTING_KEYS);
-  const test = await testConnection();
+  const test = await testOneDrive();
   // Log only pass/fail — the message can contain Graph error detail.
   await logActivity(req.user.id, 'settings.test', 'settings', null,
     `OneDrive connection test: ${test.ok ? 'OK' : 'failed'}`);
-  res.render('admin/settings', { title: 'Settings', settings, saved: null, test });
+  res.render('admin/settings', { title: 'Settings', settings, saved: null, test, emailTest: null });
+}));
+
+router.post('/settings/test-email', requireRole(), asyncHandler(async (req, res) => {
+  const settings = await getSettings(ALL_SETTING_KEYS);
+  const emailTest = await testEmail();
+  await logActivity(req.user.id, 'settings.test', 'settings', null,
+    `Email (SMTP) connection test: ${emailTest.ok ? 'OK' : 'failed'}`);
+  res.render('admin/settings', { title: 'Settings', settings, saved: null, test: null, emailTest });
 }));
 
 module.exports = router;

@@ -36,6 +36,11 @@
     <label>Latitude <span class="muted">(optional)</span> <input type="number" name="lat" step="any" placeholder="auto from address"></label>
     <label>Longitude <span class="muted">(optional)</span> <input type="number" name="lng" step="any" placeholder="auto from address"></label>
     <label class="span2">Notes <input type="text" name="notes"></label>
+    <label class="span2"><strong>Invoice billing</strong> <span class="muted">(optional — falls back to the site name/address/contact email above)</span></label>
+    <label>Billing business name <input type="text" name="billing_name" placeholder="e.g. ABC Property Management"></label>
+    <label class="span2">Billing address <input type="text" name="billing_address" placeholder="if different from the site address above"></label>
+    <label>Billing email <input type="email" name="billing_email" placeholder="invoices are emailed here"></label>
+    <label><input type="checkbox" name="gst_applicable" checked> GST applicable</label>
     <button class="btn btn-primary">Add site</button>
   </form>
   <p class="muted">Coordinates enable route optimization. Leave latitude/longitude
@@ -77,6 +82,10 @@
     <% if (p.contact_email) { %>
       <span class="muted">· <a href="mailto:<%= p.contact_email %>"><%= p.contact_email %></a></span>
     <% } %>
+    <% if (p.billing_email) { %>
+      <span class="chip">Bill: <a href="mailto:<%= p.billing_email %>"><%= p.billing_email %></a></span>
+    <% } %>
+    <% if (!p.gst_applicable) { %><span class="muted">· no GST</span><% } %>
     <% if (p.lat != null && p.lng != null) { %>
       <span class="status status-completed"><%= p.lat.toFixed(4) %>, <%= p.lng.toFixed(4) %></span>
     <% } else { %>
@@ -96,6 +105,11 @@
     <label class="span2 confirm-line"><input type="checkbox" name="regeocode">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v5h-5"/></svg> Re-detect coordinates from the address (overrides the lat/lng above)</label>
     <label class="span2">Notes <input type="text" name="notes" value="<%= p.notes || '' %>"></label>
+    <label class="span2"><strong>Invoice billing</strong> <span class="muted">(optional — falls back to the site name/address/contact email above)</span></label>
+    <label>Billing business name <input type="text" name="billing_name" value="<%= p.billing_name || '' %>" placeholder="e.g. ABC Property Management"></label>
+    <label class="span2">Billing address <input type="text" name="billing_address" value="<%= p.billing_address || '' %>" placeholder="if different from the site address above"></label>
+    <label>Billing email <input type="email" name="billing_email" value="<%= p.billing_email || '' %>" placeholder="invoices are emailed here"></label>
+    <label><input type="checkbox" name="gst_applicable" <%= p.gst_applicable ? 'checked' : '' %>> GST applicable</label>
     <button class="btn btn-primary">Save changes</button>
   </form>
   <p class="muted">Changed the address? Tick “Re-detect” (or clear lat/lng) and save to look up new coordinates.</p>

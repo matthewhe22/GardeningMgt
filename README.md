@@ -18,7 +18,8 @@ normal Node.js server.
 | Job timer with GPS capture on start/finish | Job page (mobile-friendly) |
 | Job completion summary sent to supervisors & admins | 🔔 Notifications |
 | Per-job comments (supervisor ↔ gardener) | Job page |
-| Invoicing per job (pre-filled from the site's gardening fee, admin-only) | **Invoices** (staff) |
+| Invoicing per job (pre-filled from the site's gardening fee), with per-site billing name/address/email and a GST-inclusive breakdown | **Invoices** (staff), **Properties** |
+| Automatic invoice creation + emailing (PDF attached) to the site's billing address when a job completes | Job page, **Properties**, **Settings** (email/SMTP) |
 | Reporting (visits, hours per gardener, issues, invoice totals) | **Reports** (staff) |
 
 ## Roles

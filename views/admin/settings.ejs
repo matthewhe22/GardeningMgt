@@ -21,6 +21,12 @@
     <% } else { %><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
     <% } %> <%= test.message %></p>
 <% } %>
+<% if (locals.emailTest) { %>
+  <p class="alert <%= emailTest.ok ? 'alert-ok' : 'alert-error' %>">
+    <% if (emailTest.ok) { %><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 5 5L19 7"/></svg>
+    <% } else { %><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+    <% } %> <%= emailTest.message %></p>
+<% } %>
 
 <div class="card">
   <h2>OneDrive (Microsoft Graph)</h2>
@@ -48,7 +54,7 @@
   <h2>Invoice details</h2>
   <p class="muted">Shown on every invoice PDF: business letterhead, GST/ABN, and the default
     payment terms used to set each new invoice's due date.</p>
-  <form method="post" action="/admin/settings" class="form-grid">
+  <form method="post" action="/admin/settings" class="form-grid"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
     <label>Business name
       <input type="text" name="invoice_business_name" value="<%= settings.invoice_business_name || '' %>" placeholder="e.g. Green Thumb Gardening Pty Ltd"></label>
     <label class="span2">Business address
@@ -63,6 +69,34 @@
         value="<%= settings.invoice_payment_details ? '********' : '' %>"
         placeholder="<%= settings.invoice_payment_details ? 'saved — leave as is to keep' : 'e.g. BSB 000-000, Acc 000000000' %>"></label>
     <button class="btn btn-primary">Save settings</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Email (invoice sending)</h2>
+  <p class="muted">When a job completes, its invoice is emailed automatically to the site's
+    billing email (set per-site on the Properties page). Configure any SMTP account below —
+    a normal mailbox (Gmail, Office 365, etc. — usually needs an "app password") or an SMTP
+    relay from your host/provider both work.</p>
+  <form method="post" action="/admin/settings" class="form-grid"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+    <label>SMTP host
+      <input type="text" name="smtp_host" value="<%= settings.smtp_host || '' %>" placeholder="smtp.gmail.com"></label>
+    <label>Port
+      <input type="number" name="smtp_port" min="1" step="1" value="<%= settings.smtp_port || 587 %>"></label>
+    <label>Username
+      <input type="text" name="smtp_user" value="<%= settings.smtp_user || '' %>" placeholder="ops@yourcompany.com"></label>
+    <label>Password
+      <input type="password" name="smtp_password"
+        value="<%= settings.smtp_password ? '********' : '' %>"
+        placeholder="<%= settings.smtp_password ? 'saved — leave as is to keep' : 'app password or SMTP password' %>"></label>
+    <label>From email
+      <input type="email" name="smtp_from_email" value="<%= settings.smtp_from_email || '' %>" placeholder="invoices@yourcompany.com"></label>
+    <label>From name <span class="muted">(optional)</span>
+      <input type="text" name="smtp_from_name" value="<%= settings.smtp_from_name || '' %>" placeholder="e.g. Green Thumb Gardening"></label>
+    <button class="btn btn-primary">Save settings</button>
+  </form>
+  <form method="post" action="/admin/settings/test-email" style="margin-top:8px"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+    <button class="btn">Test connection</button>
   </form>
 </div>
 

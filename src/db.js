@@ -147,6 +147,14 @@ CREATE TABLE IF NOT EXISTS properties (
   lng           REAL,
   lots          INTEGER,
   notes         TEXT,
+  -- Invoice "bill to" details for this site, which can differ from the site
+  -- itself (e.g. a property manager or head office receives the invoice, not
+  -- the site's own on-the-ground contact_name/contact_email above). Any unset
+  -- field falls back to the site's own name/address/contact_email.
+  billing_name    TEXT,
+  billing_address TEXT,
+  billing_email   TEXT,
+  gst_applicable  BOOLEAN NOT NULL DEFAULT true,
   created_at    TIMESTAMP NOT NULL DEFAULT now()
 );
 
@@ -410,7 +418,7 @@ function ensureCriticalSchema() {
 
 // Bump when SCHEMA or the migrations below change, so existing databases
 // re-run the DDL exactly once instead of on every serverless cold start.
-const SCHEMA_VERSION = '9';
+const SCHEMA_VERSION = '10';
 
 /**
  * Numeric, forward-only comparison of a stored schema_version against this
@@ -456,6 +464,12 @@ async function runMigrations() {
   // existing rows and on any photo whose format sharp couldn't thumbnail —
   // the serve route (src/server.js) falls back to the original in both cases.
   await pool.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS thumb_data BYTEA');
+  // Per-site invoice "bill to" details, so a site whose billing contact
+  // differs from its on-the-ground contact still invoices the right party.
+  await pool.query('ALTER TABLE properties ADD COLUMN IF NOT EXISTS billing_name TEXT');
+  await pool.query('ALTER TABLE properties ADD COLUMN IF NOT EXISTS billing_address TEXT');
+  await pool.query('ALTER TABLE properties ADD COLUMN IF NOT EXISTS billing_email TEXT');
+  await pool.query("ALTER TABLE properties ADD COLUMN IF NOT EXISTS gst_applicable BOOLEAN NOT NULL DEFAULT true");
   const { c } = (await pool.query('SELECT COUNT(*)::int AS c FROM users')).rows[0];
   if (c === 0) {
     const bcrypt = require('bcryptjs');

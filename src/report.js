@@ -7,6 +7,12 @@ const storage = require('./storage');
 const { renderMapSnapshot, externalMapUrl } = require('./mapSnapshot');
 const { fmtDateTime, fmtDate } = require('./time');
 
+// Standard Australian GST rate. Per the site's gst_applicable flag, invoice
+// totals are treated as GST-inclusive (no extra charge is added) — this is
+// only used to compute the compliance breakdown shown on the invoice.
+const GST_RATE = 0.10;
+const gstComponent = (totalIncGst) => totalIncGst - totalIncGst / (1 + GST_RATE);
+
 /** Everything needed to render a job completion report. */
 async function loadReportData(visitId) {
   const visit = await q1(`
@@ -309,14 +315,19 @@ async function renderInvoicePdf(invoice, business = {}) {
     row('Due date', invoice.due_at ? fmtDate(invoice.due_at) : '-');
     row('Status', invoice.status);
 
-    // Bill to
+    // Bill to — the site's billing details (which can differ from the site's
+    // own on-the-ground contact) take priority, falling back to the site's
+    // own name/address/contact email when unset.
     doc.moveDown(0.4);
     doc.fillColor(GREEN).font('Helvetica-Bold').fontSize(12).text('Bill to');
     doc.moveDown(0.2);
-    row('Property', invoice.property_name);
-    row('Address', invoice.address);
-    if (invoice.contact_name) row('Contact', invoice.contact_name);
-    if (invoice.contact_email) row('Contact email', invoice.contact_email);
+    row('Name', invoice.billing_name || invoice.property_name);
+    row('Address', invoice.billing_address || invoice.address);
+    if (invoice.billing_email || invoice.contact_email) {
+      row('Email', invoice.billing_email || invoice.contact_email);
+    }
+    // Only worth a separate line when the bill-to name doesn't already say it.
+    if (invoice.billing_name) row('Site', invoice.property_name);
     row('Job date', invoice.scheduled_date);
 
     // Line items table
@@ -355,11 +366,36 @@ async function renderInvoicePdf(invoice, business = {}) {
     ensure(30);
     doc.moveTo(left, doc.y + 2).lineTo(left + cw, doc.y + 2).lineWidth(1).strokeColor('#e6e4dc').stroke();
     doc.moveDown(0.4);
+
+    // GST-inclusive breakdown: the site's gst_applicable flag means the fee
+    // amounts above already include GST (no extra charge is added) — this is
+    // purely a compliance breakdown of the same total, at the standard 10%
+    // Australian rate.
+    const totalsRow = (label, value) => {
+      ensure(16);
+      const y = doc.y;
+      doc.text(label, colPrice, y, { width: priceW, align: 'right' });
+      doc.text(value, colAmt, y, { width: amtW, align: 'right' });
+      doc.y = Math.max(doc.y, y) + 2;
+    };
+    if (invoice.gst_applicable) {
+      const gst = gstComponent(invoice.total);
+      doc.font('Helvetica').fontSize(9).fillColor(MUTED);
+      totalsRow('Subtotal', `$${(invoice.total - gst).toFixed(2)}`);
+      totalsRow('GST (10%)', `$${gst.toFixed(2)}`);
+      doc.moveDown(0.2);
+    }
     const totalY = doc.y;
     doc.font('Helvetica-Bold').fontSize(11).fillColor(INK);
     doc.text('Total', colPrice, totalY, { width: priceW, align: 'right' });
     doc.text(`$${invoice.total.toFixed(2)}`, colAmt, totalY, { width: amtW, align: 'right' });
-    doc.y = totalY + 24;
+    doc.y = totalY + 20;
+    if (invoice.gst_applicable) {
+      ensure(14);
+      doc.font('Helvetica').fontSize(8).fillColor(MUTED).text('Total price includes GST.', colDesc, doc.y, { width: cw });
+      doc.moveDown(0.3);
+    }
+    doc.y += 8;
 
     // Payment details / terms
     if (business.invoice_payment_terms_days || business.invoice_payment_details) {
@@ -381,4 +417,7 @@ async function renderInvoicePdf(invoice, business = {}) {
   });
 }
 
-module.exports = { loadReportData, renderReportHtml, renderReportPdf, renderInvoicePdf, archiveToOneDrive };
+module.exports = {
+  loadReportData, renderReportHtml, renderReportPdf, renderInvoicePdf, archiveToOneDrive,
+  GST_RATE, gstComponent,
+};

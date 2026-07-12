@@ -8,10 +8,14 @@
 <p class="alert alert-error">Only a draft invoice can be deleted. Void it instead.</p>
 <% } %>
 <p class="muted">
-  <%= invoice.property_name %>, <%= invoice.address %> · Visit on <%= invoice.scheduled_date %>
+  Bill to: <strong><%= invoice.billing_name || invoice.property_name %></strong>, <%= invoice.billing_address || invoice.address %>
+  <% if (invoice.billing_name) { %> · Site: <%= invoice.property_name %><% } %>
+  · Visit on <%= invoice.scheduled_date %>
   (<a href="/visits/<%= invoice.visit_id %>">visit #<%= invoice.visit_id %></a>)
   <% if (invoice.gardener_name) { %> · Gardener: <%= invoice.gardener_name %><% } %>
-  <% if (invoice.contact_email) { %> · Contact: <a href="mailto:<%= invoice.contact_email %>"><%= invoice.contact_email %></a><% } %>
+  <% if (invoice.billing_email || invoice.contact_email) { %>
+    · Email: <a href="mailto:<%= invoice.billing_email || invoice.contact_email %>"><%= invoice.billing_email || invoice.contact_email %></a>
+  <% } %>
   <% if (invoice.due_at) { %> · Due <%= fmtDate(invoice.due_at) %><% } %>
   <% if (invoice.issued_at) { %> · Issued <%= fmtDateTime(invoice.issued_at) %><% } %>
   <% if (invoice.paid_at) { %> · Paid <%= fmtDateTime(invoice.paid_at) %><% } %>
@@ -36,7 +40,12 @@
       </td>
     </tr>
     <% }) %>
-    <tr><td colspan="3" class="stack-main"><strong>Total</strong></td><td data-label="Total"><strong>$<%= invoice.total.toFixed(2) %></strong></td><td></td></tr>
+    <% if (invoice.gst_applicable) { %>
+    <% const gst = invoice.total - invoice.total / 1.10; %>
+    <tr><td colspan="3" class="stack-main muted">Subtotal</td><td data-label="Subtotal" class="muted">$<%= (invoice.total - gst).toFixed(2) %></td><td></td></tr>
+    <tr><td colspan="3" class="stack-main muted">GST (10%)</td><td data-label="GST" class="muted">$<%= gst.toFixed(2) %></td><td></td></tr>
+    <% } %>
+    <tr><td colspan="3" class="stack-main"><strong>Total<%= invoice.gst_applicable ? ' (inc. GST)' : '' %></strong></td><td data-label="Total"><strong>$<%= invoice.total.toFixed(2) %></strong></td><td></td></tr>
   </table>
 
   <% if (invoice.status === 'draft') { %>
@@ -61,7 +70,7 @@
 
   <% if (invoice.status === 'draft' && !invoice.items.length) { %>
   <form method="post" action="/invoices/<%= invoice.id %>/delete" class="inline" style="margin-top:8px"
-    data-confirm="Delete this empty draft invoice? This can't be undone.">
+    data-confirm="Delete this empty draft invoice? This can't be undone."><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
     <button class="link-btn">Delete this empty draft</button>
   </form>
   <% } %>

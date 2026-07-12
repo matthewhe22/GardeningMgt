@@ -28,7 +28,17 @@ There is no password reset anywhere — not admin-initiated, not self-service, n
 ### 3. Invoices cannot actually be sent to a client **[corroborated: Maria (blocking), UX]**
 No PDF, print view, or email for invoices (job *reports* have PDFs; invoices don't). The page lacks business name, client billing details, GST, due date, payment details. Invoicing is strictly one-per-visit (no monthly consolidated invoice — how most contracts bill); invoices can be created for visits that haven't happened, and an accidental empty draft can't be deleted.
 **Fix:** invoice PDF using the existing report.js infrastructure + business-details settings; guard the create button on incomplete visits; allow deleting empty drafts. Consider multi-visit invoices.
-**Mostly addressed:** the hardcoded, invisible `HOURLY_RATE`/$50 default has been removed. Each site's recurring job now has an admin-only **gardening fee** (`jobs.gardening_fee`, set/edited only when `req.user.role === 'admin'` — see `src/routes/jobs.js`, `views/jobs/index.ejs`); creating an invoice pulls that fee into a "Gardening fee" line item instead of computing labour × a fixed rate (`src/routes/invoices.js`). Supervisors can still create and manage invoices but never see or set the fee itself. A real invoice **PDF** now exists (`GET /invoices/:id/pdf`, `renderInvoicePdf` in `src/report.js`) carrying business name/address/ABN-GST, client contact/email, due date, and line items/total — this note previously said PDF and business/client/GST details were still open; they aren't, as of this session. Still genuinely open: no email-send action (PDF is download-only, no automated delivery to the client), and invoicing is still strictly one-per-visit (no monthly/consolidated multi-visit invoice).
+**Now fully addressed except multi-visit invoicing:** the hardcoded, invisible `HOURLY_RATE`/$50 default was removed earlier (each site's recurring job has an admin-only **gardening fee**, `jobs.gardening_fee`). This session added the remaining pieces:
+- **Per-site billing details:** `billing_name`/`billing_address`/`billing_email`/`gst_applicable` columns on `properties` (schema v10, `views/admin/properties.ejs`), independent of the site's own on-the-ground `contact_name`/`contact_email` — a property manager or head office can be billed instead of whoever's on-site. Falls back to the site's own name/address/contact email when unset.
+- **Invoice PDF** (`GET /invoices/:id/pdf`, `renderInvoicePdf` in `src/report.js`) now shows the site's billing name/address/email in "Bill to" (falling back to the site's own details), alongside business name/address/ABN-GST, due date, and line items/total.
+- **GST-inclusive breakdown:** when a site's `gst_applicable` is set, both the PDF and the invoice page show a Subtotal/GST(10%)/Total breakdown of the same total — per an explicit scoping decision, this is a compliance breakdown of an already-GST-inclusive fee, not an added charge.
+- **Automatic invoicing + emailing:** completing a visit (either the gardener's timer-stop flow or staff manually marking one complete) now auto-creates the invoice (when the job has a `gardening_fee` set) and emails it — as a PDF attachment — to the site's `billing_email`, entirely in the background so it never blocks the "complete job" tap. A site with no `billing_email` still gets its invoice auto-created (visible as a draft for the office to send manually) with a logged, non-fatal skip rather than a failure.
+- **Email delivery:** a new SMTP integration (`src/email.js`, settings-driven exactly like the OneDrive integration, with its own "Test connection" button on `/admin/settings`) — nodemailer-based, works with any mailbox or SMTP relay.
+- **Invoice-creation logic** was extracted into `src/invoicing.js`, shared by both the manual "Create invoice" button and the new auto-trigger, so there's one source of truth for the fee-pulling/duplicate-prevention logic.
+
+Verified fully end-to-end against a real Postgres instance, a live HTTP server, and a real local SMTP test server: completed a visit through the actual gardener flow (start timer → upload photo → complete job) and confirmed the invoice was auto-created, correctly marked "sent", and a real email — correct recipient/subject/body/PDF attachment — was received by the test SMTP server with the right GST-inclusive total; separately verified the no-`billing_email` case still creates a draft invoice with a clear "not emailed" activity-log entry instead of failing. Added `test/gst.test.js` (4 sub-tests) for the GST math.
+
+**Still genuinely open:** invoicing remains strictly one-per-visit — no monthly/consolidated multi-visit invoice.
 
 ### 4. CSRF tokens are injected only by client-side JS — without JS nobody can even log in **[full-stack: critical]**
 Zero `_csrf` hidden inputs are rendered server-side; `public/js/app.js` injects them after load. If that one script fails (flaky signal, mid-deploy, script error), every POST including login returns 403 "Session expired" (verified via curl).
@@ -128,12 +138,12 @@ The fail-closed guard only triggers when `VERCEL` or `NODE_ENV=production` is se
 
 ## Current status
 
-Every P0, P1, P2, and P3 finding above has been addressed except two genuinely
-open items, neither of which blocks day-to-day use:
+Every P0, P1, P2, and P3 finding above has been addressed except one genuinely
+open item, which doesn't block day-to-day use:
 
-1. **Invoicing has no email-send action** (P0-3) — the PDF is download-only,
-   not delivered to the client automatically; invoicing also remains strictly
-   one-per-visit (no monthly/consolidated multi-visit invoice).
+1. **Invoicing is still strictly one-per-visit** (P0-3) — no monthly/
+   consolidated multi-visit invoice. (Email-send automation, GST breakdown,
+   and per-site billing details are now done — see item 3 above.)
 2. **`scripts/backup.js`'s "no S3" path is documentation, not automation** —
    without object storage configured, keeping full photo bytes backed up
    still requires manually running an occasional uncensored `pg_dump`

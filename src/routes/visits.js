@@ -9,6 +9,7 @@ const { asyncHandler } = require('../asyncHandler');
 const { assertCsrf } = require('../csrf');
 const { optimizeRouteRoad } = require('../routeOptimizer');
 const { runInBackground } = require('../background');
+const { autoInvoiceAndEmail } = require('../invoicing');
 const { today, toDate } = require('../time');
 const { pageParam, paginate } = require('../pagination');
 
@@ -343,6 +344,9 @@ router.post('/:id/update', requireRole('supervisor'), asyncHandler(async (req, r
   if (['completed', 'skipped', 'cancelled'].includes(status) && status !== visit.status) {
     await advanceRecurringJob(visit, req.user.id, status === 'completed');
   }
+  // Staff completing a visit here (rather than via the gardener's timer) still
+  // triggers the same auto-invoice/email — same best-effort, non-blocking pattern.
+  if (completing) runInBackground(() => autoInvoiceAndEmail(visit.id), `auto-invoice #${visit.id}`);
   const busy = status === 'scheduled'
     ? await dayConflicts(gardener, scheduled_date, visit.id) : 0;
   res.redirect(`/visits/${visit.id}${busy ? '?warning=busy' : ''}`);
@@ -491,6 +495,9 @@ router.post('/:id/timer/stop', asyncHandler(async (req, res) => {
   // gardener's "complete job" tap returns immediately instead of waiting on the
   // report render + sequential Graph uploads.
   runInBackground(() => archiveToOneDrive(visit.id), `onedrive archive #${visit.id}`);
+  // Auto-invoice (if the site's job has a gardening fee set) and email it to
+  // the site's billing address — same best-effort, non-blocking pattern.
+  runInBackground(() => autoInvoiceAndEmail(visit.id), `auto-invoice #${visit.id}`);
   res.redirect(`/visits/${visit.id}`);
 }));
 

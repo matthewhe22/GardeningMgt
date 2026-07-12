@@ -1,60 +1,14 @@
 const express = require('express');
-const { q, q1, withTransaction } = require('../db');
+const { q, q1 } = require('../db');
 const { requireRole } = require('../auth');
 const { logActivity } = require('../activity');
 const { asyncHandler } = require('../asyncHandler');
-const { year: businessYear, today: businessToday } = require('../time');
 const { pageParam, paginate } = require('../pagination');
-const { getSetting, getSettings, INVOICE_SETTING_KEYS } = require('../settings');
+const { getSettings, INVOICE_SETTING_KEYS } = require('../settings');
 const { renderInvoicePdf } = require('../report');
+const { createInvoiceForVisit, invoiceWithItems } = require('../invoicing');
 
 const router = express.Router();
-
-// Add `days` calendar days to a 'YYYY-MM-DD' date string, without any
-// timezone drift (plain UTC-midnight arithmetic on the calendar date).
-function addDays(dateStr, days) {
-  const d = new Date(`${dateStr}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
-async function nextInvoiceNumber() {
-  // Per-year counter, atomically incremented-and-read in one statement — the
-  // same INSERT ... ON CONFLICT ... RETURNING pattern already trusted
-  // elsewhere in this codebase for race-safe counters (e.g. the unique
-  // partial indexes on jobs/invoices), so concurrent creates never collide on
-  // the UNIQUE number. Replaces the old single global invoice_seq sequence,
-  // which never actually reset per year despite its comment claiming
-  // otherwise — nextval() just kept counting across year boundaries.
-  // invoice_seq itself is kept in the schema (unused for new numbers) so
-  // already-issued numbers stay valid; see db.js.
-  const year = businessYear();
-  const { next_n } = await q1(
-    `INSERT INTO invoice_number_counters (year) VALUES ($1)
-     ON CONFLICT (year) DO UPDATE SET next_n = invoice_number_counters.next_n + 1
-     RETURNING next_n`,
-    [year]);
-  return `INV-${year}-${String(next_n).padStart(4, '0')}`;
-}
-
-async function invoiceWithItems(id) {
-  // Header and line items are both keyed by the same id — fetch concurrently.
-  const [invoice, items] = await Promise.all([
-    q1(`
-    SELECT inv.*, v.scheduled_date, v.duration_minutes, p.name AS property_name, p.address,
-           p.contact_name, p.contact_email, u.name AS gardener_name
-    FROM invoices inv
-    JOIN visits v ON v.id = inv.visit_id
-    JOIN properties p ON p.id = v.property_id
-    LEFT JOIN users u ON u.id = v.gardener_id
-    WHERE inv.id = $1`, [id]),
-    q('SELECT * FROM invoice_items WHERE invoice_id = $1', [id]),
-  ]);
-  if (!invoice) return null;
-  invoice.items = items;
-  invoice.total = invoice.items.reduce((s, it) => s + it.quantity * it.unit_price, 0);
-  return invoice;
-}
 
 // Invoicing is staff-only.
 router.use(requireRole('supervisor'));
@@ -85,46 +39,10 @@ router.get('/', asyncHandler(async (req, res) => {
 router.post('/', asyncHandler(async (req, res) => {
   const visitId = Number(req.body.visit_id);
   if (!Number.isInteger(visitId)) return res.redirect('/invoices');
-  const visit = await q1(
-    `SELECT v.*, j.gardening_fee FROM visits v LEFT JOIN jobs j ON j.id = v.job_id WHERE v.id = $1`,
-    [visitId]);
-  if (!visit) return res.redirect('/invoices');
-  // A job that hasn't happened yet has nothing to bill — block invoicing
-  // until the visit is actually completed.
-  if (visit.status !== 'completed') {
-    return res.redirect('/invoices?error=notcompleted');
-  }
-  // Don't create a second live invoice for the same job (voided ones don't count).
-  // This check-then-insert still has a race window, closed below by the
-  // uq_invoices_visit_open unique index + a 23505 catch.
-  const existing = await q1("SELECT id FROM invoices WHERE visit_id = $1 AND status <> 'void' LIMIT 1", [visitId]);
-  if (existing) return res.redirect(`/invoices/${existing.id}`);
-  const number = await nextInvoiceNumber();
-  const termsDays = Number(await getSetting('invoice_payment_terms_days')) || 14;
-  const dueAt = addDays(businessToday(), termsDays);
-  let invoiceId;
-  try {
-    // Invoice + its fee line are one unit: a failure partway through must
-    // not leave a live invoice with zero line items.
-    invoiceId = await withTransaction(async (tx) => {
-      const { id } = await tx.q1(
-        'INSERT INTO invoices (visit_id, number, created_by, due_at) VALUES ($1, $2, $3, $4) RETURNING id',
-        [visitId, number, req.user.id, dueAt]);
-      if (visit.gardening_fee != null) {
-        await tx.q('INSERT INTO invoice_items (invoice_id, description, quantity, unit_price) VALUES ($1, $2, $3, $4)',
-          [id, 'Gardening fee', 1, visit.gardening_fee]);
-      }
-      return id;
-    });
-  } catch (e) {
-    if (e.code === '23505') { // unique_violation: lost the race to a concurrent create
-      const winner = await q1("SELECT id FROM invoices WHERE visit_id = $1 AND status <> 'void' LIMIT 1", [visitId]);
-      if (winner) return res.redirect(`/invoices/${winner.id}`);
-    }
-    throw e;
-  }
-  await logActivity(req.user.id, 'invoice.create', 'invoice', invoiceId, `Created invoice ${number} for visit #${visitId}`);
-  res.redirect(`/invoices/${invoiceId}`);
+  const result = await createInvoiceForVisit(visitId, { userId: req.user.id });
+  if (result.status === 'not_found') return res.redirect('/invoices');
+  if (result.status === 'not_completed') return res.redirect('/invoices?error=notcompleted');
+  res.redirect(`/invoices/${result.invoiceId}`);
 }));
 
 router.get('/:id', asyncHandler(async (req, res) => {
