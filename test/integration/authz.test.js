@@ -190,4 +190,17 @@ test('authorization / IDOR gates', { skip: !TEST_DB && reason }, async (t) => {
     const res = await agentB.get('/admin/properties');
     assert.strictEqual(res.status, 403);
   });
+
+  await t.test("a gardener CANNOT send a completed job's report to owners, even on their own visit (supervisor-only)", async () => {
+    const completedVisit = await q1(`
+      INSERT INTO visits (property_id, gardener_id, scheduled_date, status, started_at, finished_at, duration_minutes)
+      VALUES ($1, $2, CURRENT_DATE, 'completed', now() - interval '1 hour', now(), 60) RETURNING id`,
+      [property.id, gardenerAId]);
+    // agentA is the gardener assigned to this visit, so this isn't an IDOR
+    // case — it's checking the role gate itself: even the owning gardener
+    // must not be able to trigger owner-facing emails on a job they did.
+    const res = await agentA.post(`/visits/${completedVisit.id}/report/send-to-owners`).type('form')
+      .send({ confirm_report: 'on', _csrf: csrfA });
+    assert.strictEqual(res.status, 403);
+  });
 });
