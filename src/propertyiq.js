@@ -119,7 +119,8 @@ function extractStreetNumbers(text) {
 }
 
 /**
- * Score how well a PIQ building matches a free-text site address. Returns 0
+ * Score how well a PIQ building matches a free-text site address, and flag a
+ * high-confidence ("strong") match. Returns { score, strong }; score is 0
  * (no match) unless ALL of these hard gates pass:
  *   1. street numbers agree (when both sides have one) — a range like "10-12"
  *      matches "10", "12" or "10-12";
@@ -128,9 +129,12 @@ function extractStreetNumbers(text) {
  *      match "Park Avenue");
  *   3. postcodes don't conflict.
  * Among candidates that pass, a higher score (shared street-name + suburb +
- * postcode tokens) is a better match. Pure function — unit-tested directly.
+ * postcode tokens) is a better match. `strong` is set when street number, the
+ * full street name, the suburb AND the postcode all agree — a complete-address
+ * match that nothing else can beat, so findBuildingByAddress can stop paging.
+ * Pure function — unit-tested directly.
  */
-function matchAddress(targetAddress, b) {
+function matchQuality(targetAddress, b) {
   const target = normalize(targetAddress);
   const targetTokens = new Set(target.split(' ').filter(Boolean));
   const targetNums = extractStreetNumbers(targetAddress);
@@ -139,38 +143,52 @@ function matchAddress(targetAddress, b) {
   // Gate 1: street number must agree. If the building has a number but the
   // site address has none, that's too weak to trust — reject.
   if (candNums.size) {
-    if (!targetNums.size) return 0;
+    if (!targetNums.size) return { score: 0, strong: false };
     let overlap = false;
     for (const n of candNums) if (targetNums.has(n)) overlap = true;
-    if (!overlap) return 0;
+    if (!overlap) return { score: 0, strong: false };
   }
 
   // Gate 2: every identifying street-name token must be present in the target.
   const nameTokens = significantTokens(b.streetName);
-  if (!nameTokens.length) return 0;
-  for (const t of nameTokens) if (!targetTokens.has(t)) return 0;
+  if (!nameTokens.length) return { score: 0, strong: false };
+  for (const t of nameTokens) if (!targetTokens.has(t)) return { score: 0, strong: false };
 
   // Gate 3: reject on a postcode conflict.
   const targetPostcode = (target.match(/\b\d{4}\b/g) || []).pop();
-  if (b.postcode && targetPostcode && normalize(b.postcode) !== targetPostcode) return 0;
+  if (b.postcode && targetPostcode && normalize(b.postcode) !== targetPostcode) return { score: 0, strong: false };
 
   // Passed. Score by shared identifying tokens so the best of several valid
   // candidates wins (suburb / postcode agreement breaks ties).
+  const suburbTokens = significantTokens(b.suburb);
   const candTokens = new Set([
     ...nameTokens,
-    ...significantTokens(b.suburb),
+    ...suburbTokens,
     ...(b.postcode ? [normalize(b.postcode)] : []),
   ]);
   let score = 0;
   for (const t of candTokens) if (targetTokens.has(t)) score++;
-  return score;
+
+  // Strong: number + full street name (both already ensured above) plus the
+  // suburb and a matching postcode — a fully-specified address on both sides.
+  const suburbMatches = suburbTokens.length > 0 && suburbTokens.every((t) => targetTokens.has(t));
+  const postcodeMatches = !!(b.postcode && targetPostcode && normalize(b.postcode) === targetPostcode);
+  const strong = score > 0 && candNums.size > 0 && suburbMatches && postcodeMatches;
+
+  return { score, strong };
+}
+
+/** Numeric match score for a building (0 = no match). See matchQuality(). */
+function matchAddress(targetAddress, b) {
+  return matchQuality(targetAddress, b).score;
 }
 
 /**
  * Find the PIQ building whose address best matches the given site address.
  * Paginates through /api/buildings (no address search param on this API) and
- * scores each candidate with matchAddress(). Returns the raw PIQ Building
- * object, or null if nothing clears the matcher's hard gates.
+ * scores each candidate with matchQuality(). Returns as soon as a strong
+ * (complete-address) match is found, otherwise the best partial match once the
+ * list is exhausted, or null if nothing clears the matcher's hard gates.
  */
 async function findBuildingByAddress(address) {
   const cfg = await getConfig();
@@ -186,7 +204,10 @@ async function findBuildingByAddress(address) {
     const buildings = resp.data || [];
     if (!buildings.length) break;
     for (const b of buildings) {
-      const score = matchAddress(address, b);
+      const { score, strong } = matchQuality(address, b);
+      // A complete-address match can't be beaten — stop scanning immediately
+      // instead of paging through the rest of the (up to 10,000) buildings.
+      if (strong) return b;
       if (score > bestScore) { bestScore = score; best = b; }
     }
     if (!resp.links || !resp.links.next) break;
@@ -276,5 +297,5 @@ module.exports = {
   SETTING_KEYS, getConfig, findBuildingByAddress, getBuilding, getBuildingLots,
   getOwnerEmailsForBuilding, resolveOwnersForProperty, buildingAddress, testConnection,
   // Exported for unit testing of the address-matching logic.
-  extractStreetNumbers, matchAddress,
+  extractStreetNumbers, matchAddress, matchQuality,
 };

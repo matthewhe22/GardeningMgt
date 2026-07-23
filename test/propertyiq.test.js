@@ -8,7 +8,7 @@ process.env.SESSION_SECRET = process.env.SESSION_SECRET || 'test-secret-for-unit
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { extractStreetNumbers, matchAddress } = require('../src/propertyiq');
+const { extractStreetNumbers, matchAddress, matchQuality } = require('../src/propertyiq');
 
 test('extractStreetNumbers', async (t) => {
   const set = (s) => [...extractStreetNumbers(s)].sort();
@@ -85,5 +85,39 @@ test('matchAddress hard gates', async (t) => {
   await t.test('wrong street number is rejected', () => {
     assert.strictEqual(matchAddress('12 Smith Street, Carlton',
       { streetNo: '99', streetName: 'Smith Street', suburb: 'Carlton' }), 0);
+  });
+});
+
+test('matchQuality strong-match flag (early-exit signal)', async (t) => {
+  const b = { streetNo: '40', streetName: 'King Street', suburb: 'Sydney', state: 'NSW', postcode: '2000' };
+
+  await t.test('a complete-address match (number + street + suburb + postcode) is strong', () => {
+    const q = matchQuality('40 King Street, Sydney NSW 2000', b);
+    assert.ok(q.score > 0);
+    assert.strictEqual(q.strong, true);
+  });
+
+  await t.test('a match missing the postcode is NOT strong (keeps scanning for a better one)', () => {
+    const q = matchQuality('40 King Street, Sydney', b);
+    assert.ok(q.score > 0);
+    assert.strictEqual(q.strong, false);
+  });
+
+  await t.test('a match missing the suburb is NOT strong', () => {
+    const q = matchQuality('40 King Street 2000', b);
+    assert.ok(q.score > 0);
+    assert.strictEqual(q.strong, false);
+  });
+
+  await t.test('a non-match is neither scored nor strong', () => {
+    const q = matchQuality('40 King Avenue, Sydney NSW 2000', b);
+    assert.strictEqual(q.score, 0);
+    assert.strictEqual(q.strong, false);
+  });
+
+  await t.test('a building with no suburb/postcode can never be strong', () => {
+    const q = matchQuality('12 Smith Street', { streetNo: '12', streetName: 'Smith Street' });
+    assert.ok(q.score > 0);
+    assert.strictEqual(q.strong, false);
   });
 });
