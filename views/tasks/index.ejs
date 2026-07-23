@@ -39,7 +39,25 @@
     <% tasks.forEach(t => { %>
     <tr>
       <td class="stack-main"><strong><%= t.title %></strong>
-        <% if (t.property_name) { %><br><span class="muted"><%= t.property_name %></span><% } %></td>
+        <% if (t.property_name) { %><br><span class="muted"><%= t.property_name %></span><% } %>
+        <% if (t.description) { %><br><span class="muted"><%= t.description %></span><% } %>
+        <% if (staff) { %>
+        <details class="row-edit">
+          <summary>Edit</summary>
+          <form method="post" action="/tasks/<%= t.id %>/update" class="form-grid"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+            <label class="span2">Title <input type="text" name="title" value="<%= t.title %>" required></label>
+            <label class="span2">Description <input type="text" name="description" value="<%= t.description || '' %>"></label>
+            <label>Assignee
+              <select name="assignee_id">
+                <option value="">Unassigned</option>
+                <% gardeners.forEach(g => { %><option value="<%= g.id %>" <%= String(g.id) === String(t.assignee_id) ? 'selected' : '' %>><%= g.name %></option><% }) %>
+              </select>
+            </label>
+            <label>Due date <input type="date" name="due_date" value="<%= t.due_date || '' %>"<% if (t.visit_ref) { %> title="This task is linked to a visit; the list shows the visit date"<% } %>></label>
+            <button class="btn btn-primary btn-sm">Save changes</button>
+          </form>
+        </details>
+        <% } %></td>
       <td data-label="Assignee"><%= t.assignee_name || '—' %></td>
       <td class="muted" data-label="Due / visit">
         <% if (t.visit_ref) { %><a href="/visits/<%= t.visit_ref %>"><%= t.scheduled_date %></a>

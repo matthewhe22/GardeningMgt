@@ -2,6 +2,33 @@
 <h1>Photo gallery</h1>
 <p class="muted">Photos shared by the team. Every photo carries its upload timestamp. Upload photos from a job or issue page.</p>
 
+<% if (staff) { %>
+<div class="card">
+  <form method="get" class="filter-row">
+    <label>From <input type="date" name="from" value="<%= from %>"></label>
+    <label>To <input type="date" name="to" value="<%= to %>"></label>
+    <label>Site
+      <select name="property_id">
+        <option value="">All sites</option>
+        <% properties.forEach(p => { %>
+          <option value="<%= p.id %>" <%= String(p.id) === String(propertyId) ? 'selected' : '' %>><%= p.name %></option>
+        <% }) %>
+      </select>
+    </label>
+    <label>Gardener
+      <select name="gardener_id">
+        <option value="">All gardeners</option>
+        <% gardeners.forEach(g => { %>
+          <option value="<%= g.id %>" <%= String(g.id) === String(gardenerId) ? 'selected' : '' %>><%= g.name %></option>
+        <% }) %>
+      </select>
+    </label>
+    <button class="btn">Filter</button>
+    <% if (from || to || propertyId || gardenerId) { %><a class="btn btn-sm" href="/photos">Clear</a><% } %>
+  </form>
+</div>
+<% } %>
+
 <div class="photo-grid large">
   <% photos.forEach(ph => { %>
     <figure class="photo">
@@ -21,7 +48,11 @@
 <div class="card">
   <div class="empty">
     <span class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h3l2-2.5h6L17 7h3a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Z"/><circle cx="12" cy="13" r="3.5"/></svg></span>
-    <p>No photos yet.</p>
+    <% if (staff && (from || to || propertyId || gardenerId)) { %>
+      <p>No photos match these filters. <a href="/photos">Clear filters</a></p>
+    <% } else { %>
+      <p>No photos yet.</p>
+    <% } %>
   </div>
 </div>
 <% } %>

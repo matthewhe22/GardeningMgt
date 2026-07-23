@@ -1059,6 +1059,12 @@ body.anon {
 .confirm-line { display: flex; align-items: center; gap: 10px; font-weight: 600; margin: 10px 0; }
 .confirm-line input { width: 20px; height: 20px; }
 
+/* Inline per-row edit disclosure (e.g. editing a task in the tasks table). */
+.row-edit { margin-top: 8px; }
+.row-edit > summary { cursor: pointer; display: inline-block; font-size: 0.82rem; font-weight: 600; color: var(--green-700); }
+.row-edit[open] > summary { margin-bottom: 8px; }
+.row-edit .form-grid { padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--green-50); max-width: 560px; }
+
 /* Key/value summary table (e.g. the owner-report preview). */
 table.kv { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 0.92rem; }
 table.kv th, table.kv td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e6e4dc; vertical-align: top; }
