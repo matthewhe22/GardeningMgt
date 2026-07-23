@@ -538,7 +538,20 @@ router.post('/:id/report/send-to-owners', requireRole('supervisor'), asyncHandle
   if (req.body.confirm_report !== 'on') return res.redirect(`/visits/${visit.id}?error=piqconfirm`);
 
   const property = await q1('SELECT id, address, piq_building_id FROM properties WHERE id = $1', [visit.property_id]);
-  const result = await propertyiq.getOwnerEmailsForProperty(property);
+
+  // The PropertyIQ lookup hits an external API (token + buildings + lots).
+  // Per propertyiq.js's contract these failures are non-fatal: catch them and
+  // surface a friendly redirect + activity log rather than a raw 500 page.
+  let result;
+  try {
+    result = await propertyiq.getOwnerEmailsForProperty(property);
+  } catch (e) {
+    console.error(`[propertyiq] owner lookup for visit #${visit.id} failed:`, e.message);
+    await logActivity(req.user.id, 'report.send_owners', 'visit', visit.id,
+      `PropertyIQ lookup failed for visit #${visit.id} (see server logs)`).catch(() => {});
+    return res.redirect(`/visits/${visit.id}?error=piqerror`);
+  }
+
   if (!result.configured) return res.redirect(`/visits/${visit.id}?error=piqnotconfigured`);
   if (!result.buildingId) return res.redirect(`/visits/${visit.id}?error=piqnomatch`);
   if (result.buildingId !== property.piq_building_id) {
@@ -558,14 +571,24 @@ router.post('/:id/report/send-to-owners', requireRole('supervisor'), asyncHandle
   const text = `Please find attached the completed job report for ${visit.property_name}, ${visit.address}, ` +
     `dated ${visit.scheduled_date}.`;
 
+  // Send per recipient, each guarded so one bad address / SMTP hiccup can't
+  // abort the loop (leaving some owners emailed and no record written) or
+  // throw a 500 into the request. sendMail returns {ok:false, skipped} when
+  // SMTP isn't configured; a thrown error is counted as a failure too.
   let sent = 0;
+  let failed = 0;
   for (const to of result.emails) {
-    const r = await sendMail({ to, subject, text, attachments });
-    if (r.ok) sent++;
+    try {
+      const r = await sendMail({ to, subject, text, attachments });
+      if (r.ok) sent++; else failed++;
+    } catch (e) {
+      failed++;
+      console.error(`[propertyiq] sending report for visit #${visit.id} to an owner failed:`, e.message);
+    }
   }
 
   await logActivity(req.user.id, 'report.send_owners', 'visit', visit.id, sent
-    ? `Sent job report for visit #${visit.id} to ${sent}/${result.emails.length} owner(s) via PropertyIQ (building #${result.buildingId})`
+    ? `Sent job report for visit #${visit.id} to ${sent}/${result.emails.length} owner(s) via PropertyIQ (building #${result.buildingId})${failed ? `; ${failed} failed` : ''}`
     : `Failed to send job report for visit #${visit.id} to any of ${result.emails.length} owner(s) — SMTP not configured or send failed`);
 
   res.redirect(`/visits/${visit.id}?error=${sent ? 'piqsent' : 'piqsendfailed'}`);
