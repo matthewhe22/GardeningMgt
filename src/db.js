@@ -418,7 +418,7 @@ function ensureCriticalSchema() {
 
 // Bump when SCHEMA or the migrations below change, so existing databases
 // re-run the DDL exactly once instead of on every serverless cold start.
-const SCHEMA_VERSION = '10';
+const SCHEMA_VERSION = '11';
 
 /**
  * Numeric, forward-only comparison of a stored schema_version against this
@@ -470,6 +470,11 @@ async function runMigrations() {
   await pool.query('ALTER TABLE properties ADD COLUMN IF NOT EXISTS billing_address TEXT');
   await pool.query('ALTER TABLE properties ADD COLUMN IF NOT EXISTS billing_email TEXT');
   await pool.query("ALTER TABLE properties ADD COLUMN IF NOT EXISTS gst_applicable BOOLEAN NOT NULL DEFAULT true");
+  // Cached PropertyIQ building match for this site, keyed by address (see
+  // src/propertyiq.js). NULL until the first "send report to owners" lookup
+  // succeeds, so repeat sends skip the address-matching pass over PIQ's
+  // building list.
+  await pool.query('ALTER TABLE properties ADD COLUMN IF NOT EXISTS piq_building_id TEXT');
   const { c } = (await pool.query('SELECT COUNT(*)::int AS c FROM users')).rows[0];
   if (c === 0) {
     const bcrypt = require('bcryptjs');
