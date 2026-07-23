@@ -61,7 +61,7 @@ async function renderReportHtml(data, { inlinePhotos = false } = {}) {
   // Self-contained location snapshot from the captured GPS: OSM tiles are
   // embedded as data URIs so the report still renders offline / from the
   // OneDrive archive.
-  const mapSvg = await renderMapSnapshot(data.gpsPoints, data.visit, { inline: true });
+  const mapSvg = await renderMapSnapshot(data.gpsPoints, data.visit, { inline: true, width: 360, height: 216 });
   const mapLink = externalMapUrl(data.gpsPoints, data.visit);
   return ejs.renderFile(
     path.join(__dirname, '..', 'views', 'visits', 'report.ejs'),
@@ -210,11 +210,13 @@ async function renderReportPdf(data) {
       heading('Job location');
       let mapDrawn = false;
       if (mapPng) {
-        const mapW = cw;
+        // A compact, left-aligned map (roughly half the content width) keeps
+        // the report short instead of a full-width block.
+        const mapW = Math.min(280, cw);
         const mapH = Math.round((mapW * 340) / 600); // preserve the snapshot's aspect ratio
         ensure(mapH + 8);
         try {
-          doc.image(mapPng, left, doc.y, { fit: [mapW, mapH], align: 'center' });
+          doc.image(mapPng, left, doc.y, { fit: [mapW, mapH] });
           doc.y += mapH + 6;
           mapDrawn = true;
         } catch (e) {
@@ -243,30 +245,41 @@ async function renderReportPdf(data) {
       });
     }
 
-    // Photos
+    // Photos: a compact 3-up thumbnail grid (small uniform tiles) instead of
+    // one large image per row, so a job with several photos stays a page or
+    // two rather than many.
     heading(`Photos (${photos.length})`);
     if (!photos.length) {
       doc.fillColor(MUTED).font('Helvetica').fontSize(10).text('No photos were uploaded for this job.');
     } else {
+      const cols = 3;
+      const gutter = 10;
+      const cellW = (cw - gutter * (cols - 1)) / cols;
+      const imgH = 92;
+      const capH = 22;
+      const rowH = imgH + capH + 6;
+      let col = 0;
+      let rowTop = doc.y;
       photos.forEach((ph) => {
+        if (col === 0) { ensure(rowH); rowTop = doc.y; }
+        const x = left + col * (cellW + gutter);
         const rec = photoBytes[ph.id];
-        const caption = `${fmtDateTime(ph.created_at)}${ph.caption ? ` - ${clean(ph.caption)}` : ''} - by ${clean(ph.uploader_name) || 'unknown'}`;
+        const caption = `${fmtDateTime(ph.created_at)}${ph.caption ? ` - ${clean(ph.caption)}` : ''} - ${clean(ph.uploader_name) || 'unknown'}`;
         if (rec && /jpe?g|png/i.test(rec.mime)) {
-          ensure(250);
           try {
-            doc.image(rec.data, left, doc.y, { fit: [Math.min(340, cw), 230] });
-            doc.y += 236;
+            doc.image(rec.data, x, rowTop, { fit: [cellW, imgH], align: 'center', valign: 'center' });
           } catch (e) {
-            ensure(16);
-            doc.fillColor(MUTED).font('Helvetica').fontSize(9).text(`[Could not render image ${clean(ph.filename)}]`);
+            doc.fillColor(MUTED).font('Helvetica').fontSize(8).text(`[${clean(ph.filename)}]`, x, rowTop, { width: cellW });
           }
         } else {
-          ensure(16);
-          doc.fillColor(MUTED).font('Helvetica').fontSize(9).text(`[Photo ${clean(ph.filename)}${rec ? ` - ${rec.mime}` : ''} - not embeddable]`);
+          doc.fillColor(MUTED).font('Helvetica').fontSize(8).text(`[${rec ? clean(rec.mime) : 'no image'}]`, x, rowTop, { width: cellW });
         }
-        doc.fillColor(MUTED).font('Helvetica').fontSize(8).text(caption, { width: cw });
-        doc.moveDown(0.5);
+        doc.fillColor(MUTED).font('Helvetica').fontSize(7)
+          .text(caption, x, rowTop + imgH + 3, { width: cellW, height: capH, ellipsis: true });
+        col++;
+        if (col === cols) { col = 0; doc.y = rowTop + rowH; }
       });
+      if (col !== 0) doc.y = rowTop + rowH; // close a partial final row
     }
 
     doc.moveDown(1);
