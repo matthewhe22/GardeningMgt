@@ -73,9 +73,9 @@
       <input type="password" name="onedrive_client_secret"
         value="<%= settings.onedrive_client_secret ? '********' : '' %>"
         placeholder="<%= settings.onedrive_client_secret ? 'saved — leave as is to keep' : 'paste secret value' %>"></label>
-    <label>Drive user (UPN)
-      <input type="email" name="onedrive_drive_user" value="<%= settings.onedrive_drive_user || '' %>" placeholder="ops@yourcompany.com"></label>
-    <label>Folder
+    <label>Site ID
+      <input type="text" name="onedrive_site_id" value="<%= settings.onedrive_site_id || '' %>" placeholder="contoso.sharepoint.com,11111111-1111-1111-1111-111111111111,22222222-2222-2222-2222-222222222222"></label>
+    <label>Folder path
       <input type="text" name="onedrive_folder" value="<%= settings.onedrive_folder || '' %>" placeholder="GardeningMgt"></label>
     <button class="btn btn-primary">Save settings</button>
   </form>
@@ -164,8 +164,10 @@
     <li>Copy the <strong>Application (client) ID</strong> and <strong>Directory (tenant) ID</strong> into the form above.</li>
     <li>Under <strong>Certificates &amp; secrets</strong>, create a client secret and paste its <em>value</em> above.</li>
     <li>Under <strong>API permissions</strong>, add Microsoft Graph → <strong>Application permissions</strong> →
-      <code>Files.ReadWrite.All</code>, then click <strong>Grant admin consent</strong>.</li>
-    <li>Set <strong>Drive user</strong> to the account whose OneDrive should receive the files.</li>
+      <code>Sites.ReadWrite.All</code>, then click <strong>Grant admin consent</strong>.</li>
+    <li>Find the target SharePoint site's <strong>Site ID</strong> — e.g. browse to
+      <code>https://graph.microsoft.com/v1.0/sites/yourtenant.sharepoint.com:/sites/YourSiteName</code>
+      via Graph Explorer and copy the <code>id</code> field — and paste it above.</li>
     <li>Click <strong>Test connection</strong> to verify.</li>
   </ol>
 </div>
