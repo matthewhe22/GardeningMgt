@@ -5,29 +5,31 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Job report #<%= visit.id %> — <%= visit.property_name %></title>
 <style>
-  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #1d2620; margin: 0; background: #fff; }
-  .wrap { max-width: 800px; margin: 0 auto; padding: 32px 24px; }
-  header { border-bottom: 3px solid #14532d; padding-bottom: 16px; margin-bottom: 24px; }
-  h1 { font-size: 1.4rem; margin: 0; color: #14532d; }
-  h2 { font-size: 1rem; margin: 28px 0 8px; color: #14532d; border-bottom: 1px solid #e6e4dc; padding-bottom: 4px; }
-  .meta { color: #707b72; font-size: 0.9rem; margin-top: 4px; }
-  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-  td, th { text-align: left; padding: 6px 8px; border-bottom: 1px solid #eee; vertical-align: top; }
-  th { width: 200px; color: #707b72; font-weight: 600; }
-  .pill { display: inline-block; padding: 1px 10px; border-radius: 999px; font-size: 0.78rem; background: #e3f5ea; color: #15803d; }
-  .photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #1d2620; margin: 0; background: #fff; font-size: 13px; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 22px 20px; }
+  header { border-bottom: 2px solid #14532d; padding-bottom: 10px; margin-bottom: 14px; }
+  h1 { font-size: 1.2rem; margin: 0; color: #14532d; }
+  h2 { font-size: 0.9rem; margin: 16px 0 6px; color: #14532d; border-bottom: 1px solid #e6e4dc; padding-bottom: 3px; }
+  .meta { color: #707b72; font-size: 0.82rem; margin-top: 3px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+  td, th { text-align: left; padding: 3px 8px; border-bottom: 1px solid #eee; vertical-align: top; }
+  th { width: 170px; color: #707b72; font-weight: 600; }
+  .pill { display: inline-block; padding: 1px 10px; border-radius: 999px; font-size: 0.74rem; background: #e3f5ea; color: #15803d; }
+  /* Compact photo thumbnails: small uniform tiles keep the report short. */
+  .photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; }
   figure { margin: 0; }
-  img { width: 100%; border-radius: 8px; border: 1px solid #e6e4dc; }
-  figcaption { font-size: 0.78rem; color: #707b72; margin-top: 4px; }
-  .stamp { background: #14532d; color: #fff; padding: 1px 8px; border-radius: 4px; font-size: 0.74rem; }
-  .comment { border-left: 3px solid #e6e4dc; padding: 4px 12px; margin: 8px 0; }
-  .map-snapshot { max-width: 600px; margin: 4px 0 8px; }
+  img { width: 100%; height: 104px; object-fit: cover; border-radius: 6px; border: 1px solid #e6e4dc; display: block; }
+  figcaption { font-size: 0.68rem; color: #707b72; margin-top: 2px; line-height: 1.25; }
+  .stamp { background: #14532d; color: #fff; padding: 1px 6px; border-radius: 4px; font-size: 0.66rem; }
+  .comment { border-left: 3px solid #e6e4dc; padding: 3px 10px; margin: 6px 0; font-size: 0.85rem; }
+  /* Smaller location map. */
+  .map-snapshot { max-width: 360px; margin: 4px 0 6px; }
   .map-snapshot svg { width: 100%; height: auto; }
-  footer { margin-top: 40px; color: #707b72; font-size: 0.78rem; border-top: 1px solid #e6e4dc; padding-top: 12px; }
+  footer { margin-top: 22px; color: #707b72; font-size: 0.72rem; border-top: 1px solid #e6e4dc; padding-top: 8px; }
   @media print {
     .no-print { display: none; }
     h2 { break-after: avoid; }
-    figure, .comment, table { break-inside: avoid; }
+    figure, .comment { break-inside: avoid; }
   }
 </style>
 </head>
@@ -72,15 +74,6 @@
   <div class="map-snapshot"><%- mapSvg %></div>
   <p class="meta">Captured from the gardener's GPS on this visit.<% if (mapLink) { %>
     <a href="<%= mapLink %>" target="_blank" rel="noopener">Open in map ↗</a><% } %></p>
-  <% } %>
-
-  <% if (gpsPoints.length) { %>
-  <h2>GPS log</h2>
-  <table>
-    <% gpsPoints.forEach(g => { %>
-      <tr><th><%= g.kind %></th><td><%= g.lat.toFixed(5) %>, <%= g.lng.toFixed(5) %> · <%= fmtDateTime(g.recorded_at) %></td></tr>
-    <% }) %>
-  </table>
   <% } %>
 
   <% if (comments.length) { %>
