@@ -194,7 +194,16 @@ async function findBuildingByAddress(address) {
   return bestScore >= 1 ? best : null;
 }
 
-/** Fetch the Building object (with lots + owner contacts) for a known PIQ building ID. */
+/** Fetch a single Building object for a known PIQ building ID (or null). */
+async function getBuilding(buildingId) {
+  const cfg = await getConfig();
+  if (!cfg) return null;
+  const token = await getAccessToken(cfg);
+  const resp = await apiGet(cfg, `/api/buildings/${encodeURIComponent(buildingId)}`, token);
+  return resp.data || null;
+}
+
+/** Fetch the lots (with owner contacts) for a known PIQ building ID. */
 async function getBuildingLots(buildingId) {
   const cfg = await getConfig();
   if (!cfg) return [];
@@ -210,30 +219,43 @@ async function getBuildingLots(buildingId) {
   return lots;
 }
 
-/**
- * Owner email addresses for the site at `address`, resolved via PropertyIQ.
- * Caches the matched building ID against the property row so subsequent
- * sends skip the address-matching pass. Returns { buildingId, emails } —
- * emails is deduplicated and always an array (possibly empty).
- */
-async function getOwnerEmailsForProperty(property) {
-  const cfg = await getConfig();
-  if (!cfg) return { configured: false, buildingId: null, emails: [] };
+/** A single-line, human-readable address for a PIQ Building object. */
+function buildingAddress(b) {
+  if (!b) return '';
+  return [b.streetNo, b.streetName, b.suburb, b.state, b.postcode].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+}
 
-  let buildingId = property.piq_building_id || null;
-  if (!buildingId) {
-    const building = await findBuildingByAddress(property.address);
-    if (!building) return { configured: true, buildingId: null, emails: [] };
-    buildingId = String(building.id);
-  }
-
+/** Deduplicated owner email addresses for a known PIQ building ID. */
+async function getOwnerEmailsForBuilding(buildingId) {
   const lots = await getBuildingLots(buildingId);
   const emails = new Set();
   for (const lot of lots) {
     const email = (lot.ownerContact && lot.ownerContact.email) || lot.email;
     if (email && email.includes('@')) emails.add(email.trim());
   }
-  return { configured: true, buildingId, emails: [...emails] };
+  return [...emails];
+}
+
+/**
+ * Resolve the PIQ building + owner emails for a site, for the "confirm before
+ * send" preview. Uses the cached piq_building_id when present (falling back to
+ * an address match if that id no longer resolves), otherwise matches by
+ * address. Returns { configured, building, emails } — building is the raw PIQ
+ * Building object (or null when nothing matched), emails is deduped.
+ */
+async function resolveOwnersForProperty(property) {
+  const cfg = await getConfig();
+  if (!cfg) return { configured: false, building: null, emails: [] };
+
+  let building = null;
+  if (property.piq_building_id) {
+    building = await getBuilding(property.piq_building_id).catch(() => null);
+  }
+  if (!building) building = await findBuildingByAddress(property.address);
+  if (!building) return { configured: true, building: null, emails: [] };
+
+  const emails = await getOwnerEmailsForBuilding(building.id);
+  return { configured: true, building, emails };
 }
 
 /** Verify credentials: fetch a token and list the first page of buildings. */
@@ -251,8 +273,8 @@ async function testConnection() {
 }
 
 module.exports = {
-  SETTING_KEYS, getConfig, findBuildingByAddress, getBuildingLots,
-  getOwnerEmailsForProperty, testConnection,
+  SETTING_KEYS, getConfig, findBuildingByAddress, getBuilding, getBuildingLots,
+  getOwnerEmailsForBuilding, resolveOwnersForProperty, buildingAddress, testConnection,
   // Exported for unit testing of the address-matching logic.
   extractStreetNumbers, matchAddress,
 };

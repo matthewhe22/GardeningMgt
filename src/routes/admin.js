@@ -187,7 +187,7 @@ router.post('/properties/import', requireRole('supervisor'),
 // ticked, or whenever latitude/longitude are left blank.
 router.post('/properties/:id/update', requireRole('supervisor'), asyncHandler(async (req, res) => {
   const id = Number(req.params.id);
-  const existing = await q1('SELECT id FROM properties WHERE id = $1', [id]);
+  const existing = await q1('SELECT id, address FROM properties WHERE id = $1', [id]);
   if (!existing) return res.redirect('/admin/properties');
   const { name, address, contact_name, contact_phone, contact_email, lat, lng, lots, notes,
     billing_name, billing_address, billing_email } = req.body;
@@ -202,14 +202,20 @@ router.post('/properties/:id/update', requireRole('supervisor'), asyncHandler(as
     } catch (e) { console.error('[geocode] update lookup failed:', e.message); }
   }
   const gstApplicable = req.body.gst_applicable === 'on';
+  // If the address changed, drop the cached PropertyIQ building match so a
+  // stale match can never send a report to the wrong building's owners — the
+  // next send re-resolves (and re-confirms) against the new address.
+  const addressChanged = (existing.address || '').trim() !== address.trim();
   await q(`
     UPDATE properties SET name = $1, address = $2, contact_name = $3, contact_phone = $4,
       contact_email = $5, lat = $6, lng = $7, lots = $8, notes = $9,
-      billing_name = $10, billing_address = $11, billing_email = $12, gst_applicable = $13
-    WHERE id = $14`,
+      billing_name = $10, billing_address = $11, billing_email = $12, gst_applicable = $13,
+      piq_building_id = CASE WHEN $14 THEN NULL ELSE piq_building_id END
+    WHERE id = $15`,
     [name.trim(), address.trim(), contact_name || null, contact_phone || null, contact_email || null,
       latN, lngN, lots ? Math.round(Number(lots)) : null, notes || null,
-      billing_name || null, billing_address || null, billing_email || null, gstApplicable, id]);
+      billing_name || null, billing_address || null, billing_email || null, gstApplicable,
+      addressChanged, id]);
   await logActivity(req.user.id, 'property.update', 'property', id, `Updated site "${name.trim()}"`);
   res.redirect('/admin/properties');
 }));
