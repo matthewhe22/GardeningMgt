@@ -67,53 +67,131 @@ async function apiGet(cfg, path, token) {
 }
 
 // Loose normalisation for address matching: lowercase, strip punctuation,
-// collapse whitespace. Building/site addresses are free-text on both sides
-// (our properties.address vs PIQ's streetNo/streetName/suburb fields), so an
-// exact match isn't realistic — this matches on the significant tokens
-// instead (street number + enough of the remaining text in common).
+// collapse whitespace. Building/site addresses are free-text on our side
+// (properties.address) vs PIQ's structured streetNo/streetName/suburb fields,
+// so an exact string match isn't realistic — matchAddress() below compares
+// the structured pieces instead.
 function normalize(s) {
   return String(s || '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+// Australian state abbreviations plus unit/secondary-address words that carry
+// no street-identity signal — excluded when comparing street names so that
+// "Park Avenue" and "Park Road" still differ on their meaningful token.
+const NON_IDENTIFYING = new Set([
+  'nsw', 'vic', 'qld', 'sa', 'wa', 'tas', 'act', 'nt', 'australia',
+  'unit', 'units', 'apt', 'apartment', 'suite', 'level', 'floor', 'shop', 'villa', 'lot',
+]);
+
+// The identifying (non-numeric, non-boilerplate) tokens of a name/suburb.
+function significantTokens(s) {
+  return normalize(s).split(' ').filter((t) => t && !NON_IDENTIFYING.has(t) && !/^\d+$/.test(t));
+}
+
+/**
+ * Extract the street number(s) from an address string as a Set of digit
+ * strings. Handles a leading number ("12 Smith St"), a number that isn't
+ * first ("Level 2, 40 King St" → 40, not the unit 2), a unit form
+ * ("Unit 5/10 Smith St" → 10), and a range ("10-12" → {10, 12}). A trailing
+ * 4-digit postcode is stripped first so it isn't mistaken for a street number.
+ * Empty when there's no recognisable street number.
+ */
+function extractStreetNumbers(text) {
+  let s = String(text || '').toLowerCase();
+  s = s.replace(/\b\d{4}\b(?!.*\d)/, ' '); // drop a trailing postcode
+  const nums = new Set();
+  // Unit/secondary "X/Y" — the street number is the part after the slash.
+  const slash = s.match(/\b\d+[a-z]?\s*\/\s*(\d+[a-z]?(?:\s*-\s*\d+[a-z]?)?)/);
+  let streetPart;
+  if (slash) {
+    streetPart = slash[1];
+  } else {
+    // Strip a leading unit/level/shop token + its number so we don't grab the
+    // secondary number as the street number.
+    streetPart = s.replace(/\b(unit|apt|apartment|suite|level|floor|shop|villa|lot)\s*\.?\s*\d+[a-z]?\s*[,/]?\s*/g, ' ');
+  }
+  const m = streetPart.match(/\b(\d+)[a-z]?(?:\s*-\s*(\d+)[a-z]?)?/);
+  if (m) {
+    nums.add(m[1]);
+    if (m[2]) nums.add(m[2]);
+  }
+  return nums;
+}
+
+/**
+ * Score how well a PIQ building matches a free-text site address. Returns 0
+ * (no match) unless ALL of these hard gates pass:
+ *   1. street numbers agree (when both sides have one) — a range like "10-12"
+ *      matches "10", "12" or "10-12";
+ *   2. every identifying token of the building's streetName appears in the
+ *      site address ("Park Road" needs both "park" and "road", so it can't
+ *      match "Park Avenue");
+ *   3. postcodes don't conflict.
+ * Among candidates that pass, a higher score (shared street-name + suburb +
+ * postcode tokens) is a better match. Pure function — unit-tested directly.
+ */
+function matchAddress(targetAddress, b) {
+  const target = normalize(targetAddress);
+  const targetTokens = new Set(target.split(' ').filter(Boolean));
+  const targetNums = extractStreetNumbers(targetAddress);
+  const candNums = extractStreetNumbers(b.streetNo || '');
+
+  // Gate 1: street number must agree. If the building has a number but the
+  // site address has none, that's too weak to trust — reject.
+  if (candNums.size) {
+    if (!targetNums.size) return 0;
+    let overlap = false;
+    for (const n of candNums) if (targetNums.has(n)) overlap = true;
+    if (!overlap) return 0;
+  }
+
+  // Gate 2: every identifying street-name token must be present in the target.
+  const nameTokens = significantTokens(b.streetName);
+  if (!nameTokens.length) return 0;
+  for (const t of nameTokens) if (!targetTokens.has(t)) return 0;
+
+  // Gate 3: reject on a postcode conflict.
+  const targetPostcode = (target.match(/\b\d{4}\b/g) || []).pop();
+  if (b.postcode && targetPostcode && normalize(b.postcode) !== targetPostcode) return 0;
+
+  // Passed. Score by shared identifying tokens so the best of several valid
+  // candidates wins (suburb / postcode agreement breaks ties).
+  const candTokens = new Set([
+    ...nameTokens,
+    ...significantTokens(b.suburb),
+    ...(b.postcode ? [normalize(b.postcode)] : []),
+  ]);
+  let score = 0;
+  for (const t of candTokens) if (targetTokens.has(t)) score++;
+  return score;
 }
 
 /**
  * Find the PIQ building whose address best matches the given site address.
  * Paginates through /api/buildings (no address search param on this API) and
- * scores each candidate by shared tokens with the site address, requiring
- * the street number to match when the site address has one.
- * Returns the raw PIQ Building object, or null if nothing scores a match.
+ * scores each candidate with matchAddress(). Returns the raw PIQ Building
+ * object, or null if nothing clears the matcher's hard gates.
  */
 async function findBuildingByAddress(address) {
   const cfg = await getConfig();
   if (!cfg) return null;
   const token = await getAccessToken(cfg);
-  const target = normalize(address);
-  const targetTokens = new Set(target.split(' ').filter(Boolean));
-  const streetNoMatch = target.match(/^\d+[a-z]?/);
-  const targetStreetNo = streetNoMatch ? streetNoMatch[0] : null;
 
   let best = null;
   let bestScore = 0;
-  let page = 1;
   // Bounded pagination so a misconfigured/huge PIQ instance can't hang a
   // report send indefinitely — 50 pages * 200/page covers 10,000 buildings.
-  for (; page <= 50; page++) {
+  for (let page = 1; page <= 50; page++) {
     const resp = await apiGet(cfg, `/api/buildings?number=200&page=${page}`, token);
     const buildings = resp.data || [];
     if (!buildings.length) break;
     for (const b of buildings) {
-      const candidate = normalize([b.streetNo, b.streetName, b.suburb, b.state, b.postcode].filter(Boolean).join(' '));
-      if (!candidate) continue;
-      if (targetStreetNo && b.streetNo && normalize(b.streetNo) !== normalize(targetStreetNo)) continue;
-      const candidateTokens = new Set(candidate.split(' ').filter(Boolean));
-      let shared = 0;
-      for (const t of candidateTokens) if (targetTokens.has(t)) shared++;
-      if (shared > bestScore) { bestScore = shared; best = b; }
+      const score = matchAddress(address, b);
+      if (score > bestScore) { bestScore = score; best = b; }
     }
     if (!resp.links || !resp.links.next) break;
   }
-  // Require at least the street number plus one more shared token (street
-  // name or suburb) — a bare street-number match alone is too weak to trust.
-  return bestScore >= 2 ? best : null;
+  return bestScore >= 1 ? best : null;
 }
 
 /** Fetch the Building object (with lots + owner contacts) for a known PIQ building ID. */
@@ -175,4 +253,6 @@ async function testConnection() {
 module.exports = {
   SETTING_KEYS, getConfig, findBuildingByAddress, getBuildingLots,
   getOwnerEmailsForProperty, testConnection,
+  // Exported for unit testing of the address-matching logic.
+  extractStreetNumbers, matchAddress,
 };
