@@ -310,19 +310,20 @@ router.post('/users/:id/toggle', requireRole(), asyncHandler(async (req, res) =>
 const { getSettings, setSetting, INVOICE_SETTING_KEYS } = require('../settings');
 const { testConnection: testOneDrive, SETTING_KEYS: ONEDRIVE_SETTING_KEYS } = require('../onedrive');
 const { testConnection: testEmail, SETTING_KEYS: EMAIL_SETTING_KEYS } = require('../email');
+const { testConnection: testPiq, SETTING_KEYS: PIQ_SETTING_KEYS } = require('../propertyiq');
 const { getBranding, saveLogo, saveFavicon, clearLogo, clearFavicon } = require('../branding');
 const { upload: imageUpload } = require('../upload');
 
 // Settings whose masked placeholder ('********') means "leave as-is, don't
 // overwrite the stored secret" — mirrors the onedrive_client_secret pattern.
-const MASKED_SETTING_KEYS = new Set(['onedrive_client_secret', 'invoice_payment_details', 'smtp_password']);
-const ALL_SETTING_KEYS = [...ONEDRIVE_SETTING_KEYS, ...INVOICE_SETTING_KEYS, ...EMAIL_SETTING_KEYS];
+const MASKED_SETTING_KEYS = new Set(['onedrive_client_secret', 'invoice_payment_details', 'smtp_password', 'piq_client_secret']);
+const ALL_SETTING_KEYS = [...ONEDRIVE_SETTING_KEYS, ...INVOICE_SETTING_KEYS, ...EMAIL_SETTING_KEYS, ...PIQ_SETTING_KEYS];
 
 router.get('/settings', requireRole(), asyncHandler(async (req, res) => {
   const [settings, branding] = await Promise.all([getSettings(ALL_SETTING_KEYS), getBranding()]);
   res.render('admin/settings', {
     title: 'Settings', settings, branding,
-    saved: req.query.saved, brandingError: req.query.brandingError || null, test: null, emailTest: null,
+    saved: req.query.saved, brandingError: req.query.brandingError || null, test: null, emailTest: null, piqTest: null,
   });
 }));
 
@@ -343,7 +344,7 @@ router.post('/settings/test', requireRole(), asyncHandler(async (req, res) => {
   // Log only pass/fail — the message can contain Graph error detail.
   await logActivity(req.user.id, 'settings.test', 'settings', null,
     `OneDrive connection test: ${test.ok ? 'OK' : 'failed'}`);
-  res.render('admin/settings', { title: 'Settings', settings, branding, saved: null, brandingError: null, test, emailTest: null });
+  res.render('admin/settings', { title: 'Settings', settings, branding, saved: null, brandingError: null, test, emailTest: null, piqTest: null });
 }));
 
 router.post('/settings/test-email', requireRole(), asyncHandler(async (req, res) => {
@@ -351,7 +352,15 @@ router.post('/settings/test-email', requireRole(), asyncHandler(async (req, res)
   const emailTest = await testEmail();
   await logActivity(req.user.id, 'settings.test', 'settings', null,
     `Email (SMTP) connection test: ${emailTest.ok ? 'OK' : 'failed'}`);
-  res.render('admin/settings', { title: 'Settings', settings, branding, saved: null, brandingError: null, test: null, emailTest });
+  res.render('admin/settings', { title: 'Settings', settings, branding, saved: null, brandingError: null, test: null, emailTest, piqTest: null });
+}));
+
+router.post('/settings/test-piq', requireRole(), asyncHandler(async (req, res) => {
+  const [settings, branding] = await Promise.all([getSettings(ALL_SETTING_KEYS), getBranding()]);
+  const piqTest = await testPiq();
+  await logActivity(req.user.id, 'settings.test', 'settings', null,
+    `PropertyIQ connection test: ${piqTest.ok ? 'OK' : 'failed'}`);
+  res.render('admin/settings', { title: 'Settings', settings, branding, saved: null, brandingError: null, test: null, emailTest: null, piqTest });
 }));
 
 // Logo (shown in the sidebar/topbar) and favicon (browser tab icon) — each

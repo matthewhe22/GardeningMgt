@@ -10,6 +10,8 @@ const { assertCsrf } = require('../csrf');
 const { optimizeRouteRoad } = require('../routeOptimizer');
 const { runInBackground } = require('../background');
 const { autoInvoiceAndEmail } = require('../invoicing');
+const { sendMail } = require('../email');
+const propertyiq = require('../propertyiq');
 const { today, toDate } = require('../time');
 const { pageParam, paginate } = require('../pagination');
 
@@ -519,6 +521,54 @@ router.get('/:id/report', asyncHandler(async (req, res) => {
     return res.send(pdf);
   }
   res.type('html').send(await renderReportHtml(data));
+}));
+
+/**
+ * Supervisor/admin confirms a completed job's report is satisfactory and
+ * sends it straight to the site's owners. The site is linked to a
+ * PropertyIQ building by matching properties.address (caching the match on
+ * properties.piq_building_id), and owner emails are pulled from that
+ * building's lots via the PropertyIQ Strata API.
+ */
+router.post('/:id/report/send-to-owners', requireRole('supervisor'), asyncHandler(async (req, res) => {
+  assertCsrf(req);
+  const visit = await getVisit(req.params.id);
+  if (!visit) return res.status(404).render('error', { title: 'Not found', message: 'Job not found.' });
+  if (!visit.finished_at) return res.redirect(`/visits/${visit.id}?error=piqnotcomplete`);
+  if (req.body.confirm_report !== 'on') return res.redirect(`/visits/${visit.id}?error=piqconfirm`);
+
+  const property = await q1('SELECT id, address, piq_building_id FROM properties WHERE id = $1', [visit.property_id]);
+  const result = await propertyiq.getOwnerEmailsForProperty(property);
+  if (!result.configured) return res.redirect(`/visits/${visit.id}?error=piqnotconfigured`);
+  if (!result.buildingId) return res.redirect(`/visits/${visit.id}?error=piqnomatch`);
+  if (result.buildingId !== property.piq_building_id) {
+    await q('UPDATE properties SET piq_building_id = $1 WHERE id = $2', [result.buildingId, property.id]);
+  }
+  if (!result.emails.length) return res.redirect(`/visits/${visit.id}?error=piqnoemails`);
+
+  const data = await loadReportData(visit.id);
+  const pdf = await renderReportPdf(data);
+  const slug = String(visit.property_name || 'job')
+    .replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'job';
+  const attachments = [{
+    filename: `completion-report-${slug}-${visit.scheduled_date}.pdf`,
+    content: pdf, contentType: 'application/pdf',
+  }];
+  const subject = `Job completion report — ${visit.property_name} (${visit.scheduled_date})`;
+  const text = `Please find attached the completed job report for ${visit.property_name}, ${visit.address}, ` +
+    `dated ${visit.scheduled_date}.`;
+
+  let sent = 0;
+  for (const to of result.emails) {
+    const r = await sendMail({ to, subject, text, attachments });
+    if (r.ok) sent++;
+  }
+
+  await logActivity(req.user.id, 'report.send_owners', 'visit', visit.id, sent
+    ? `Sent job report for visit #${visit.id} to ${sent}/${result.emails.length} owner(s) via PropertyIQ (building #${result.buildingId})`
+    : `Failed to send job report for visit #${visit.id} to any of ${result.emails.length} owner(s) — SMTP not configured or send failed`);
+
+  res.redirect(`/visits/${visit.id}?error=${sent ? 'piqsent' : 'piqsendfailed'}`);
 }));
 
 /**

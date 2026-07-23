@@ -4,7 +4,7 @@ const { q, q1 } = require('./db');
 // Secret-valued settings are encrypted at rest with AES-256-GCM using a key
 // derived from SETTINGS_KEY (or SESSION_SECRET as a fallback). Stored as
 // enc:<iv>:<tag>:<ciphertext> (all base64). Plaintext legacy values still read.
-const SECRET_KEYS = new Set(['onedrive_client_secret', 'invoice_payment_details', 'smtp_password']);
+const SECRET_KEYS = new Set(['onedrive_client_secret', 'invoice_payment_details', 'smtp_password', 'piq_client_secret']);
 
 // Business details shown on invoice PDFs, edited on /admin/settings.
 // invoice_payment_details (bank/BPAY info etc.) is encrypted at rest like the

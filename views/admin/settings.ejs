@@ -27,6 +27,12 @@
     <% } else { %><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
     <% } %> <%= emailTest.message %></p>
 <% } %>
+<% if (locals.piqTest) { %>
+  <p class="alert <%= piqTest.ok ? 'alert-ok' : 'alert-error' %>">
+    <% if (piqTest.ok) { %><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 5 5L19 7"/></svg>
+    <% } else { %><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+    <% } %> <%= piqTest.message %></p>
+<% } %>
 <% if (locals.brandingError) { %><p class="alert alert-error"><%= brandingError %></p><% } %>
 
 <div class="card">
@@ -124,6 +130,29 @@
     <button class="btn btn-primary">Save settings</button>
   </form>
   <form method="post" action="/admin/settings/test-email" style="margin-top:8px"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+    <button class="btn">Test connection</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>PropertyIQ (owner report sending)</h2>
+  <p class="muted">Lets a supervisor send a completed job report straight to a building's owners.
+    The site is matched to a PropertyIQ building by address, and owner emails are pulled from
+    that building's lots — see the "Send report to owners" button on a completed job.</p>
+  <form method="post" action="/admin/settings" class="form-grid"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+    <label>Base URL
+      <input type="text" name="piq_base_url" value="<%= settings.piq_base_url || '' %>" placeholder="https://tocs.propertyiq.com.au"></label>
+    <label>Client ID
+      <input type="text" name="piq_client_id" value="<%= settings.piq_client_id || '' %>"></label>
+    <label>Client secret
+      <input type="password" name="piq_client_secret"
+        value="<%= settings.piq_client_secret ? '********' : '' %>"
+        placeholder="<%= settings.piq_client_secret ? 'saved — leave as is to keep' : 'paste secret value' %>"></label>
+    <label>Scopes <span class="muted">(optional)</span>
+      <input type="text" name="piq_scope" value="<%= settings.piq_scope || '' %>" placeholder="buildings lots"></label>
+    <button class="btn btn-primary">Save settings</button>
+  </form>
+  <form method="post" action="/admin/settings/test-piq" style="margin-top:8px"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
     <button class="btn">Test connection</button>
   </form>
 </div>
