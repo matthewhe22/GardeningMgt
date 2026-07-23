@@ -4,6 +4,7 @@ const { requireRole, isStaff } = require('../auth');
 const { logActivity } = require('../activity');
 const { asyncHandler } = require('../asyncHandler');
 const { pageParam, paginate } = require('../pagination');
+const { isValidDate } = require('../recurrence');
 
 const router = express.Router();
 
@@ -57,6 +58,25 @@ router.post('/', requireRole('supervisor'), asyncHandler(async (req, res) => {
     await logActivity(req.user.id, 'task.create', 'task', id, `Created task "${title.trim()}"`);
   }
   res.redirect('/tasks');
+}));
+
+// Edit a task's details (staff only): title, description, assignee, due date.
+// Status has its own quick-change control, so it's deliberately not touched
+// here. Assignee accepts any gardener id or blank (unassigned); the users FK
+// rejects a bogus id.
+router.post('/:id/update', requireRole('supervisor'), asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  const task = await q1('SELECT id, title FROM tasks WHERE id = $1', [id]);
+  if (!task) return res.redirect('/tasks');
+  const { title, description } = req.body;
+  if (!(title || '').trim()) return safeRedirectBack(req, res, '/tasks');
+  const assigneeId = /^\d+$/.test(req.body.assignee_id || '') ? Number(req.body.assignee_id) : null;
+  const dueDate = isValidDate(req.body.due_date) ? req.body.due_date : null;
+  await q(
+    'UPDATE tasks SET title = $1, description = $2, assignee_id = $3, due_date = $4 WHERE id = $5',
+    [title.trim(), description || null, assigneeId, dueDate, id]);
+  await logActivity(req.user.id, 'task.update', 'task', id, `Edited task "${title.trim()}"`);
+  safeRedirectBack(req, res, '/tasks');
 }));
 
 router.post('/:id/status', asyncHandler(async (req, res) => {
