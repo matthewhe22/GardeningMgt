@@ -524,13 +524,14 @@ router.get('/:id/report', asyncHandler(async (req, res) => {
 }));
 
 /**
- * Supervisor/admin confirms a completed job's report is satisfactory and
- * sends it straight to the site's owners. The site is linked to a
- * PropertyIQ building by matching properties.address (caching the match on
- * properties.piq_building_id), and owner emails are pulled from that
- * building's lots via the PropertyIQ Strata API.
+ * Step 1 of sending a completed report to a site's owners: resolve the
+ * PropertyIQ building for the site (by cached id, else by address match) and
+ * show the supervisor exactly which building and owner emails were found, so
+ * they can confirm it's the right building BEFORE anything is emailed. The
+ * resolved building id is cached on the property; the confirmation itself
+ * happens on the preview page (POST send-to-owners below).
  */
-router.post('/:id/report/send-to-owners', requireRole('supervisor'), asyncHandler(async (req, res) => {
+router.post('/:id/report/owners/preview', requireRole('supervisor'), asyncHandler(async (req, res) => {
   assertCsrf(req);
   const visit = await getVisit(req.params.id);
   if (!visit) return res.status(404).render('error', { title: 'Not found', message: 'Job not found.' });
@@ -539,12 +540,11 @@ router.post('/:id/report/send-to-owners', requireRole('supervisor'), asyncHandle
 
   const property = await q1('SELECT id, address, piq_building_id FROM properties WHERE id = $1', [visit.property_id]);
 
-  // The PropertyIQ lookup hits an external API (token + buildings + lots).
-  // Per propertyiq.js's contract these failures are non-fatal: catch them and
-  // surface a friendly redirect + activity log rather than a raw 500 page.
+  // External API (token + buildings + lots) — non-fatal per propertyiq.js's
+  // contract: a failure gives a friendly redirect + log, never a raw 500.
   let result;
   try {
-    result = await propertyiq.getOwnerEmailsForProperty(property);
+    result = await propertyiq.resolveOwnersForProperty(property);
   } catch (e) {
     console.error(`[propertyiq] owner lookup for visit #${visit.id} failed:`, e.message);
     await logActivity(req.user.id, 'report.send_owners', 'visit', visit.id,
@@ -553,11 +553,56 @@ router.post('/:id/report/send-to-owners', requireRole('supervisor'), asyncHandle
   }
 
   if (!result.configured) return res.redirect(`/visits/${visit.id}?error=piqnotconfigured`);
-  if (!result.buildingId) return res.redirect(`/visits/${visit.id}?error=piqnomatch`);
-  if (result.buildingId !== property.piq_building_id) {
-    await q('UPDATE properties SET piq_building_id = $1 WHERE id = $2', [result.buildingId, property.id]);
+  if (!result.building) return res.redirect(`/visits/${visit.id}?error=piqnomatch`);
+
+  const buildingId = String(result.building.id);
+  if (buildingId !== property.piq_building_id) {
+    await q('UPDATE properties SET piq_building_id = $1 WHERE id = $2', [buildingId, property.id]);
   }
-  if (!result.emails.length) return res.redirect(`/visits/${visit.id}?error=piqnoemails`);
+
+  res.render('visits/owners-preview', {
+    title: `Send report to owners — ${visit.property_name}`,
+    visit,
+    buildingId,
+    buildingName: result.building.buildingName || '',
+    buildingAddress: propertyiq.buildingAddress(result.building),
+    emails: result.emails,
+  });
+}));
+
+/**
+ * Step 2: the supervisor has reviewed the matched building + owner list on the
+ * preview page and confirmed it's correct. Re-fetch the owners for the
+ * confirmed (cached) building and email the report PDF to each. The confirmed
+ * building id from the preview form must still match the cached one, so a
+ * concurrent address change can't silently redirect the send elsewhere.
+ */
+router.post('/:id/report/send-to-owners', requireRole('supervisor'), asyncHandler(async (req, res) => {
+  assertCsrf(req);
+  const visit = await getVisit(req.params.id);
+  if (!visit) return res.status(404).render('error', { title: 'Not found', message: 'Job not found.' });
+  if (!visit.finished_at) return res.redirect(`/visits/${visit.id}?error=piqnotcomplete`);
+  if (req.body.confirm_send !== 'on') return res.redirect(`/visits/${visit.id}?error=piqconfirm`);
+
+  const property = await q1('SELECT id, address, piq_building_id FROM properties WHERE id = $1', [visit.property_id]);
+  const confirmedBuildingId = String(req.body.building_id || '');
+  // The cached id was set at preview time; if it's gone or no longer matches
+  // what the supervisor confirmed (e.g. the address was edited in between),
+  // send nothing and make them review again.
+  if (!property.piq_building_id || !confirmedBuildingId || property.piq_building_id !== confirmedBuildingId) {
+    return res.redirect(`/visits/${visit.id}?error=piqstale`);
+  }
+
+  let emails;
+  try {
+    emails = await propertyiq.getOwnerEmailsForBuilding(property.piq_building_id);
+  } catch (e) {
+    console.error(`[propertyiq] owner fetch for visit #${visit.id} failed:`, e.message);
+    await logActivity(req.user.id, 'report.send_owners', 'visit', visit.id,
+      `PropertyIQ lookup failed for visit #${visit.id} (see server logs)`).catch(() => {});
+    return res.redirect(`/visits/${visit.id}?error=piqerror`);
+  }
+  if (!emails.length) return res.redirect(`/visits/${visit.id}?error=piqnoemails`);
 
   const data = await loadReportData(visit.id);
   const pdf = await renderReportPdf(data);
@@ -577,7 +622,7 @@ router.post('/:id/report/send-to-owners', requireRole('supervisor'), asyncHandle
   // SMTP isn't configured; a thrown error is counted as a failure too.
   let sent = 0;
   let failed = 0;
-  for (const to of result.emails) {
+  for (const to of emails) {
     try {
       const r = await sendMail({ to, subject, text, attachments });
       if (r.ok) sent++; else failed++;
@@ -588,8 +633,8 @@ router.post('/:id/report/send-to-owners', requireRole('supervisor'), asyncHandle
   }
 
   await logActivity(req.user.id, 'report.send_owners', 'visit', visit.id, sent
-    ? `Sent job report for visit #${visit.id} to ${sent}/${result.emails.length} owner(s) via PropertyIQ (building #${result.buildingId})${failed ? `; ${failed} failed` : ''}`
-    : `Failed to send job report for visit #${visit.id} to any of ${result.emails.length} owner(s) — SMTP not configured or send failed`);
+    ? `Sent job report for visit #${visit.id} to ${sent}/${emails.length} owner(s) via PropertyIQ (building #${property.piq_building_id})${failed ? `; ${failed} failed` : ''}`
+    : `Failed to send job report for visit #${visit.id} to any of ${emails.length} owner(s) — SMTP not configured or send failed`);
 
   res.redirect(`/visits/${visit.id}?error=${sent ? 'piqsent' : 'piqsendfailed'}`);
 }));

@@ -73,53 +73,92 @@ test('PIQ send-to-owners: non-fatal errors + guarded per-recipient send', { skip
       [visit.id]);
   }
 
-  await t.test('a PropertyIQ lookup failure redirects to piqerror (not a 500) and is logged', async () => {
-    propertyiq.getOwnerEmailsForProperty = async () => { throw new Error('simulated PIQ 500'); };
+  const BUILDING = { id: '900', buildingName: 'Kingsford Court', streetNo: '40', streetName: 'King Street', suburb: 'Sydney', state: 'NSW', postcode: '2000' };
+
+  // Step 1 (preview) helper: resolve + cache the building, returns the response.
+  function preview() {
+    return agent.post(`/visits/${visit.id}/report/owners/preview`).type('form')
+      .send({ confirm_report: 'on', _csrf: csrf });
+  }
+
+  await t.test('preview: a PropertyIQ lookup failure redirects to piqerror (not a 500) and is logged', async () => {
+    propertyiq.resolveOwnersForProperty = async () => { throw new Error('simulated PIQ 500'); };
     mailBehavior = async () => { throw new Error('must not send on lookup failure'); };
 
-    const res = await agent.post(`/visits/${visit.id}/report/send-to-owners`).type('form')
-      .send({ confirm_report: 'on', _csrf: csrf });
-
+    const res = await preview();
     assert.strictEqual(res.status, 302);
     assert.match(res.headers.location, /error=piqerror/);
     const row = await latestLog();
     assert.ok(row && /lookup failed/i.test(row.details), 'a failure should be logged');
   });
 
-  await t.test('the send loop is guarded: a throwing recipient does not abort it or 500, successes counted', async () => {
-    propertyiq.getOwnerEmailsForProperty = async () => ({
-      configured: true, buildingId: '900', emails: ['a@x.com', 'b@x.com', 'c@x.com'],
+  await t.test('preview: renders the matched building + owner list and caches the building id', async () => {
+    propertyiq.resolveOwnersForProperty = async () => ({
+      configured: true, building: BUILDING, emails: ['a@x.com', 'b@x.com'],
     });
+    const res = await preview();
+    assert.strictEqual(res.status, 200);
+    assert.match(res.text, /Kingsford Court/);
+    assert.match(res.text, /a@x\.com/);
+    assert.match(res.text, /b@x\.com/);
+    const prop = await q1('SELECT piq_building_id FROM properties WHERE id = $1', [property.id]);
+    assert.strictEqual(prop.piq_building_id, '900', 'matched building id cached at preview');
+  });
+
+  await t.test('send: guarded loop — a throwing recipient does not abort it or 500, successes counted', async () => {
+    propertyiq.resolveOwnersForProperty = async () => ({ configured: true, building: BUILDING, emails: ['a@x.com'] });
+    await preview(); // caches building 900
+    propertyiq.getOwnerEmailsForBuilding = async () => ['a@x.com', 'b@x.com', 'c@x.com'];
     const seen = [];
     mailBehavior = async (msg) => {
       seen.push(msg.to);
-      if (msg.to === 'a@x.com') return { ok: true };       // delivered
-      if (msg.to === 'b@x.com') throw new Error('smtp blip'); // throws mid-loop
-      return { ok: false, skipped: true };                  // SMTP not configured
+      if (msg.to === 'a@x.com') return { ok: true };          // delivered
+      if (msg.to === 'b@x.com') throw new Error('smtp blip');  // throws mid-loop
+      return { ok: false, skipped: true };                     // SMTP not configured
     };
 
     const res = await agent.post(`/visits/${visit.id}/report/send-to-owners`).type('form')
-      .send({ confirm_report: 'on', _csrf: csrf });
+      .send({ confirm_send: 'on', building_id: '900', _csrf: csrf });
 
     assert.strictEqual(res.status, 302);
     assert.match(res.headers.location, /error=piqsent/, 'at least one delivered → piqsent');
     assert.deepStrictEqual(seen, ['a@x.com', 'b@x.com', 'c@x.com'], 'loop attempted all three despite the throw');
-
     const row = await latestLog();
     assert.ok(row && /1\/3/.test(row.details), `should record 1/3 delivered, got: ${row && row.details}`);
-
-    const prop = await q1('SELECT piq_building_id FROM properties WHERE id = $1', [property.id]);
-    assert.strictEqual(prop.piq_building_id, '900', 'matched building id cached');
   });
 
-  await t.test('all recipients failing → piqsendfailed, still no 500', async () => {
-    propertyiq.getOwnerEmailsForProperty = async () => ({
-      configured: true, buildingId: '900', emails: ['only@x.com'],
-    });
+  await t.test('send: a confirmed building id that no longer matches the cache → piqstale, nothing sent', async () => {
+    propertyiq.resolveOwnersForProperty = async () => ({ configured: true, building: BUILDING, emails: ['a@x.com'] });
+    await preview(); // cache is '900'
+    let sends = 0;
+    mailBehavior = async () => { sends++; return { ok: true }; };
+
+    const res = await agent.post(`/visits/${visit.id}/report/send-to-owners`).type('form')
+      .send({ confirm_send: 'on', building_id: '999', _csrf: csrf }); // stale id
+
+    assert.strictEqual(res.status, 302);
+    assert.match(res.headers.location, /error=piqstale/);
+    assert.strictEqual(sends, 0, 'nothing should be sent on a stale confirmation');
+  });
+
+  await t.test('send: without the confirmation checkbox → piqconfirm, nothing sent', async () => {
+    let sends = 0;
+    mailBehavior = async () => { sends++; return { ok: true }; };
+    const res = await agent.post(`/visits/${visit.id}/report/send-to-owners`).type('form')
+      .send({ building_id: '900', _csrf: csrf }); // no confirm_send
+    assert.strictEqual(res.status, 302);
+    assert.match(res.headers.location, /error=piqconfirm/);
+    assert.strictEqual(sends, 0);
+  });
+
+  await t.test('send: all recipients failing → piqsendfailed, still no 500', async () => {
+    propertyiq.resolveOwnersForProperty = async () => ({ configured: true, building: BUILDING, emails: ['only@x.com'] });
+    await preview();
+    propertyiq.getOwnerEmailsForBuilding = async () => ['only@x.com'];
     mailBehavior = async () => ({ ok: false, skipped: true });
 
     const res = await agent.post(`/visits/${visit.id}/report/send-to-owners`).type('form')
-      .send({ confirm_report: 'on', _csrf: csrf });
+      .send({ confirm_send: 'on', building_id: '900', _csrf: csrf });
 
     assert.strictEqual(res.status, 302);
     assert.match(res.headers.location, /error=piqsendfailed/);
