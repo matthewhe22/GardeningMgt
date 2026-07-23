@@ -4,7 +4,7 @@ const { q, q1 } = require('./db');
 const { uploadFile, getConfig, getAccessToken } = require('./onedrive');
 const { logActivity } = require('./activity');
 const storage = require('./storage');
-const { renderMapSnapshot, externalMapUrl } = require('./mapSnapshot');
+const { renderMapSnapshot, renderMapSnapshotPng, externalMapUrl } = require('./mapSnapshot');
 const { fmtDateTime, fmtDate } = require('./time');
 
 // Standard Australian GST rate. Per the site's gst_applicable flag, invoice
@@ -137,6 +137,10 @@ async function renderReportPdf(data) {
     for (const r of rows) photoBytes[r.id] = r;
   }
   const mapLink = externalMapUrl(gpsPoints, visit);
+  // The job-location map, rasterised to PNG so pdfkit can embed it (it can't
+  // render SVG). Best-effort: null when there's no location or rasterisation
+  // fails, in which case the section falls back to the raw GPS coordinates.
+  const mapPng = await renderMapSnapshotPng(gpsPoints, visit);
 
   return await new Promise((resolve, reject) => {
     const doc = new PDFDocument({
@@ -199,10 +203,27 @@ async function renderReportPdf(data) {
       tasks.forEach((t) => row(t.title, `${t.status.replace('_', ' ')}${t.description ? ` - ${t.description}` : ''}`));
     }
 
-    // GPS + map link
-    if (gpsPoints.length) {
-      heading('GPS log');
-      gpsPoints.forEach((g) => row(g.kind, `${g.lat.toFixed(5)}, ${g.lng.toFixed(5)}  -  ${fmtDateTime(g.recorded_at)}`));
+    // Job location: the map snapshot (start/finish markers + track over an OSM
+    // street background), replacing the raw coordinate readout. Falls back to
+    // the coordinates only when the map couldn't be rendered.
+    if (mapPng || gpsPoints.length) {
+      heading('Job location');
+      let mapDrawn = false;
+      if (mapPng) {
+        const mapW = cw;
+        const mapH = Math.round((mapW * 340) / 600); // preserve the snapshot's aspect ratio
+        ensure(mapH + 8);
+        try {
+          doc.image(mapPng, left, doc.y, { fit: [mapW, mapH], align: 'center' });
+          doc.y += mapH + 6;
+          mapDrawn = true;
+        } catch (e) {
+          // fall through to the coordinate list on any embed error
+        }
+      }
+      if (!mapDrawn && gpsPoints.length) {
+        gpsPoints.forEach((g) => row(g.kind, `${g.lat.toFixed(5)}, ${g.lng.toFixed(5)}  -  ${fmtDateTime(g.recorded_at)}`));
+      }
       if (mapLink) {
         ensure(16);
         doc.fillColor(GREEN).font('Helvetica').fontSize(9).text('View job location on map', { link: mapLink, underline: true });

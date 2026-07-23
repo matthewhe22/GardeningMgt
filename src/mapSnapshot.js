@@ -241,4 +241,30 @@ async function renderMapSnapshot(gpsPoints, property, opts = {}) {
 </svg>`;
 }
 
-module.exports = { renderMapSnapshot, representativePoint, externalMapUrl, collectPoints };
+/**
+ * Rasterise the job-location snapshot to a PNG Buffer (for the PDF report,
+ * which can't embed SVG). Builds the self-contained inline SVG (tiles embedded
+ * as data URIs) and rasterises it with sharp at ~2x for crisp print. Returns
+ * null when there's no location to show or rasterisation fails — best-effort,
+ * same as the tile fetches, so the caller can fall back gracefully.
+ */
+async function renderMapSnapshotPng(gpsPoints, property, opts = {}) {
+  const width = opts.width || 600;
+  const height = opts.height || 340;
+  const svg = await renderMapSnapshot(gpsPoints, property, { inline: true, width, height });
+  if (!svg) return null;
+  try {
+    // sharp is required lazily so it never loads on cold start unless a PDF
+    // map is actually rendered (mirrors report.js's lazy pdfkit require).
+    const sharp = require('sharp');
+    return await sharp(Buffer.from(svg), { density: 200 })
+      .resize(width * 2) // height follows from the snapshot's aspect ratio
+      .png()
+      .toBuffer();
+  } catch (e) {
+    console.error('[mapSnapshot] PNG rasterisation failed:', e.message);
+    return null;
+  }
+}
+
+module.exports = { renderMapSnapshot, renderMapSnapshotPng, representativePoint, externalMapUrl, collectPoints };
