@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { renderMapSnapshot, representativePoint, externalMapUrl, collectPoints } = require('../src/mapSnapshot');
+const { renderMapSnapshot, renderMapSnapshotPng, representativePoint, externalMapUrl, collectPoints } = require('../src/mapSnapshot');
 
 const gps = [
   { lat: -36.8485, lng: 174.7633, kind: 'start' },
@@ -73,4 +73,26 @@ test('externalMapUrl points at the finish coordinate', () => {
 test('ignores null-island (0,0) readings', () => {
   const { pts } = collectPoints([{ lat: 0, lng: 0, kind: 'start' }], null);
   assert.strictEqual(pts.length, 0);
+});
+
+test('renderMapSnapshotPng rasterises the snapshot to a PNG buffer (for the PDF report)', async () => {
+  const realFetch = global.fetch;
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC', 'base64');
+  global.fetch = async () => ({ ok: true, arrayBuffer: async () => png });
+  try {
+    const buf = await renderMapSnapshotPng(gps, null, { width: 300, height: 170 });
+    assert.ok(Buffer.isBuffer(buf) && buf.length > 0, 'returns a non-empty buffer');
+    // PNG magic number.
+    assert.deepStrictEqual([...buf.subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47], 'is a PNG');
+    const sharp = require('sharp');
+    const meta = await sharp(buf).metadata();
+    assert.strictEqual(meta.width, 600, 'rasterised at 2x the requested width');
+  } finally {
+    global.fetch = realFetch;
+  }
+});
+
+test('renderMapSnapshotPng returns null when there is no location', async () => {
+  assert.strictEqual(await renderMapSnapshotPng([], { lat: null, lng: null }), null);
+  assert.strictEqual(await renderMapSnapshotPng(null, null), null);
 });
