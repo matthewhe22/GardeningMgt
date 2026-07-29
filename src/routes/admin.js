@@ -109,7 +109,8 @@ router.post('/properties/import', requireRole('supervisor'),
 // --- User management: admin only ---
 
 router.get('/users', requireRole(), asyncHandler(async (req, res) => {
-  const users = await q('SELECT id, name, email, role, phone, active, created_at FROM users ORDER BY role, name');
+  const users = await q(
+    'SELECT id, name, email, role, phone, active, last_login_at, created_at FROM users ORDER BY role, name');
   res.render('admin/users', { title: 'Users', users });
 }));
 

@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS users (
   role          TEXT NOT NULL CHECK (role IN ('admin','supervisor','gardener')),
   phone         TEXT,
   active        BOOLEAN NOT NULL DEFAULT true,
+  last_login_at TIMESTAMP,                        -- set on every successful sign-in
   created_at    TIMESTAMP NOT NULL DEFAULT now()
 );
 
@@ -269,6 +270,8 @@ function ready() {
       await pool.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS visit_comment_id INTEGER REFERENCES visit_comments(id) ON DELETE SET NULL');
       // Renewal tracking: flag when a contract has been renewed/closed.
       await pool.query("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS renewal_acknowledged BOOLEAN NOT NULL DEFAULT false");
+      // Sign-in tracking for the admin user list.
+      await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP');
       const { c } = (await pool.query('SELECT COUNT(*)::int AS c FROM users')).rows[0];
       if (c === 0) {
         const bcrypt = require('bcryptjs');

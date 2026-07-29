@@ -984,3 +984,51 @@ body.anon {
 /* Bump default button/control min height to 44px for touch. */
 .btn, select, input[type="date"], input[type="text"], input[type="email"], input[type="password"], input[type="number"] { min-height: 44px; }
 .btn { display: inline-flex; align-items: center; justify-content: center; }
+
+/* --------------------------------------------------------------------------
+   "Add to home screen" prompt — injected by app.js on mobile only
+   -------------------------------------------------------------------------- */
+
+.a2hs {
+  position: fixed;
+  left: 10px;
+  right: 10px;
+  bottom: calc(66px + env(safe-area-inset-bottom, 0px)); /* clear of the tab bar */
+  z-index: 55;
+  display: flex;
+  gap: 12px;
+  padding: 14px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow-lg);
+  opacity: 0;
+  transform: translateY(12px);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.a2hs.is-open { opacity: 1; transform: none; }
+.a2hs-icon { flex: none; font-size: 1.6rem; line-height: 1.2; }
+.a2hs-body { flex: 1; min-width: 0; }
+.a2hs-title { display: block; color: var(--green-800); }
+.a2hs-steps { margin: 4px 0 10px; font-size: 0.86rem; color: var(--muted); }
+.a2hs-actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.a2hs-actions .btn { min-height: 40px; padding: 8px 14px; }
+/* .btn sets display:inline-flex, which would otherwise beat the UA rule for
+   [hidden] — the install button must stay hidden where there is no install API. */
+.a2hs [hidden] { display: none; }
+.a2hs-close {
+  flex: none;
+  align-self: flex-start;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--muted);
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) { .a2hs { transition: none; } }
+@media print { .a2hs { display: none !important; } }

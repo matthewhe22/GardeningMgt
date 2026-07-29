@@ -21,13 +21,14 @@
 
 <div class="card">
   <table class="table">
-    <tr><th>Name</th><th>Email</th><th>Role</th><th>Phone</th><th>Status</th><th></th></tr>
+    <tr><th>Name</th><th>Email</th><th>Role</th><th>Phone</th><th>Last login</th><th>Status</th><th></th></tr>
     <% users.forEach(u => { %>
     <tr>
       <td><strong><%= u.name %></strong></td>
       <td class="muted"><%= u.email %></td>
       <td><span class="tag tag-<%= u.role %>"><%= u.role %></span></td>
       <td class="muted"><%= u.phone || '' %></td>
+      <td class="muted"><%= u.last_login_at ? u.last_login_at.slice(0, 16) : 'Never' %></td>
       <td><%= u.active ? 'active' : 'disabled' %></td>
       <td>
         <% if (u.id !== user.id) { %>

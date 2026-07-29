@@ -1,7 +1,7 @@
 // GardeningMgt service worker: app-shell + static caching so the UI loads
 // offline, with a friendly offline fallback for navigations. (Form POSTs are
 // not queued — they require connectivity; the offline page tells the user.)
-const CACHE = 'gmgt-v1';
+const CACHE = 'gmgt-v2';
 const STATIC = ['/css/style.css', '/js/app.js', '/manifest.json', '/icon.svg', '/offline.html'];
 
 self.addEventListener('install', (e) => {

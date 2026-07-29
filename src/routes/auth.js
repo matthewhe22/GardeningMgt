@@ -1,7 +1,8 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const { q1 } = require('../db');
+const { q, q1 } = require('../db');
 const { logActivity } = require('../activity');
+const { deviceLabel } = require('../device');
 const { asyncHandler } = require('../asyncHandler');
 
 const router = express.Router();
@@ -47,7 +48,9 @@ router.post('/login', asyncHandler(async (req, res) => {
   attempts.delete(key);
   // Rotate session on login to prevent fixation.
   req.session = { userId: user.id };
-  await logActivity(user.id, 'auth.login', 'user', user.id, `${user.name} signed in`);
+  const device = deviceLabel(req.get('user-agent'));
+  await q('UPDATE users SET last_login_at = now() WHERE id = $1', [user.id]);
+  await logActivity(user.id, 'auth.login', 'user', user.id, `${user.name} signed in (${device})`);
   res.redirect('/');
 }));
 
