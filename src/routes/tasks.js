@@ -3,8 +3,28 @@ const { q, q1 } = require('../db');
 const { requireRole, isStaff } = require('../auth');
 const { logActivity } = require('../activity');
 const { asyncHandler } = require('../asyncHandler');
+const { pageParam, paginate } = require('../pagination');
+const { isValidDate } = require('../recurrence');
 
 const router = express.Router();
+
+// Redirect back to wherever the user came from (the tasks list or a visit's
+// detail page both link to this action), but never to an attacker-controlled
+// referer: only follow it if it actually parses as same-origin as this
+// request, otherwise fall back. Same-site session cookies already mitigate
+// the real-world risk, but there's no reason to trust the raw header either.
+function safeRedirectBack(req, res, fallback) {
+  const ref = req.get('referer');
+  if (ref) {
+    try {
+      const refUrl = new URL(ref);
+      if (`${refUrl.protocol}//${refUrl.host}` === `${req.protocol}://${req.get('host')}`) {
+        return res.redirect(ref);
+      }
+    } catch (e) { /* unparseable referer: fall through to fallback */ }
+  }
+  res.redirect(fallback);
+}
 
 router.get('/', asyncHandler(async (req, res) => {
   const staff = isStaff(req.user);
@@ -13,17 +33,18 @@ router.get('/', asyncHandler(async (req, res) => {
   const args = [];
   if (status) { args.push(status); where.push(`t.status = $${args.length}`); }
   if (!staff) { args.push(req.user.id); where.push(`(t.assignee_id = $${args.length} OR v.gardener_id = $${args.length})`); }
-  const tasks = await q(`
+  const page = pageParam(req);
+  const tasksSql = `
     SELECT t.*, u.name AS assignee_name, v.scheduled_date, p.name AS property_name, v.id AS visit_ref
     FROM tasks t
     LEFT JOIN users u ON u.id = t.assignee_id
     LEFT JOIN visits v ON v.id = t.visit_id
     LEFT JOIN properties p ON p.id = v.property_id
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-    ORDER BY (t.status = 'done'), COALESCE(t.due_date, v.scheduled_date, '9999-12-31')
-    LIMIT 300`, args);
+    ORDER BY (t.status = 'done'), COALESCE(t.due_date, v.scheduled_date, '9999-12-31')`;
+  const { rows: tasks, total, totalPages } = await paginate(q, tasksSql, args, page);
   const gardeners = await q("SELECT id, name FROM users WHERE role = 'gardener' AND active");
-  res.render('tasks/index', { title: 'Tasks', tasks, gardeners, staff, status });
+  res.render('tasks/index', { title: 'Tasks', tasks, gardeners, staff, status, page, total, totalPages });
 }));
 
 // Standalone task (not tied to a visit)
@@ -39,6 +60,25 @@ router.post('/', requireRole('supervisor'), asyncHandler(async (req, res) => {
   res.redirect('/tasks');
 }));
 
+// Edit a task's details (staff only): title, description, assignee, due date.
+// Status has its own quick-change control, so it's deliberately not touched
+// here. Assignee accepts any gardener id or blank (unassigned); the users FK
+// rejects a bogus id.
+router.post('/:id/update', requireRole('supervisor'), asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  const task = await q1('SELECT id, title FROM tasks WHERE id = $1', [id]);
+  if (!task) return res.redirect('/tasks');
+  const { title, description } = req.body;
+  if (!(title || '').trim()) return safeRedirectBack(req, res, '/tasks');
+  const assigneeId = /^\d+$/.test(req.body.assignee_id || '') ? Number(req.body.assignee_id) : null;
+  const dueDate = isValidDate(req.body.due_date) ? req.body.due_date : null;
+  await q(
+    'UPDATE tasks SET title = $1, description = $2, assignee_id = $3, due_date = $4 WHERE id = $5',
+    [title.trim(), description || null, assigneeId, dueDate, id]);
+  await logActivity(req.user.id, 'task.update', 'task', id, `Edited task "${title.trim()}"`);
+  safeRedirectBack(req, res, '/tasks');
+}));
+
 router.post('/:id/status', asyncHandler(async (req, res) => {
   const task = await q1(`
     SELECT t.*, v.gardener_id FROM tasks t LEFT JOIN visits v ON v.id = t.visit_id WHERE t.id = $1`,
@@ -51,7 +91,7 @@ router.post('/:id/status', asyncHandler(async (req, res) => {
   await q(`UPDATE tasks SET status = $1, completed_at = CASE WHEN $1 = 'done' THEN now() ELSE NULL END WHERE id = $2`,
     [status, task.id]);
   await logActivity(req.user.id, 'task.status', 'task', task.id, `Task "${task.title}": ${task.status} -> ${status}`);
-  res.redirect(req.get('referer') || '/tasks');
+  safeRedirectBack(req, res, '/tasks');
 }));
 
 module.exports = router;

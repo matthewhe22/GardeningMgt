@@ -7,28 +7,65 @@ const { requireRole } = require('../auth');
 const { logActivity } = require('../activity');
 const { sendRemindersForDate } = require('../reminders');
 const { asyncHandler } = require('../asyncHandler');
+const { today: businessToday } = require('../time');
 const { assertCsrf } = require('../csrf');
+const { geocodeAddress, geocodeMissingBatch } = require('../geocode');
+const { pageParam, paginate } = require('../pagination');
+
+// Per-click cap on the backfill so the request stays under the serverless
+// time limit (Nominatim wants ~1 req/sec). Click again to continue.
+const GEOCODE_BATCH = Number(process.env.GEOCODE_BATCH || 5);
 
 const router = express.Router();
 
 // --- Activity log & bulk reminders: supervisors and admins ---
 
+// Every action logged so far is "<category>.<verb>" (e.g. 'auth.login',
+// 'visit.timer.stop') — group the filter dropdown by that category prefix
+// rather than hardcoding the full list, so it stays in sync with whatever
+// logActivity() calls actually exist across the codebase.
+const ACTIVITY_CATEGORY_LABELS = {
+  auth: 'Login/logout', visit: 'Visits', job: 'Contracts', invoice: 'Invoicing',
+  issue: 'Issues', property: 'Sites', task: 'Tasks', user: 'Users',
+  route: 'Routing', settings: 'Settings', photo: 'Photos', report: 'Reports',
+};
+
 router.get('/activity', requireRole('supervisor'), asyncHandler(async (req, res) => {
-  const entries = await q(`
+  const page = pageParam(req);
+  const search = (req.query.search || '').trim();
+  const actingUserId = Number(req.query.user_id) || '';
+  const category = (req.query.category || '').trim();
+  const where = [];
+  const args = [];
+  if (search) { args.push(`%${search}%`); where.push(`a.details ILIKE $${args.length}`); }
+  if (actingUserId) { args.push(actingUserId); where.push(`a.user_id = $${args.length}`); }
+  if (category) { args.push(`${category}.%`); where.push(`a.action LIKE $${args.length}`); }
+  const baseWhere = where.length ? 'WHERE ' + where.join(' AND ') : '';
+  const activitySql = `
     SELECT a.*, u.name AS user_name FROM activity_log a
     LEFT JOIN users u ON u.id = a.user_id
-    ORDER BY a.created_at DESC, a.id DESC LIMIT 300`);
-  res.render('admin/activity', { title: 'Activity log', entries });
+    ${baseWhere}
+    ORDER BY a.created_at DESC, a.id DESC`;
+  const [{ rows: entries, total, totalPages }, users, categoryRows] = await Promise.all([
+    paginate(q, activitySql, args, page),
+    q('SELECT id, name FROM users ORDER BY name'),
+    q(`SELECT DISTINCT split_part(action, '.', 1) AS cat FROM activity_log ORDER BY cat`),
+  ]);
+  const categories = categoryRows.map((r) => ({ value: r.cat, label: ACTIVITY_CATEGORY_LABELS[r.cat] || r.cat }));
+  res.render('admin/activity', {
+    title: 'Activity log', entries, page, total, totalPages,
+    search, actingUserId, category, users, categories,
+  });
 }));
 
 router.post('/reminders/bulk', requireRole('supervisor'), asyncHandler(async (req, res) => {
-  const date = req.body.date || new Date().toISOString().slice(0, 10);
+  const date = req.body.date || businessToday();
   const sent = await sendRemindersForDate(date, { actorId: req.user.id, force: req.body.force === 'on' });
   res.redirect(`/admin/reminders?date=${date}&sent=${sent}`);
 }));
 
 router.get('/reminders', requireRole('supervisor'), asyncHandler(async (req, res) => {
-  const date = req.query.date || new Date().toISOString().slice(0, 10);
+  const date = req.query.date || businessToday();
   const pending = await q(`
     SELECT v.*, p.name AS property_name, u.name AS gardener_name
     FROM visits v JOIN properties p ON p.id = v.property_id
@@ -42,23 +79,56 @@ router.get('/reminders', requireRole('supervisor'), asyncHandler(async (req, res
 
 router.get('/properties', requireRole('supervisor'), asyncHandler(async (req, res) => {
   const properties = await q('SELECT * FROM properties ORDER BY name');
+  const missingCoords = properties.filter((p) => p.lat == null || p.lng == null).length;
   res.render('admin/properties', {
-    title: 'Properties', properties,
+    title: 'Properties', properties, missingCoords,
     imported: req.query.imported, importErrors: req.query.errors,
+    geocoded: req.query.geocoded, geoFailed: req.query.failed, remaining: req.query.remaining,
   });
 }));
 
 router.post('/properties', requireRole('supervisor'), asyncHandler(async (req, res) => {
-  const { name, address, contact_name, contact_phone, lat, lng, lots, notes } = req.body;
+  const { name, address, contact_name, contact_phone, contact_email, lat, lng, lots, notes,
+    billing_name, billing_address, billing_email } = req.body;
   if (!(name || '').trim() || !(address || '').trim()) return res.redirect('/admin/properties');
+  // Coordinates power route optimization. If they weren't entered, derive them
+  // from the address automatically (best-effort — a save never fails on this).
+  let latN = lat ? Number(lat) : null;
+  let lngN = lng ? Number(lng) : null;
+  if ((latN == null || lngN == null)) {
+    try {
+      const geo = await geocodeAddress(address.trim());
+      if (geo) { latN = geo.lat; lngN = geo.lng; }
+    } catch (e) { console.error('[geocode] create lookup failed:', e.message); }
+  }
+  // gst_applicable defaults true (the common case); unchecked checkboxes
+  // aren't sent by the browser at all, so its absence means "off".
+  const gstApplicable = req.body.gst_applicable === 'on';
   const { id } = await q1(`
-    INSERT INTO properties (name, address, contact_name, contact_phone, lat, lng, lots, notes)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-    [name.trim(), address.trim(), contact_name || null, contact_phone || null,
-      lat ? Number(lat) : null, lng ? Number(lng) : null,
-      lots ? Math.round(Number(lots)) : null, notes || null]);
+    INSERT INTO properties (name, address, contact_name, contact_phone, contact_email, lat, lng, lots, notes,
+      billing_name, billing_address, billing_email, gst_applicable)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
+    [name.trim(), address.trim(), contact_name || null, contact_phone || null, contact_email || null,
+      latN, lngN, lots ? Math.round(Number(lots)) : null, notes || null,
+      billing_name || null, billing_address || null, billing_email || null, gstApplicable]);
   await logActivity(req.user.id, 'property.create', 'property', id, `Added site "${name.trim()}"`);
   res.redirect('/admin/properties');
+}));
+
+// Backfill coordinates for sites that don't have them yet, from their address.
+// Processes a small batch per click (Nominatim ~1 req/sec) and reports how many
+// still remain so the button can be clicked again until it's done.
+// geocodeMissingBatch itself lives in ../geocode.js — shared by this button,
+// the daily cron pass (server.js's /cron/reminders), and (previously) the
+// spreadsheet import below, which no longer calls it inline.
+router.post('/properties/geocode', requireRole('supervisor'), asyncHandler(async (req, res) => {
+  const { done, failed, remaining } = await geocodeMissingBatch(GEOCODE_BATCH);
+  if (done) {
+    await logActivity(req.user.id, 'property.geocode', 'property', null,
+      `Geocoded ${done} site(s) from address`);
+  }
+  const params = new URLSearchParams({ geocoded: String(done), failed: String(failed), remaining: String(remaining) });
+  res.redirect(`/admin/properties?${params}`);
 }));
 
 // Bulk import sites from an Excel (.xlsx) or CSV upload.
@@ -103,15 +173,63 @@ router.post('/properties/import', requireRole('supervisor'),
     }
     const params = new URLSearchParams({ imported: String(imported) });
     if (errors.length) params.set('errors', errors.slice(0, 10).join(' · '));
+    // Imported rows with no Lat/Lng are left with NULL coordinates (the
+    // properties list already flags "missing coordinates" sites) rather than
+    // geocoding them inline here: geocoding is rate-limited to ~1 req/sec and
+    // each lookup can take up to 8s, so doing it inside this request/response
+    // cycle risked a serverless timeout on anything but a tiny sheet. The
+    // daily cron pass (server.js's /cron/reminders) and the "Find missing
+    // coordinates" button both pick up any property still missing coordinates.
     res.redirect(`/admin/properties?${params}`);
   }));
+
+// Edit a site. Re-detects coordinates from the address when "Re-detect" is
+// ticked, or whenever latitude/longitude are left blank.
+router.post('/properties/:id/update', requireRole('supervisor'), asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  const existing = await q1('SELECT id, address FROM properties WHERE id = $1', [id]);
+  if (!existing) return res.redirect('/admin/properties');
+  const { name, address, contact_name, contact_phone, contact_email, lat, lng, lots, notes,
+    billing_name, billing_address, billing_email } = req.body;
+  if (!(name || '').trim() || !(address || '').trim()) return res.redirect('/admin/properties');
+  const redetect = req.body.regeocode === 'on';
+  let latN = (!redetect && lat) ? Number(lat) : null;
+  let lngN = (!redetect && lng) ? Number(lng) : null;
+  if (redetect || latN == null || lngN == null) {
+    try {
+      const g = await geocodeAddress(address.trim());
+      if (g) { latN = g.lat; lngN = g.lng; }
+    } catch (e) { console.error('[geocode] update lookup failed:', e.message); }
+  }
+  const gstApplicable = req.body.gst_applicable === 'on';
+  // If the address changed, drop the cached PropertyIQ building match so a
+  // stale match can never send a report to the wrong building's owners — the
+  // next send re-resolves (and re-confirms) against the new address.
+  const addressChanged = (existing.address || '').trim() !== address.trim();
+  await q(`
+    UPDATE properties SET name = $1, address = $2, contact_name = $3, contact_phone = $4,
+      contact_email = $5, lat = $6, lng = $7, lots = $8, notes = $9,
+      billing_name = $10, billing_address = $11, billing_email = $12, gst_applicable = $13,
+      piq_building_id = CASE WHEN $14 THEN NULL ELSE piq_building_id END
+    WHERE id = $15`,
+    [name.trim(), address.trim(), contact_name || null, contact_phone || null, contact_email || null,
+      latN, lngN, lots ? Math.round(Number(lots)) : null, notes || null,
+      billing_name || null, billing_address || null, billing_email || null, gstApplicable,
+      addressChanged, id]);
+  await logActivity(req.user.id, 'property.update', 'property', id, `Updated site "${name.trim()}"`);
+  res.redirect('/admin/properties');
+}));
 
 // --- User management: admin only ---
 
 router.get('/users', requireRole(), asyncHandler(async (req, res) => {
   const users = await q(
     'SELECT id, name, email, role, phone, active, last_login_at, created_at FROM users ORDER BY role, name');
-  res.render('admin/users', { title: 'Users', users });
+  res.render('admin/users', {
+    title: 'Users', users,
+    error: req.query.error || null,
+    created: req.query.created || null, updated: req.query.updated || null, reset: req.query.reset || null,
+  });
 }));
 
 router.post('/users', requireRole(), asyncHandler(async (req, res) => {
@@ -123,7 +241,7 @@ router.post('/users', requireRole(), asyncHandler(async (req, res) => {
   try {
     const { id } = await q1(`
       INSERT INTO users (name, email, password_hash, role, phone) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-      [name.trim(), email.trim().toLowerCase(), bcrypt.hashSync(password, 10), role, phone || null]);
+      [name.trim(), email.trim().toLowerCase(), await bcrypt.hash(password, 10), role, phone || null]);
     await logActivity(req.user.id, 'user.create', 'user', id, `Created ${role} account for ${name.trim()}`);
   } catch (e) {
     if (e.code === '23505') return res.redirect('/admin/users?error=dupemail'); // unique_violation
@@ -132,45 +250,150 @@ router.post('/users', requireRole(), asyncHandler(async (req, res) => {
   res.redirect('/admin/users?created=1');
 }));
 
+// How many *other* active admins exist besides `id` — used to stop a
+// role-change or deactivation from leaving the business with zero admins.
+async function activeAdminCountExcluding(id) {
+  const { c } = await q1(
+    "SELECT COUNT(*)::int AS c FROM users WHERE role = 'admin' AND active AND id <> $1", [id]);
+  return c;
+}
+
+// Edit an existing user's name/email/phone/role. Mirrors the create route's
+// validation and duplicate-email handling (unique index + 23505 catch, same
+// pattern as uq_jobs_property_active elsewhere in this codebase).
+router.post('/users/:id/update', requireRole(), asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  const existing = await q1('SELECT id, role, active FROM users WHERE id = $1', [id]);
+  if (!existing) return res.redirect('/admin/users');
+  const { name, email, role, phone } = req.body;
+  if (!(name || '').trim() || !(email || '').trim() || !['admin', 'supervisor', 'gardener'].includes(role)) {
+    return res.redirect('/admin/users?error=invalid');
+  }
+  if (existing.role === 'admin' && existing.active && role !== 'admin' && await activeAdminCountExcluding(id) === 0) {
+    return res.redirect('/admin/users?error=lastadmin');
+  }
+  try {
+    await q(`UPDATE users SET name = $1, email = $2, role = $3, phone = $4 WHERE id = $5`,
+      [name.trim(), email.trim().toLowerCase(), role, phone || null, id]);
+  } catch (e) {
+    if (e.code === '23505') return res.redirect('/admin/users?error=dupemail'); // unique_violation
+    throw e;
+  }
+  await logActivity(req.user.id, 'user.update', 'user', id, `Updated details for ${name.trim()}`);
+  res.redirect('/admin/users?updated=1');
+}));
+
+// Admin-initiated password reset — no email flow, just sets the new hash
+// directly (same bcrypt convention as the login route in routes/auth.js).
+// The log entry records who reset whose password, never the password itself.
+router.post('/users/:id/password', requireRole(), asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  const target = await q1('SELECT id, name FROM users WHERE id = $1', [id]);
+  if (!target) return res.redirect('/admin/users');
+  const { password } = req.body;
+  if (!password || String(password).length < 8) return res.redirect('/admin/users?error=weak');
+  await q('UPDATE users SET password_hash = $1 WHERE id = $2', [await bcrypt.hash(password, 10), id]);
+  await logActivity(req.user.id, 'user.password_reset', 'user', id, `Reset password for ${target.name}`);
+  res.redirect('/admin/users?reset=1');
+}));
+
 router.post('/users/:id/toggle', requireRole(), asyncHandler(async (req, res) => {
-  if (Number(req.params.id) !== req.user.id) {
-    await q('UPDATE users SET active = NOT active WHERE id = $1', [req.params.id]);
-    await logActivity(req.user.id, 'user.toggle', 'user', Number(req.params.id), `Toggled active state of user #${req.params.id}`);
+  const id = Number(req.params.id);
+  if (id !== req.user.id) {
+    const existing = await q1('SELECT role, active FROM users WHERE id = $1', [id]);
+    // Disabling the last active admin would lock the whole business out of
+    // admin-only functions (user management, settings, ...) — block it.
+    if (existing && existing.role === 'admin' && existing.active && await activeAdminCountExcluding(id) === 0) {
+      return res.redirect('/admin/users?error=lastadmin');
+    }
+    await q('UPDATE users SET active = NOT active WHERE id = $1', [id]);
+    await logActivity(req.user.id, 'user.toggle', 'user', id, `Toggled active state of user #${id}`);
   }
   res.redirect('/admin/users');
 }));
 
-// --- App settings (OneDrive archiving): admin only ---
+// --- App settings (OneDrive archiving, invoice letterhead): admin only ---
 
-const { getSettings, setSetting } = require('../settings');
-const { testConnection, SETTING_KEYS } = require('../onedrive');
+const { getSettings, setSetting, INVOICE_SETTING_KEYS } = require('../settings');
+const { testConnection: testOneDrive, SETTING_KEYS: ONEDRIVE_SETTING_KEYS } = require('../onedrive');
+const { testConnection: testEmail, SETTING_KEYS: EMAIL_SETTING_KEYS } = require('../email');
+const { testConnection: testPiq, SETTING_KEYS: PIQ_SETTING_KEYS } = require('../propertyiq');
+const { getBranding, saveLogo, saveFavicon, clearLogo, clearFavicon } = require('../branding');
+const { upload: imageUpload } = require('../upload');
+
+// Settings whose masked placeholder ('********') means "leave as-is, don't
+// overwrite the stored secret" — mirrors the onedrive_client_secret pattern.
+const MASKED_SETTING_KEYS = new Set(['onedrive_client_secret', 'invoice_payment_details', 'smtp_password', 'piq_client_secret']);
+const ALL_SETTING_KEYS = [...ONEDRIVE_SETTING_KEYS, ...INVOICE_SETTING_KEYS, ...EMAIL_SETTING_KEYS, ...PIQ_SETTING_KEYS];
 
 router.get('/settings', requireRole(), asyncHandler(async (req, res) => {
-  const settings = await getSettings(SETTING_KEYS);
+  const [settings, branding] = await Promise.all([getSettings(ALL_SETTING_KEYS), getBranding()]);
   res.render('admin/settings', {
-    title: 'Settings', settings,
-    saved: req.query.saved, test: null,
+    title: 'Settings', settings, branding,
+    saved: req.query.saved, brandingError: req.query.brandingError || null, test: null, emailTest: null, piqTest: null,
   });
 }));
 
 router.post('/settings', requireRole(), asyncHandler(async (req, res) => {
-  for (const key of SETTING_KEYS) {
+  for (const key of ALL_SETTING_KEYS) {
     const value = (req.body[key] || '').trim();
     // Leave the stored secret untouched when the masked placeholder comes back.
-    if (key === 'onedrive_client_secret' && value === '********') continue;
+    if (MASKED_SETTING_KEYS.has(key) && value === '********') continue;
     await setSetting(key, value || null);
   }
-  await logActivity(req.user.id, 'settings.update', 'settings', null, 'Updated OneDrive settings');
+  await logActivity(req.user.id, 'settings.update', 'settings', null, 'Updated settings');
   res.redirect('/admin/settings?saved=1');
 }));
 
 router.post('/settings/test', requireRole(), asyncHandler(async (req, res) => {
-  const settings = await getSettings(SETTING_KEYS);
-  const test = await testConnection();
+  const [settings, branding] = await Promise.all([getSettings(ALL_SETTING_KEYS), getBranding()]);
+  const test = await testOneDrive();
   // Log only pass/fail — the message can contain Graph error detail.
   await logActivity(req.user.id, 'settings.test', 'settings', null,
     `OneDrive connection test: ${test.ok ? 'OK' : 'failed'}`);
-  res.render('admin/settings', { title: 'Settings', settings, saved: null, test });
+  res.render('admin/settings', { title: 'Settings', settings, branding, saved: null, brandingError: null, test, emailTest: null, piqTest: null });
 }));
+
+router.post('/settings/test-email', requireRole(), asyncHandler(async (req, res) => {
+  const [settings, branding] = await Promise.all([getSettings(ALL_SETTING_KEYS), getBranding()]);
+  const emailTest = await testEmail();
+  await logActivity(req.user.id, 'settings.test', 'settings', null,
+    `Email (SMTP) connection test: ${emailTest.ok ? 'OK' : 'failed'}`);
+  res.render('admin/settings', { title: 'Settings', settings, branding, saved: null, brandingError: null, test: null, emailTest, piqTest: null });
+}));
+
+router.post('/settings/test-piq', requireRole(), asyncHandler(async (req, res) => {
+  const [settings, branding] = await Promise.all([getSettings(ALL_SETTING_KEYS), getBranding()]);
+  const piqTest = await testPiq();
+  await logActivity(req.user.id, 'settings.test', 'settings', null,
+    `PropertyIQ connection test: ${piqTest.ok ? 'OK' : 'failed'}`);
+  res.render('admin/settings', { title: 'Settings', settings, branding, saved: null, brandingError: null, test: null, emailTest: null, piqTest });
+}));
+
+// Logo (shown in the sidebar/topbar) and favicon (browser tab icon) — each
+// re-encoded and resized server-side (src/branding.js) so any reasonable
+// image works regardless of its original size/format.
+router.post('/settings/branding', requireRole(),
+  imageUpload.fields([{ name: 'logo', maxCount: 1 }, { name: 'favicon', maxCount: 1 }]),
+  asyncHandler(async (req, res) => {
+    assertCsrf(req); // defence in depth — see csrf.js's comment on multipart bodies
+    const logoFile = req.files?.logo?.[0];
+    const faviconFile = req.files?.favicon?.[0];
+    let error = null;
+
+    if (req.body.remove_logo === 'on') await clearLogo();
+    else if (logoFile) {
+      const r = await saveLogo(logoFile);
+      if (!r.ok) error = r.message;
+    }
+    if (req.body.remove_favicon === 'on') await clearFavicon();
+    else if (faviconFile) {
+      const r = await saveFavicon(faviconFile);
+      if (!r.ok) error = error || r.message;
+    }
+
+    await logActivity(req.user.id, 'settings.update', 'settings', null, 'Updated branding (logo/favicon)');
+    res.redirect(error ? `/admin/settings?brandingError=${encodeURIComponent(error)}` : '/admin/settings?saved=1');
+  }));
 
 module.exports = router;

@@ -4,10 +4,31 @@ const { q, q1 } = require('./db');
 // Secret-valued settings are encrypted at rest with AES-256-GCM using a key
 // derived from SETTINGS_KEY (or SESSION_SECRET as a fallback). Stored as
 // enc:<iv>:<tag>:<ciphertext> (all base64). Plaintext legacy values still read.
-const SECRET_KEYS = new Set(['onedrive_client_secret']);
-const KEY = crypto.createHash('sha256')
-  .update(process.env.SETTINGS_KEY || process.env.SESSION_SECRET || 'dev-only-insecure-secret')
-  .digest();
+const SECRET_KEYS = new Set(['onedrive_client_secret', 'invoice_payment_details', 'smtp_password', 'piq_client_secret']);
+
+// Business details shown on invoice PDFs, edited on /admin/settings.
+// invoice_payment_details (bank/BPAY info etc.) is encrypted at rest like the
+// OneDrive client secret above; the rest is non-sensitive letterhead text.
+const INVOICE_SETTING_KEYS = [
+  'invoice_business_name', 'invoice_business_address', 'invoice_business_abn',
+  'invoice_payment_details', 'invoice_payment_terms_days',
+];
+
+// Fail closed, same rule as server.js's SESSION_SECRET guard (duplicated
+// rather than imported to avoid a circular require: server.js -> routes/admin
+// -> settings.js -> server.js). Without this, an unset SETTINGS_KEY/
+// SESSION_SECRET silently derives the encryption key from a literal string in
+// the public repo, so anyone who reads the source can decrypt stored secrets
+// (e.g. the OneDrive client secret) straight out of the settings table.
+const KEY_MATERIAL = process.env.SETTINGS_KEY || process.env.SESSION_SECRET;
+if (!KEY_MATERIAL && process.env.ALLOW_INSECURE_SECRET !== '1') {
+  throw new Error(
+    'SETTINGS_KEY or SESSION_SECRET must be set — refusing to start and derive the settings ' +
+    'encryption key from the default insecure value. Set one of them, or set ' +
+    'ALLOW_INSECURE_SECRET=1 for local dev only.'
+  );
+}
+const KEY = crypto.createHash('sha256').update(KEY_MATERIAL || 'dev-only-insecure-secret').digest();
 
 function encrypt(plain) {
   const iv = crypto.randomBytes(12);
@@ -50,4 +71,4 @@ async function setSetting(key, value) {
     [key, stored]);
 }
 
-module.exports = { getSetting, getSettings, setSetting };
+module.exports = { getSetting, getSettings, setSetting, INVOICE_SETTING_KEYS };

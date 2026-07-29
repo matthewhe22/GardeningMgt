@@ -1,44 +1,63 @@
 <%- include('../partials/header') %>
 <h1><%= invoice.number %> <span class="status status-<%= invoice.status %>"><%= invoice.status %></span></h1>
+<% if (error === 'duplicate') { %>
+<p class="alert alert-error">Can't set that status: another live invoice already exists for this visit. Void or update that one first.</p>
+<% } else if (error === 'hasitems') { %>
+<p class="alert alert-error">Can't delete this invoice: it already has line items. Void it instead.</p>
+<% } else if (error === 'notdraft') { %>
+<p class="alert alert-error">Only a draft invoice can be deleted. Void it instead.</p>
+<% } %>
 <p class="muted">
-  <%= invoice.property_name %>, <%= invoice.address %> · Job on <%= invoice.scheduled_date %>
-  (<a href="/visits/<%= invoice.visit_id %>">job #<%= invoice.visit_id %></a>)
+  Bill to: <strong><%= invoice.billing_name || invoice.property_name %></strong>, <%= invoice.billing_address || invoice.address %>
+  <% if (invoice.billing_name) { %> · Site: <%= invoice.property_name %><% } %>
+  · Visit on <%= invoice.scheduled_date %>
+  (<a href="/visits/<%= invoice.visit_id %>">visit #<%= invoice.visit_id %></a>)
   <% if (invoice.gardener_name) { %> · Gardener: <%= invoice.gardener_name %><% } %>
-  <% if (invoice.issued_at) { %> · Issued <%= invoice.issued_at %><% } %>
-  <% if (invoice.paid_at) { %> · Paid <%= invoice.paid_at %><% } %>
+  <% if (invoice.billing_email || invoice.contact_email) { %>
+    · Email: <a href="mailto:<%= invoice.billing_email || invoice.contact_email %>"><%= invoice.billing_email || invoice.contact_email %></a>
+  <% } %>
+  <% if (invoice.due_at) { %> · Due <%= fmtDate(invoice.due_at) %><% } %>
+  <% if (invoice.issued_at) { %> · Issued <%= fmtDateTime(invoice.issued_at) %><% } %>
+  <% if (invoice.paid_at) { %> · Paid <%= fmtDateTime(invoice.paid_at) %><% } %>
 </p>
+<p><a class="btn" href="/invoices/<%= invoice.id %>/pdf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 19.5h16"/></svg> Download PDF</a></p>
 
 <div class="card">
-  <table class="table">
-    <tr><th>Description</th><th>Qty</th><th>Unit price</th><th>Amount</th><th></th></tr>
+  <table class="table table--stack">
+    <tr class="thead-row"><th>Description</th><th>Qty</th><th>Unit price</th><th>Amount</th><th>Remove</th></tr>
     <% invoice.items.forEach(it => { %>
     <tr>
-      <td><%= it.description %></td>
-      <td><%= it.quantity %></td>
-      <td>$<%= it.unit_price.toFixed(2) %></td>
-      <td>$<%= (it.quantity * it.unit_price).toFixed(2) %></td>
-      <td>
+      <td class="stack-main"><%= it.description %></td>
+      <td data-label="Qty"><%= it.quantity %></td>
+      <td data-label="Unit price">$<%= it.unit_price.toFixed(2) %></td>
+      <td data-label="Amount">$<%= (it.quantity * it.unit_price).toFixed(2) %></td>
+      <td data-label="Remove">
         <% if (invoice.status === 'draft') { %>
-        <form method="post" action="/invoices/<%= invoice.id %>/items/<%= it.id %>/delete" class="inline">
-          <button class="link-btn">✕</button>
+        <form method="post" action="/invoices/<%= invoice.id %>/items/<%= it.id %>/delete" class="inline" data-confirm="Remove this line item?"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+          <button class="link-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
         </form>
         <% } %>
       </td>
     </tr>
     <% }) %>
-    <tr><td colspan="3"><strong>Total</strong></td><td><strong>$<%= invoice.total.toFixed(2) %></strong></td><td></td></tr>
+    <% if (invoice.gst_applicable) { %>
+    <% const gst = invoice.total - invoice.total / 1.10; %>
+    <tr><td colspan="3" class="stack-main muted">Subtotal</td><td data-label="Subtotal" class="muted">$<%= (invoice.total - gst).toFixed(2) %></td><td></td></tr>
+    <tr><td colspan="3" class="stack-main muted">GST (10%)</td><td data-label="GST" class="muted">$<%= gst.toFixed(2) %></td><td></td></tr>
+    <% } %>
+    <tr><td colspan="3" class="stack-main"><strong>Total<%= invoice.gst_applicable ? ' (inc. GST)' : '' %></strong></td><td data-label="Total"><strong>$<%= invoice.total.toFixed(2) %></strong></td><td></td></tr>
   </table>
 
   <% if (invoice.status === 'draft') { %>
-  <form method="post" action="/invoices/<%= invoice.id %>/items" class="filter-row">
-    <input type="text" name="description" placeholder="Description" required>
-    <input type="number" name="quantity" placeholder="Qty" step="0.01" value="1" required>
-    <input type="number" name="unit_price" placeholder="Unit price" step="0.01" required>
+  <form method="post" action="/invoices/<%= invoice.id %>/items" class="filter-row"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+    <label>Description <input type="text" name="description" placeholder="e.g. Mulch supply" required></label>
+    <label>Qty <input type="number" name="quantity" step="0.01" min="0" value="1" required></label>
+    <label>Unit price <input type="number" name="unit_price" step="0.01" min="0" required></label>
     <button class="btn">Add line</button>
   </form>
   <% } %>
 
-  <form method="post" action="/invoices/<%= invoice.id %>/status" class="filter-row">
+  <form method="post" action="/invoices/<%= invoice.id %>/status" class="filter-row" data-confirm="Update this invoice's status?"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
     <label>Status
       <select name="status">
         <% ['draft','sent','paid','void'].forEach(s => { %>
@@ -48,5 +67,12 @@
     </label>
     <button class="btn btn-primary">Update status</button>
   </form>
+
+  <% if (invoice.status === 'draft' && !invoice.items.length) { %>
+  <form method="post" action="/invoices/<%= invoice.id %>/delete" class="inline" style="margin-top:8px"
+    data-confirm="Delete this empty draft invoice? This can't be undone."><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+    <button class="link-btn">Delete this empty draft</button>
+  </form>
+  <% } %>
 </div>
 <%- include('../partials/footer') %>

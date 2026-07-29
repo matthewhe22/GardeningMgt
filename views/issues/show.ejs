@@ -1,7 +1,11 @@
 <%- include('../partials/header') %>
 <h1>Issue #<%= issue.id %>: <%= issue.title %></h1>
-<p class="muted">Reported by <%= issue.reporter_name || 'unknown' %> on <%= issue.created_at %> UTC
-  <% if (issue.property_name) { %> · <%= issue.property_name %><% } %></p>
+<p class="muted">Reported by <%= issue.reporter_name || 'unknown' %> on <%= fmtDateTime(issue.created_at) %>
+  <% if (issue.property_name) { %> · <%= issue.property_name %><% } %>
+  <% if (issue.visit_id) { %> · <a href="/visits/<%= issue.visit_id %>">from visit #<%= issue.visit_id %></a><% } %></p>
+<% if (locals.flash === 'badphoto') { %>
+  <p class="alert alert-error"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg> One or more photos couldn't be uploaded — please check the file and try again.</p>
+<% } %>
 
 <div class="grid">
   <section class="card">
@@ -10,9 +14,9 @@
     <p>
       <span class="prio prio-<%= issue.priority %>"><%= issue.priority %></span>
       <span class="status status-<%= issue.status %>"><%= issue.status.replace('_',' ') %></span>
-      <% if (issue.resolved_at) { %><span class="muted">resolved <%= issue.resolved_at %> UTC</span><% } %>
+      <% if (issue.resolved_at) { %><span class="muted">resolved <%= fmtDateTime(issue.resolved_at) %></span><% } %>
     </p>
-    <form method="post" action="/issues/<%= issue.id %>/update" class="form-grid">
+    <form method="post" action="/issues/<%= issue.id %>/update" class="form-grid"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
       <label>Status
         <select name="status">
           <% ['open','in_progress','resolved','closed'].forEach(s => { %>
@@ -44,27 +48,43 @@
     <div class="photo-grid">
       <% photos.forEach(ph => { %>
         <figure class="photo">
-          <a href="/uploads/<%= ph.filename %>" target="_blank"><img src="/uploads/<%= ph.filename %>" alt="<%= ph.caption || ph.original_name %>" loading="lazy"></a>
-          <figcaption><span class="photo-stamp">📅 <%= ph.created_at %> UTC</span><br>
-            <span class="muted">by <%= ph.uploader_name %></span></figcaption>
+          <a href="/uploads/<%= ph.filename %>" target="_blank"><img src="/uploads/<%= ph.filename %>/thumb" alt="<%= ph.caption || ph.original_name %>" loading="lazy"></a>
+          <figcaption><span class="photo-stamp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M8 3v4M16 3v4M3.5 10h17"/></svg> <%= fmtDateTime(ph.created_at) %></span><br>
+            <span class="muted">by <%= ph.uploader_name %></span>
+            <% if (staff || ph.uploaded_by === user.id) { %>
+              <form method="post" action="/photos/<%= ph.id %>/delete" class="inline" data-confirm="Delete this photo?"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %><button class="link-btn link-btn-danger">Delete</button></form>
+            <% } %></figcaption>
         </figure>
       <% }) %>
     </div>
-    <form method="post" action="/issues/<%= issue.id %>/photos" enctype="multipart/form-data" class="add-row">
-      <input type="file" name="photos" accept="image/*" multiple required>
-      <button class="btn">Upload</button>
+    <form method="post" action="/issues/<%= issue.id %>/photos" enctype="multipart/form-data" class="photo-upload" data-upload><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+      <div class="photo-actions">
+        <label class="btn btn-primary photo-pick" data-camera>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h3l2-2.5h6L17 7h3a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Z"/><circle cx="12" cy="13" r="3.5"/></svg> Take photo
+          <input type="file" name="photos" accept="image/*" capture="environment" multiple hidden>
+        </label>
+        <label class="btn photo-pick" data-library>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="m4 17 5-5 3.5 3.5L17 10l3 3"/></svg> Choose from library
+          <input type="file" name="photos" accept="image/*" multiple hidden>
+        </label>
+      </div>
+      <div class="photo-previews" data-upload-previews hidden></div>
+      <p class="upload-status muted" data-upload-status hidden></p>
+      <button class="btn btn-primary btn-block" type="submit" data-upload-submit>Upload photos</button>
     </form>
   </section>
 
   <section class="card" id="comments">
     <h2>Comments</h2>
     <% comments.forEach(c => { %>
-      <div class="comment"><strong><%= c.author_name %></strong> <span class="muted"><%= c.created_at %> UTC</span>
+      <div class="comment"><strong><%= c.author_name %></strong> <span class="muted"><%= fmtDateTime(c.created_at) %></span>
         <p><%= c.body %></p></div>
     <% }) %>
-    <form method="post" action="/issues/<%= issue.id %>/comments">
+    <form method="post" action="/issues/<%= issue.id %>/comments" class="comment-form"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
       <textarea name="body" rows="2" placeholder="Add a comment…" required></textarea>
-      <button class="btn">Comment</button>
+      <div class="comment-actions">
+        <button class="btn btn-primary comment-send" type="submit">Send</button>
+      </div>
     </form>
   </section>
 </div>

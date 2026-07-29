@@ -1,13 +1,15 @@
 {
+  "regions": ["syd1"],
   "functions": {
     "api/index.js": {
-      "includeFiles": "{views,public}/**"
+      "includeFiles": "{views,public,node_modules/pdfkit/js/data,node_modules/@img,node_modules/sharp}/**",
+      "maxDuration": 60
     }
   },
   "rewrites": [
     { "source": "/(.*)", "destination": "/api/index" }
   ],
   "crons": [
-    { "path": "/cron/reminders", "schedule": "0 6 * * *" }
+    { "path": "/cron/reminders", "schedule": "0 20 * * *" }
   ]
 }

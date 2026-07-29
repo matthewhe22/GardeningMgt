@@ -21,14 +21,14 @@
   --card:      #ffffff;
   --text:      #1d2620;
   --text-soft: #45514a;
-  --muted:     #707b72;
+  --muted:     #5b665d;
   --border:    #e6e4dc;
   --border-strong: #d6d4ca;
 
   /* semantic */
   --danger:     #c0392b;
   --danger-bg:  #fdecea;
-  --warn:       #9a6700;
+  --warn:       #855600;
   --warn-bg:    #fff4d6;
   --info:       #1d5fbf;
   --info-bg:    #e7f0fc;
@@ -49,7 +49,11 @@
 
 * { box-sizing: border-box; }
 
-html { -webkit-text-size-adjust: 100%; }
+html {
+  -webkit-text-size-adjust: 100%;
+  background: var(--bg);
+  overscroll-behavior-y: none;
+}
 
 body {
   margin: 0;
@@ -58,6 +62,7 @@ body {
   color: var(--text);
   line-height: 1.5;
   font-size: 15px;
+  overscroll-behavior-y: none;
 }
 
 a { color: var(--green-700); text-decoration: none; }
@@ -107,9 +112,25 @@ body.authed main.container {
 @media (max-width: 767px) {
   body.authed main.container {
     margin-left: 0;
-    padding: 16px 14px calc(86px + env(safe-area-inset-bottom, 0px));
+    padding: 16px 14px calc(92px + env(safe-area-inset-bottom, 0px));
   }
-  body.authed { padding-top: 56px; } /* room for fixed mobile topbar */
+  body.authed {
+    padding-top: calc(56px + env(safe-area-inset-top, 0px)); /* room for fixed mobile topbar */
+    /* On short pages (little content — e.g. Routes before a gardener/date is
+       picked, an empty Issues list, Profile), the document was shorter than
+       one screen. Mobile Safari never needs to scroll such a page, so it
+       never settles its dynamic toolbar/viewport, and a fixed bottom:0 tabbar
+       ends up pinned to that stale, shorter layout viewport — leaving a gap
+       of page background between the tabbar and the true screen edge (and a
+       laggy re-layout once something finally forces a recalculation). Forcing
+       the body to always be at least one viewport tall keeps the layout
+       viewport stable from first paint on every page. */
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+
+  body.authed h1 { font-size: 1.4rem; }
+  body.authed h1 .muted { font-size: 0.55em; }
 }
 
 /* ----- Sidebar (desktop) ----- */
@@ -151,6 +172,11 @@ body.authed main.container {
   font-size: 18px;
   flex: none;
 }
+/* An uploaded logo (admin Settings page) replaces the emoji mark above — drop
+   the placeholder tile background/border so the logo's own art shows cleanly
+   against the surrounding bar instead of sitting in a colored box. */
+.brand-mark.has-logo { background: none; border: none; }
+.brand-mark img { width: 100%; height: 100%; object-fit: contain; }
 
 .sidebar-nav { padding: 8px 12px; flex: 1; }
 
@@ -207,7 +233,20 @@ body.authed main.container {
   font-size: 0.85rem;
 }
 
-.sidebar-user { min-width: 0; }
+.sidebar-me {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+  border-radius: var(--radius-sm);
+  padding: 2px;
+  margin: -2px;
+  text-decoration: none;
+}
+.sidebar-me:hover { background: rgba(255, 255, 255, 0.07); text-decoration: none; }
+
+.sidebar-user { min-width: 0; display: flex; flex-direction: column; }
 .sidebar-user .name { color: #fff; font-size: 0.86rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sidebar-user .role { color: rgba(230, 242, 234, 0.55); font-size: 0.74rem; text-transform: capitalize; }
 
@@ -231,40 +270,42 @@ body.authed main.container {
   display: none;
   position: fixed;
   top: 0; left: 0; right: 0;
-  height: 56px;
+  height: calc(56px + env(safe-area-inset-top, 0px));
   z-index: 40;
   background: var(--green-900);
   color: #fff;
+  transform: translateZ(0);
   align-items: center;
   gap: 8px;
-  padding: 0 8px 0 14px;
+  padding: env(safe-area-inset-top, 0px) 10px 0 16px;
 }
 
 .topbar-brand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   color: #fff;
   font-weight: 700;
   text-decoration: none;
-  font-size: 1rem;
+  font-size: 1.3rem;
+  letter-spacing: -0.01em;
   margin-right: auto;
 }
 .topbar-brand:hover { text-decoration: none; }
-.topbar-brand .brand-mark { width: 30px; height: 30px; font-size: 15px; }
+.topbar-brand .brand-mark { width: 38px; height: 38px; font-size: 20px; border-radius: 11px; }
 
 .topbar-action {
   position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
+  width: 48px;
+  height: 48px;
   border-radius: 10px;
   color: rgba(230, 242, 234, 0.9);
   cursor: pointer;
 }
-.topbar-action svg { width: 22px; height: 22px; }
+.topbar-action svg { width: 26px; height: 26px; }
 .topbar-action:hover { background: rgba(255, 255, 255, 0.1); }
 .topbar-action .badge { position: absolute; top: 4px; right: 2px; }
 
@@ -280,6 +321,23 @@ body.authed main.container {
   backdrop-filter: blur(10px);
   border-top: 1px solid var(--border);
   padding-bottom: env(safe-area-inset-bottom, 0px);
+  /* Force its own compositing layer so iOS Safari keeps it pinned to the true
+     visual-viewport bottom edge (rather than a stale layout-viewport bottom)
+     as the address bar/toolbar collapses, avoiding a gap under the bar. */
+  transform: translateZ(0);
+}
+
+/* iOS Safari (collapsing toolbar) and home-screen PWAs can end the layout
+   viewport above the physical screen bottom, leaving a strip of page
+   background under a fixed bottom:0 bar. Extend the bar's backdrop past the
+   viewport edge so the nav always reads as anchored to the screen bottom. */
+.tabbar::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 0; right: 0;
+  height: 160px;
+  background: inherit;
 }
 
 .tabbar-inner { display: flex; }
@@ -290,16 +348,16 @@ body.authed main.container {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  min-height: 56px;
-  padding: 6px 2px;
+  gap: 3px;
+  min-height: 62px;
+  padding: 7px 2px;
   color: var(--muted);
-  font-size: 0.66rem;
+  font-size: 0.72rem;
   font-weight: 600;
   text-decoration: none;
   position: relative;
 }
-.tab svg { width: 22px; height: 22px; }
+.tab svg { width: 26px; height: 26px; }
 .tab:hover { text-decoration: none; }
 .tab.active { color: var(--green-700); }
 .tab .badge { position: absolute; top: 4px; left: calc(50% + 4px); }
@@ -363,7 +421,7 @@ body.authed main.container {
   .tabbar { display: block; }
 }
 
-@media (min-width: 768px) {
+@media (min-width: 768px) and (pointer: fine) {
   .sheet, .sheet-backdrop { display: none !important; }
 }
 
@@ -447,8 +505,8 @@ details.card[open] > summary::before { transform: rotate(45deg); }
 .stat-row {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  margin-bottom: 24px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  margin-bottom: 14px;
 }
 
 .stat-card {
@@ -478,7 +536,7 @@ details.card[open] > summary::before { transform: rotate(45deg); }
 .stat-icon.blue  { background: var(--info-bg); color: var(--info); }
 
 .stat-value { font-size: 1.45rem; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; }
-.stat-label { font-size: 0.72rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.stat-label { font-size: 0.85rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
 
 @media (max-width: 520px) {
   .stat-row { grid-template-columns: 1fr 1fr; }
@@ -501,7 +559,9 @@ details.card[open] > summary::before { transform: rotate(45deg); }
   margin-bottom: 8px;
   font-size: 20px;
 }
+.empty-icon svg { width: 22px; height: 22px; }
 .empty p { margin: 0; font-size: 0.9rem; }
+.empty .btn, .empty .btn-sm { margin-top: 12px; }
 
 /* --------------------------------------------------------------------------
    Forms
@@ -577,6 +637,17 @@ select {
   .form-grid .span2 { grid-column: span 1; }
 }
 
+.brand-preview { display: flex; align-items: center; gap: 10px; }
+.brand-preview-img {
+  max-width: 160px;
+  max-height: 48px;
+  border-radius: 6px;
+  background:
+    linear-gradient(45deg, #eee 25%, transparent 25%, transparent 75%, #eee 75%) 0 0/16px 16px,
+    linear-gradient(45deg, #eee 25%, #fff 25%, #fff 75%, #eee 75%) 8px 8px/16px 16px;
+}
+.brand-preview-favicon { max-width: 40px; max-height: 40px; }
+
 .filter-row {
   display: flex;
   gap: 12px;
@@ -600,7 +671,7 @@ select {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  min-height: 42px;
+  min-height: 44px;
   padding: 9px 18px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
@@ -643,6 +714,8 @@ select {
   min-height: 32px;
 }
 .link-btn:hover { text-decoration: underline; }
+.link-btn-danger { color: var(--danger); }
+.link-btn-danger:hover { color: #a93226; }
 
 /* --------------------------------------------------------------------------
    Tables
@@ -669,7 +742,7 @@ select {
 .table a { font-weight: 600; }
 
 /* Mobile: stack tagged tables into card-style rows (uses td[data-label]) */
-@media (max-width: 700px) {
+@media (max-width: 767px) {
   .table--stack, .table--stack tbody { display: block; }
   .table--stack tr {
     display: block;
@@ -739,14 +812,14 @@ select {
 }
 
 .status-scheduled, .status-pending, .status-draft { background: var(--info-bg); color: var(--info); }
-.status-in_progress, .status-sent { background: var(--warn-bg); color: var(--warn); }
+.status-in_progress, .status-sent { background: #fdf0d5; color: var(--warn); }
 .status-completed, .status-done, .status-resolved, .status-paid { background: var(--ok-bg); color: var(--ok); }
 .status-skipped, .status-blocked, .status-cancelled, .status-closed, .status-void { background: #ecebe5; color: #6d7570; }
-.status-open { background: #fdeaf0; color: #b0265c; }
+.status-open { background: #fdeaf0; color: #8e1f4b; }
 
 .prio-low { background: #ecebe5; color: #6d7570; }
 .prio-medium { background: var(--info-bg); color: var(--info); }
-.prio-high { background: #ffedd9; color: #c2570a; }
+.prio-high { background: #ffedd9; color: #9a4408; }
 .prio-urgent { background: var(--danger-bg); color: var(--danger); font-weight: 700; }
 
 .tag-admin { background: #efe9fb; color: #5b34b1; }
@@ -792,7 +865,21 @@ select {
   top: 8px;
   left: 8px;
   letter-spacing: 0.01em;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
+.photo-stamp svg { width: 12px; height: 12px; flex: none; }
+
+/* Inline SVG icons used in place of emoji glyphs: buttons/chips get a small
+   fixed size, icons sitting inline in text (headings, summaries) scale with
+   the surrounding font via 1em. */
+.btn svg, .link-btn svg, .chip svg, .status svg { width: 14px; height: 14px; flex: none; }
+h2 svg, h3 svg, summary svg { width: 1em; height: 1em; vertical-align: -0.15em; flex: none; }
+.muted svg { width: 0.9em; height: 0.9em; vertical-align: -0.1em; }
+/* Fallback for every other inline icon spot (table cells, alerts, plain
+   paragraphs) not covered by a more specific rule above. */
+svg { width: 1em; height: 1em; vertical-align: -0.125em; }
 
 /* --------------------------------------------------------------------------
    Routes, comments, notifications, alerts, misc
@@ -809,6 +896,16 @@ select {
   border-radius: 50%;
   font-size: 0.78rem;
   font-weight: 700;
+}
+/* A visit not yet placed on an optimized route has no stop number — a hollow
+   outline reads as "not routed" instead of a filled badge with a bare dash
+   glyph that's easy to mistake for a real stop number (e.g. "1"). */
+.route-no.unrouted {
+  min-width: 10px;
+  width: 10px;
+  height: 10px;
+  background: transparent;
+  border: 2px solid var(--border);
 }
 
 .route-list { padding-left: 0; margin: 16px 0 0; counter-reset: stop; list-style: none; }
@@ -850,6 +947,7 @@ select {
   background: var(--green-50);
   box-shadow: inset 3px 0 0 var(--green-500);
 }
+.notification-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 
 .alert {
   padding: 12px 16px;
@@ -910,6 +1008,32 @@ body.anon {
 .auth-card .btn { width: 100%; margin-top: 16px; }
 
 /* --------------------------------------------------------------------------
+   Profile page
+   -------------------------------------------------------------------------- */
+
+.profile-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.profile-head .avatar { width: 56px; height: 56px; font-size: 1.3rem; }
+.profile-head h2 { margin: 0; font-size: 1.15rem; }
+.profile-head .muted { margin-top: 2px; }
+
+.profile-rows { margin: 20px 0 0; }
+.profile-rows > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.92rem;
+}
+.profile-rows > div:last-child { border-bottom: 0; }
+.profile-rows dt { color: var(--muted); font-weight: 600; }
+.profile-rows dd { margin: 0; text-align: right; word-break: break-word; }
+
+/* --------------------------------------------------------------------------
    Print
    -------------------------------------------------------------------------- */
 
@@ -935,7 +1059,23 @@ body.anon {
 .confirm-line { display: flex; align-items: center; gap: 10px; font-weight: 600; margin: 10px 0; }
 .confirm-line input { width: 20px; height: 20px; }
 
+/* Inline per-row edit disclosure (e.g. editing a task in the tasks table). */
+.row-edit { margin-top: 8px; }
+.row-edit > summary { cursor: pointer; display: inline-block; font-size: 0.82rem; font-weight: 600; color: var(--green-700); }
+.row-edit[open] > summary { margin-bottom: 8px; }
+.row-edit .form-grid { padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--green-50); max-width: 560px; }
+
+/* Key/value summary table (e.g. the owner-report preview). */
+table.kv { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 0.92rem; }
+table.kv th, table.kv td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e6e4dc; vertical-align: top; }
+table.kv th { width: 210px; color: #707b72; font-weight: 600; }
+.owner-list { margin: 8px 0 16px; padding-left: 20px; line-height: 1.7; }
+.owner-list li { word-break: break-all; }
+
 .timer-card details { margin-top: 12px; }
+.map-snapshot { margin: 14px 0; max-width: 600px; }
+.map-snapshot-title { font-size: 0.95rem; margin: 0 0 6px; }
+.map-snapshot svg { width: 100%; height: auto; }
 .manage-card summary { cursor: pointer; }
 .comment-photo { max-width: 140px; display: inline-block; margin-right: 8px; }
 
@@ -946,44 +1086,430 @@ body.anon {
   text-decoration: none; color: var(--text);
   transition: box-shadow 0.12s ease, transform 0.12s ease;
 }
-.job-row:hover { text-decoration: none; box-shadow: var(--shadow); transform: translateY(-1px); }
-.job-row-main { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.job-row:hover { box-shadow: var(--shadow); transform: translateY(-1px); text-decoration: none; }
+.job-row-main { display: flex; flex-direction: column; min-width: 0; flex: 1; color: var(--text); text-decoration: none; }
+.job-row-main:hover { text-decoration: none; }
+.job-row-main:hover strong { text-decoration: underline; }
 .job-row-main strong { font-size: 0.98rem; }
 .job-row-main .muted { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .job-row-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; flex: none; }
 .job-row .status { flex: none; }
 
+/* Per-day grouping + route header on the Jobs page */
+.day-group { margin-bottom: 22px; }
+.day-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap; margin: 0 2px 10px;
+}
+.day-title { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 0.95rem; }
+.day-title .status { text-transform: none; }
+
+/* Quick "Today / All dates" filter chips */
+.quick-filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.quick-chip { cursor: pointer; }
+.quick-chip.is-active {
+  background: var(--green-700); border-color: var(--green-700); color: #fff;
+}
+.quick-chip.is-active:hover { background: var(--green-800); }
+.reorder-hint { margin: 10px 0 0; }
+
+/* Manual reorder arrows */
+.reorder { display: flex; flex-direction: column; gap: 4px; flex: none; }
+.reorder-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 26px; min-height: 0; padding: 0;
+  border: 1px solid var(--border-strong); border-radius: 6px;
+  background: var(--card); color: var(--text-soft);
+  font-size: 0.72rem; line-height: 1; cursor: pointer;
+}
+.reorder-btn:hover:not(:disabled) { background: var(--bg); border-color: #c6c4ba; }
+.reorder-btn:disabled { opacity: 0.35; cursor: default; }
+
+/* Bulk reassign/reschedule bar on the Jobs list */
+.bulk-check { flex: none; width: 18px; height: 18px; margin: 0; cursor: pointer; }
+.bulk-bar { display: flex; flex-direction: column; gap: 10px; }
+.bulk-select-all { display: flex; align-items: center; gap: 8px; margin: 0; cursor: pointer; }
+.bulk-actions { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-end; border-top: 1px solid var(--border); padding-top: 12px; }
+.bulk-count { white-space: nowrap; }
+.bulk-action-group { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+.bulk-action-group label { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; margin: 0; }
+
+.btn-sm { min-height: 36px; padding: 6px 12px; font-size: 0.82rem; box-shadow: none; }
+
+.pagination {
+  display: flex; align-items: center; justify-content: center; gap: 14px;
+  margin: 16px 0 4px;
+}
+.pagination [aria-disabled="true"] { opacity: 0.4; pointer-events: none; }
+.pagination-info { font-size: 0.85rem; white-space: nowrap; }
+
 @media (max-width: 600px) {
   .job-row { flex-wrap: wrap; }
   .job-row-meta { align-items: flex-start; flex-direction: row; gap: 10px; width: 100%; order: 4; padding-left: 38px; }
+  .reorder { flex-direction: row; order: 5; width: 100%; padding-left: 38px; gap: 8px; }
+  .reorder-btn { width: 46px; height: 38px; font-size: 0.85rem; }
+  /* No flex:1/equal-width split here: with 3 chips sharing a narrow row,
+     forcing equal width squeezed "Today & overdue" until its text wrapped
+     onto a second line inside the pill, which (with border-radius: 999px)
+     rendered as a tall oval instead of a pill. Let each chip size to its own
+     text and wrap onto a second row via .chips' existing flex-wrap instead. */
+  .quick-chip { min-height: 40px; font-size: 0.9rem; white-space: nowrap; }
 }
 
 /* --------------------------------------------------------------------------
-   Review fixes: contrast, responsive tables, site-history stats, nav chips
+   Review fixes: responsive tables, site-history stats, nav chips
    -------------------------------------------------------------------------- */
-
-/* WCAG AA: darken muted text and the amber "in progress" pill. */
-:root { --muted: #5b665d; --warn: #855600; }
-.status-in_progress, .status-sent { background: #fdf0d5; color: #855600; }
 
 /* Tables: never clip columns on small screens — scroll horizontally instead. */
 .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-@media (max-width: 640px) {
-  .card > .table, .table-wrap > .table { display: block; overflow-x: auto; white-space: nowrap; }
+@media (max-width: 767px) {
+  /* Plain tables scroll sideways; tables opted into .table--stack collapse into
+     labelled card rows instead (see the .table--stack rules above). */
+  .card > .table:not(.table--stack),
+  .table-wrap > .table:not(.table--stack) { display: block; overflow-x: auto; white-space: nowrap; }
 }
 
 .chip-link { color: var(--green-700); border-color: var(--green-100); background: var(--green-50); font-weight: 600; }
 .chip-link:hover { text-decoration: none; background: var(--green-100); }
 
 /* Site-history stat cards */
-.stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 14px; }
 .stat { text-align: center; }
 .stat-num { font-size: 1.6rem; font-weight: 700; color: var(--green-800); }
-.stat-label { color: var(--muted); font-size: 0.85rem; }
 
-/* Bump default button/control min height to 44px for touch. */
-.btn, select, input[type="date"], input[type="text"], input[type="email"], input[type="password"], input[type="number"] { min-height: 44px; }
-.btn { display: inline-flex; align-items: center; justify-content: center; }
+/* Bump default form-control min height to 44px for touch (.btn already
+   carries the same min-height in its own rule above). */
+select, input[type="date"], input[type="text"], input[type="email"], input[type="password"], input[type="number"] { min-height: 44px; }
+
+/* ==========================================================================
+   Mobile-app experience (phones, iOS + Android)
+   A native-feeling layer: large tap targets, a thumb-reachable primary
+   action bar for starting/completing jobs, camera-first photo capture, and
+   an app-like comment composer. Layered on top of the responsive shell.
+   ========================================================================== */
+
+/* Camera-first photo capture: big side-by-side buttons that open the camera
+   or photo library. Works the same on desktop and mobile. */
+.photo-pick { cursor: pointer; }
+.photo-pick input[type="file"] { display: none; }
+
+.photo-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.photo-actions .photo-pick { flex: 1 1 160px; min-height: 48px; font-size: 0.95rem; }
+
+.upload-status {
+  margin: 4px 0 8px;
+  font-weight: 600;
+  color: var(--green-700);
+}
+
+/* Thumbnails of the photos just taken / picked, shown before upload. */
+.photo-previews {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+  margin: 10px 0;
+}
+.preview-thumb { margin: 0; position: relative; }
+.preview-thumb img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  display: block;
+}
+.preview-thumb .preview-file {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  font-size: 28px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.preview-thumb figcaption {
+  font-size: 0.68rem;
+  color: var(--muted);
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.photo-upload .share-line { font-weight: 500; margin: 10px 0; }
+.photo-upload .btn-block { margin-top: 4px; }
+
+/* App-like comment composer */
+.comment-form textarea {
+  border-radius: 14px;
+  background: var(--bg);
+  border-color: var(--border);
+}
+.comment-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+.comment-actions .comment-send { margin-left: auto; }
+.comment-attach { background: var(--green-50); border-color: var(--green-100); color: var(--green-800); }
+
+/* Thumb-reachable sticky primary action on the job page (phones only).
+   On desktop these stay as normal in-card buttons. */
+.cta-spacer { display: none; }
+.cta-note { margin: 0 0 8px; }
+
+/* Gardener's "can't do this job" escape hatch — deliberately muted so it never
+   visually competes with the primary Start/Complete action above it. */
+.skip-job-form { margin-top: 10px; }
+.skip-job-btn { color: var(--muted, #6b6b6b); border-color: var(--border); background: transparent; }
+.skip-job-btn:hover { color: #a93226; border-color: #a93226; background: rgba(169, 50, 38, 0.06); }
+
+/* Forward-looking handoff shown right after a job is completed. */
+.next-stop-card {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--green-100);
+  background: var(--green-50);
+  border-radius: 12px;
+}
+.next-stop-title { margin: 0 0 4px; font-size: 0.95rem; }
+.next-stop-card p { margin: 0 0 8px; }
+.next-stop-card .btn-row { margin: 0; }
+
+@media (max-width: 767px) {
+  .mobile-sticky-cta {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: calc(62px + env(safe-area-inset-bottom, 0px)); /* sit above the tab bar */
+    z-index: 35;
+    margin: 0;
+    padding: 12px 14px;
+    background: rgba(255, 255, 255, 0.97);
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+    border-top: 1px solid var(--border);
+    box-shadow: 0 -6px 20px rgba(20, 32, 24, 0.1);
+  }
+  .mobile-sticky-cta .btn-block {
+    margin: 0;
+    min-height: 54px;
+    font-size: 1.1rem;
+    border-radius: 14px;
+    box-shadow: 0 6px 16px rgba(20, 83, 45, 0.22);
+  }
+  .mobile-sticky-cta .btn-danger { box-shadow: 0 6px 16px rgba(192, 57, 43, 0.24); }
+  .mobile-sticky-cta .cta-note { font-size: 0.85rem; }
+  .mobile-sticky-cta .confirm-line { margin: 0 0 10px; font-size: 0.9rem; }
+
+  /* Reserve room so the fixed action bar never hides the last bit of content. */
+  .cta-spacer { display: block; height: 150px; }
+
+  /* Make the whole field workflow roomier and easier to tap on a phone. */
+  .photo-actions .photo-pick { min-height: 52px; }
+  .comment-form textarea { font-size: 1rem; min-height: 56px; }
+  .comment-send { min-width: 96px; }
+
+  /* App-style job list: roomier rows with a chevron affordance on the link. */
+  .job-row { border-radius: 14px; padding: 16px; gap: 12px; position: relative; }
+  .job-row-main { position: relative; }
+  .job-row-main::after {
+    content: "";
+    position: absolute; right: 0; top: 6px;
+    width: 8px; height: 8px;
+    border-top: 2px solid var(--border-strong);
+    border-right: 2px solid var(--border-strong);
+    transform: rotate(45deg);
+  }
+  .job-row-main strong { font-size: 1.05rem; padding-right: 16px; }
+
+  /* Larger, friendlier headings and cards on small screens. */
+  .timer-card .btn { min-width: 0; }
+}
+
+/* Native-app feel: no tap-highlight flash, no accidental text selection on
+   controls, and momentum scrolling. */
+a, button, .btn, .nav-item, .tab, .photo-pick, label.confirm-line {
+  -webkit-tap-highlight-color: transparent;
+}
+.btn, .nav-item, .tab, .photo-pick, .topbar-action, .route-no, .badge {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Honour reduced-motion preferences. */
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; scroll-behavior: auto !important; }
+}
+
+/* ==========================================================================
+   Touch-device shell fallback
+   Safari's "Request Desktop Website" (and similar desktop-mode toggles) make a
+   phone report a ~980px layout viewport, so the max-width:767px rules above
+   don't fire and the desktop sidebar shows shrunk to fit. Key the mobile app
+   shell off a coarse (touch) pointer as well, so phones/tablets always get the
+   app layout regardless of a spoofed width. Real mice (pointer: fine) keep the
+   desktop sidebar.
+   ========================================================================== */
+@media (pointer: coarse) and (max-width: 1024px) {
+  .sidebar { display: none !important; }
+  .topbar { display: flex !important; }
+  .tabbar { display: block !important; }
+  body.authed main.container {
+    margin-left: 0 !important;
+    max-width: none !important;
+    padding: 16px 14px calc(92px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+  body.authed { padding-top: calc(56px + env(safe-area-inset-top, 0px)) !important; } /* room for the fixed topbar */
+}
+
+/* --------------------------------------------------------------------------
+   Dashboard lists — reuse .job-row flex rows for the visit/task/issue cards.
+   Tables collapsed too narrowly on phones (per-word address wrapping); the
+   stacked flex-row pattern reads cleanly from ~370px up through desktop.
+   -------------------------------------------------------------------------- */
+
+.card .job-list { gap: 0; margin: 4px 0 12px; }
+.card .job-list:last-child { margin-bottom: 0; }
+
+/* Compact rows with light dividers instead of the lifted standalone card look. */
+.card .job-row {
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 4px;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+}
+.card .job-list .job-row:first-child { padding-top: 4px; }
+.card .job-list .job-row:last-child { border-bottom: 0; padding-bottom: 4px; }
+.card .job-row:hover { box-shadow: none; transform: none; background: #fbfaf7; }
+.card .job-row--static { cursor: default; }
+.card .job-row--static:hover { background: transparent; }
+
+/* The route badge sits centred against the first text line. */
+.card .job-row > .route-no { margin-top: 1px; }
+
+/* Main column: let the property/address wrap as normal multi-word text —
+   never collapse to one word per line, never force a single clipped line. */
+.card .job-row-main { gap: 1px; }
+.card .job-row-main strong { line-height: 1.35; overflow-wrap: anywhere; }
+.card .job-row-main .muted {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+}
+
+/* Meta column: pills aligned to the top-right, wrapping gracefully if needed. */
+.card .job-row-meta { align-items: flex-end; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+
+/* Phone: keep the route badge + main text on one row, pills drop beneath and
+   align under the text (no awkward fixed indent). */
+@media (max-width: 600px) {
+  .card .job-row { flex-wrap: wrap; }
+  .card .job-row-meta {
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    width: 100%;
+    order: 4;
+    gap: 8px;
+    margin-top: 2px;
+  }
+  /* Indent the pills to line up under the main text when a route badge leads. */
+  .card .job-row > .route-no ~ .job-row-meta { padding-left: 38px; }
+}
+
+/* --------------------------------------------------------------------------
+   Mobile readability & top-of-page spacing
+   Phones reported the body text, the bottom tab bar and the filter controls as
+   too small / cramped. Bump the type, and stack the filter row into full-width
+   controls so the date picker, gardener select and button stop overlapping.
+   -------------------------------------------------------------------------- */
+@media (max-width: 767px) {
+  /* Larger, more legible type across the app. */
+  body { font-size: 16px; }
+  .page-sub { font-size: 0.95rem; }
+  .muted { font-size: 0.92em; }
+  .job-row-main strong { font-size: 1.08rem; }
+  .job-row-meta .muted, .job-row-meta .status { font-size: 0.92rem; }
+  .day-title { font-size: 1.05rem; }
+  .quick-chip { font-size: 0.95rem; }
+
+  /* 16px form controls stop iOS from auto-zooming (and shoving the layout)
+     when a field gains focus — a common cause of the "overlapping boxes" look. */
+  input, select, textarea, .btn { font-size: 16px; }
+
+  /* Stack the top filter controls into full-width rows instead of crowding the
+     date picker, gardener select and Filter button onto one cramped line. */
+  .filter-row { flex-direction: column; align-items: stretch; gap: 14px; }
+  .filter-row label { min-width: 0; width: 100%; }
+  .filter-row > button { width: 100%; }
+}
+
+/* Active drill-down filter banner on the Jobs list. */
+.filter-active {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* --------------------------------------------------------------------------
+   Review fixes round 2: overflow-safe task table, overdue-visits banner,
+   offline draft-recovery banner/message
+   -------------------------------------------------------------------------- */
+
+/* Tasks table on the visit page: a plain 3-up .table blew out past 390px
+   (forcing the mobile browser to zoom out, which then mis-targets taps on the
+   sticky Complete-job button and the tab bar) and clipped the status <select>
+   to ~48px. Stack it into single-column rows instead of scrolling it
+   sideways: title + status pill on one line, a full-width select below. */
+.table-tasks { width: 100%; border-collapse: collapse; }
+.table-tasks td { padding: 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.table-tasks tr:last-child td { border-bottom: 0; }
+.task-title-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.task-status-cell select { width: 100%; }
+@media (max-width: 767px) {
+  .table-tasks, .table-tasks tbody { display: block; }
+  .table-tasks tr {
+    display: block;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+    margin-bottom: 10px;
+    background: var(--card);
+  }
+  .table-tasks td { display: block; padding: 4px 0; border: 0; }
+  .task-status-cell { padding-top: 8px; }
+  .task-status-cell form { display: block; }
+}
+
+/* Dashboard "overdue visits" banner: distinct from the plain Today's-visits
+   list so slipped-past-schedule work is impossible to miss on first landing. */
+.overdue-card { border-left: 4px solid var(--danger); }
+.overdue-card h2 { color: #8e1f4b; }
+
+/* Staff duration-correction control on a completed visit. */
+.manage-duration { margin-top: 12px; }
+.manage-duration form { margin-top: 8px; }
+
+/* Offline-safe form submission: draft-restore banner and the inline
+   connectivity-failure message shown instead of the browser's own error page. */
+.draft-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 4px; }
+.draft-banner .link-btn { font-weight: 700; }
+.form-net-msg { margin-top: 10px; }
+.filter-active > div { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
 /* --------------------------------------------------------------------------
    "Add to home screen" prompt — injected by app.js on mobile only
@@ -993,8 +1519,10 @@ body.anon {
   position: fixed;
   left: 10px;
   right: 10px;
-  bottom: calc(66px + env(safe-area-inset-bottom, 0px)); /* clear of the tab bar */
-  z-index: 55;
+  /* Default clears the tab bar; app.js measures the real stack (tab bar plus
+     any fixed job-action CTA) and overrides this before the card is shown. */
+  bottom: calc(62px + env(safe-area-inset-bottom, 0px));
+  z-index: 45; /* above the tab bar (40) and the sticky CTA (35), below the sheet */
   display: flex;
   gap: 12px;
   padding: 14px;

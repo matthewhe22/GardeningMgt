@@ -1,23 +1,30 @@
 <%- include('../partials/header') %>
 <div class="page-head">
   <h1>Sites</h1>
-  <p class="page-sub">One recurring job per site. The default gardener is assigned to every
+  <p class="page-sub">One recurring contract per site. The default gardener is assigned to every
     occurrence; individual visits can still be reassigned as a replacement. Completing a visit
     automatically schedules the next one per the frequency, within the contract term.</p>
 </div>
 
 <% if (locals.flash) { %>
   <p class="alert alert-error">
-    <% if (flash === 'duplicate') { %>That site already has an active job.
+    <% if (flash === 'duplicate') { %>That site already has an active contract.
     <% } else if (flash === 'gardener') { %>The default gardener must be an active gardener.
     <% } else { %>Some details were invalid — please check and try again.<% } %>
   </p>
 <% } %>
 
+<div class="card">
+  <form method="get" class="filter-row">
+    <label>Search <input type="text" name="search" value="<%= search %>" placeholder="Site or address"></label>
+    <button class="btn">Search</button>
+  </form>
+</div>
+
 <% if (staff) { %>
 <details class="card">
   <summary><strong>＋ New site</strong></summary>
-  <form method="post" action="/jobs" class="form-grid">
+  <form method="post" action="/jobs" class="form-grid"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
     <label>Site
       <select name="property_id" required>
         <% properties.forEach(p => { %><option value="<%= p.id %>"><%= p.name %></option><% }) %>
@@ -41,43 +48,50 @@
       </select>
     </label>
     <label>First visit date <input type="date" name="start_date" required></label>
-    <label>Time window <input type="text" name="time_window" placeholder="08:00-10:00"></label>
-    <button class="btn btn-primary">Create job &amp; schedule first visit</button>
+    <label>Time window <input type="text" name="time_window" placeholder="08:00-10:00"
+      pattern="([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d" title="Format HH:MM-HH:MM, e.g. 08:00-10:00"></label>
+    <% if (user.role === 'admin') { %>
+      <label>Gardening fee <input type="number" name="gardening_fee" min="0" step="0.01" placeholder="e.g. 85.00"></label>
+    <% } %>
+    <button class="btn btn-primary">Create contract &amp; schedule first visit</button>
   </form>
 </details>
 <% } %>
 
 <div class="card">
-  <table class="table">
-    <tr><th>Site</th><th>Frequency</th><th>Contract</th><th>Gardener</th><th>Last completed</th><th>Next visit</th><% if (staff) { %><th></th><% } %></tr>
+  <table class="table table--stack">
+    <tr class="thead-row"><th>Site</th><th>Frequency</th><th>Contract</th><th>Gardener</th><th>Last completed</th><th>Next visit</th><% if (user.role === 'admin') { %><th>Fee</th><% } %><% if (staff) { %><th>Manage</th><% } %></tr>
     <% jobs.forEach(j => { %>
     <tr>
-      <td><strong><% if (staff) { %><a href="/jobs/site/<%= j.property_id %>"><%= j.property_name %></a><% } else { %><%= j.property_name %><% } %></strong><br>
+      <td class="stack-main"><strong><% if (staff) { %><a href="/jobs/site/<%= j.property_id %>"><%= j.property_name %></a><% } else { %><%= j.property_name %><% } %></strong><br>
         <span class="muted"><%= j.address %><% if (j.lots != null) { %> · <%= j.lots %> lots<% } %></span>
         <% if (!j.active) { %><span class="status status-cancelled">inactive</span><% } %>
         <% if (j.expired) { %><span class="status status-open">expired — needs renewal</span><% } %>
       </td>
-      <td><span class="status status-scheduled"><%= j.frequency %></span></td>
-      <td class="muted"><%= j.contract_years %> yr<br><%= j.start_date %> → <%= j.end_date %></td>
-      <td><%= j.gardener_name || '⚠ Unassigned' %></td>
-      <td class="muted"><%= j.last_completed_at ? j.last_completed_at + ' UTC' : 'never' %></td>
-      <td>
+      <td data-label="Frequency"><span class="status status-scheduled"><%= j.frequency %></span></td>
+      <td class="muted" data-label="Contract"><%= j.contract_years %> yr<br><%= j.start_date %> → <%= j.end_date %></td>
+      <td data-label="Gardener"><% if (j.gardener_name) { %><%= j.gardener_name %><% } else { %><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg> Unassigned<% } %></td>
+      <td class="muted" data-label="Last completed"><%= j.last_completed_at ? fmtDateTime(j.last_completed_at) : 'never' %></td>
+      <td data-label="Next visit">
         <% if (j.next_visit_date) { %>
           <a href="/visits/<%= j.next_visit_id %>"><%= j.next_visit_date %></a>
           <% if (j.upcoming_count > 1) { %><br><span class="muted"><%= j.upcoming_count %> upcoming</span><% } %>
         <% } else { %><span class="muted">none scheduled</span><% } %>
       </td>
+      <% if (user.role === 'admin') { %>
+      <td data-label="Fee"><%= j.gardening_fee != null ? '$' + Number(j.gardening_fee).toFixed(2) : '—' %></td>
+      <% } %>
       <% if (staff) { %>
-      <td>
+      <td class="stack-main">
         <% if (j.expired) { %>
-        <form method="post" action="/jobs/<%= j.id %>/renew" class="add-row" style="margin-bottom:6px">
+        <form method="post" action="/jobs/<%= j.id %>/renew" class="add-row" style="margin-bottom:6px"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
           <select name="contract_years"><option value="1">1 yr</option><option value="2">2 yr</option></select>
           <button class="btn btn-primary">Renew</button>
         </form>
         <% } %>
         <details>
           <summary class="muted">Edit</summary>
-          <form method="post" action="/jobs/<%= j.id %>/update" class="form-grid">
+          <form method="post" action="/jobs/<%= j.id %>/update" class="form-grid"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
             <label>Gardener
               <select name="gardener_id">
                 <option value="">Unassigned</option>
@@ -93,7 +107,12 @@
                 <% }) %>
               </select>
             </label>
-            <label>Time window <input type="text" name="time_window" value="<%= j.time_window || '' %>"></label>
+            <label>Time window <input type="text" name="time_window" value="<%= j.time_window || '' %>" placeholder="08:00-10:00"
+              pattern="([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d" title="Format HH:MM-HH:MM, e.g. 08:00-10:00"></label>
+            <% if (user.role === 'admin') { %>
+              <label>Gardening fee <input type="number" name="gardening_fee" min="0" step="0.01"
+                value="<%= j.gardening_fee != null ? j.gardening_fee : '' %>" placeholder="e.g. 85.00"></label>
+            <% } %>
             <label><input type="checkbox" name="active" <%= j.active ? 'checked' : '' %>> Active</label>
             <button class="btn">Save</button>
           </form>
@@ -103,6 +122,12 @@
     </tr>
     <% }) %>
   </table>
-  <% if (!jobs.length) { %><p class="muted">No site jobs yet<% if (staff) { %> — create one above<% } %>.</p><% } %>
+  <% if (!jobs.length) { %>
+    <div class="empty">
+      <span class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg></span>
+      <p>No site contracts yet<% if (staff) { %> — create one above<% } %>.</p>
+    </div>
+  <% } %>
 </div>
+<%- include('../partials/pagination') %>
 <%- include('../partials/footer') %>

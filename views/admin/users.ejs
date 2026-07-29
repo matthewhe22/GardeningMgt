@@ -1,9 +1,21 @@
 <%- include('../partials/header') %>
 <h1>Users</h1>
 
+<% if (locals.created) { %><p class="alert alert-ok">User created.</p><% } %>
+<% if (locals.updated) { %><p class="alert alert-ok">User details updated.</p><% } %>
+<% if (locals.reset) { %><p class="alert alert-ok">Password reset.</p><% } %>
+<% if (locals.error) { %>
+<p class="alert alert-error">
+  <% if (error === 'dupemail') { %>That email address is already in use by another account.
+  <% } else if (error === 'weak') { %>Password must be at least 8 characters.
+  <% } else if (error === 'lastadmin') { %>Can't do that — it would leave the business with no active admin account.
+  <% } else { %>Some details were invalid — please check and try again.<% } %>
+</p>
+<% } %>
+
 <details class="card">
   <summary><strong>＋ Add user</strong></summary>
-  <form method="post" action="/admin/users" class="form-grid">
+  <form method="post" action="/admin/users" class="form-grid"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
     <label>Name <input type="text" name="name" required></label>
     <label>Email <input type="email" name="email" required></label>
     <label>Password <input type="password" name="password" required minlength="8"></label>
@@ -20,22 +32,43 @@
 </details>
 
 <div class="card">
-  <table class="table">
-    <tr><th>Name</th><th>Email</th><th>Role</th><th>Phone</th><th>Last login</th><th>Status</th><th></th></tr>
+  <table class="table table--stack">
+    <tr class="thead-row"><th>Name</th><th>Email</th><th>Role</th><th>Phone</th><th>Last login</th><th>Status</th><th>Action</th></tr>
     <% users.forEach(u => { %>
     <tr>
-      <td><strong><%= u.name %></strong></td>
-      <td class="muted"><%= u.email %></td>
-      <td><span class="tag tag-<%= u.role %>"><%= u.role %></span></td>
-      <td class="muted"><%= u.phone || '' %></td>
-      <td class="muted"><%= u.last_login_at ? u.last_login_at.slice(0, 16) : 'Never' %></td>
-      <td><%= u.active ? 'active' : 'disabled' %></td>
-      <td>
+      <td class="stack-main"><strong><%= u.name %></strong></td>
+      <td class="muted" data-label="Email"><%= u.email %></td>
+      <td data-label="Role"><span class="tag tag-<%= u.role %>"><%= u.role %></span></td>
+      <td class="muted" data-label="Phone"><%= u.phone || '' %></td>
+      <td class="muted" data-label="Last login"><%= u.last_login_at ? fmtDateTime(u.last_login_at) : 'Never' %></td>
+      <td data-label="Status"><%= u.active ? 'active' : 'disabled' %></td>
+      <td data-label="Action">
         <% if (u.id !== user.id) { %>
-        <form method="post" action="/admin/users/<%= u.id %>/toggle" class="inline">
+        <form method="post" action="/admin/users/<%= u.id %>/toggle" class="inline"<% if (u.active) { %> data-confirm="Disable <%= u.name %>? They will no longer be able to sign in."<% } %>><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
           <button class="link-btn"><%= u.active ? 'Disable' : 'Enable' %></button>
         </form>
         <% } %>
+        <details>
+          <summary class="muted">Edit</summary>
+          <form method="post" action="/admin/users/<%= u.id %>/update" class="form-grid">
+            <label>Name <input type="text" name="name" value="<%= u.name %>" required></label>
+            <label>Email <input type="email" name="email" value="<%= u.email %>" required></label>
+            <label>Phone <input type="text" name="phone" value="<%= u.phone || '' %>"></label>
+            <label>Role
+              <select name="role">
+                <option value="gardener" <%= u.role === 'gardener' ? 'selected' : '' %>>Gardener</option>
+                <option value="supervisor" <%= u.role === 'supervisor' ? 'selected' : '' %>>Supervisor</option>
+                <option value="admin" <%= u.role === 'admin' ? 'selected' : '' %>>Admin</option>
+              </select>
+            </label>
+            <button class="btn">Save</button>
+          </form>
+          <form method="post" action="/admin/users/<%= u.id %>/password" class="form-grid" style="margin-top:8px"
+            data-confirm="Set a new password for <%= u.name %>?">
+            <label>New password <input type="password" name="password" minlength="8" required placeholder="At least 8 characters"></label>
+            <button class="btn">Set new password</button>
+          </form>
+        </details>
       </td>
     </tr>
     <% }) %>

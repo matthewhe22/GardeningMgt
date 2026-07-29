@@ -2,8 +2,12 @@ const { q1 } = require('./db');
 
 async function currentUser(req) {
   if (!req.session || !req.session.userId) return null;
+  // Fold the unread-notification count into the user lookup so every request
+  // resolves the session in a single round-trip instead of two.
   return q1(
-    'SELECT id, name, email, role, phone FROM users WHERE id = $1 AND active',
+    `SELECT id, name, email, role, phone,
+       (SELECT COUNT(*)::int FROM notifications n WHERE n.user_id = u.id AND n.read_at IS NULL) AS unread_count
+     FROM users u WHERE id = $1 AND active`,
     [req.session.userId]
   );
 }
