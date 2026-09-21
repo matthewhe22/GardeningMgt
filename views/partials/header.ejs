@@ -87,24 +87,33 @@
 
 <header class="topbar">
   <a class="topbar-brand" href="/"><span class="brand-mark<%= locals.brandLogo ? ' has-logo' : '' %>"><%- include('./brandmark') %></span> GardeningMgt</a>
-  <label for="nav-toggle" class="topbar-action" role="button" aria-label="More menu"><%- icons.more %></label>
+  <label for="nav-toggle" class="topbar-action" role="button" tabindex="0" aria-controls="more-sheet" aria-expanded="false" aria-label="More menu"><%- icons.more %></label>
 </header>
 
+<%
+  const tab = (href, icon, label) => `
+    <a href="${href}" class="tab${active(href)}"${active(href) ? ' aria-current="page"' : ''}>
+      <span class="tab-ico">${icon}</span><span class="tab-label">${label}</span></a>`;
+%>
 <nav class="tabbar" aria-label="Quick navigation">
   <div class="tabbar-inner">
-    <a href="/" class="tab<%= active('/') %>"><%- icons.home %><span>Home</span></a>
-    <a href="/visits" class="tab<%= active('/visits') %>"><%- icons.jobs %><span>Visits</span></a>
-    <a href="/routes" class="tab<%= active('/routes') %>"><%- icons.routes %><span>Routes</span></a>
-    <a href="/issues" class="tab<%= active('/issues') %>"><%- icons.issues %><span>Issues</span></a>
-    <a href="/notifications" class="tab<%= active('/notifications') %>"><%- icons.bell %><span>Alerts</span><% if (unreadCount > 0) { %><span class="badge"><%= unreadCount %></span><% } %></a>
-    <a href="/profile" class="tab<%= active('/profile') %>"><%- icons.me %><span>Me</span></a>
+    <%- tab('/', icons.home, 'Home') %>
+    <%- tab('/visits', icons.jobs, 'Visits') %>
+    <%- tab('/routes', icons.routes, 'Routes') %>
+    <a href="/notifications" class="tab<%= active('/notifications') %>"<%- active('/notifications') ? ' aria-current="page"' : '' %>>
+      <span class="tab-ico"><%- icons.bell %><% if (unreadCount > 0) { %><span class="badge" aria-hidden="true"><%= unreadCount > 9 ? '9+' : unreadCount %></span><% } %></span>
+      <span class="tab-label">Alerts</span>
+      <% if (unreadCount > 0) { %><span class="sr-only"><%= unreadCount %> unread</span><% } %>
+    </a>
+    <%- tab('/profile', icons.me, 'Me') %>
   </div>
 </nav>
 
 <input type="checkbox" id="nav-toggle" class="menu-toggle nav-toggle">
 <label for="nav-toggle" class="sheet-backdrop" aria-hidden="true"></label>
-<div class="sheet" aria-label="More options">
+<div class="sheet" id="more-sheet" role="dialog" aria-modal="true" aria-label="More options">
   <div class="sheet-handle"></div>
+  <a href="/issues" class="nav-item<%= active('/issues') %>"><%- icons.issues %> Issues</a>
   <a href="/jobs" class="nav-item<%= active('/jobs') %>"><%- icons.repeat %> Sites</a>
   <a href="/tasks" class="nav-item<%= active('/tasks') %>"><%- icons.tasks %> Tasks</a>
   <a href="/photos" class="nav-item<%= active('/photos') %>"><%- icons.photos %> Photos</a>
