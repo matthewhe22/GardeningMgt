@@ -36,6 +36,23 @@
   --ok-bg:      #e3f5ea;
 
   /* geometry */
+  /* App-shell bar metrics. The bars' heights AND the space the page reserves
+     for them both derive from these, so the two can never drift apart. */
+  --topbar-h: 56px;
+  --topbar-inset: env(safe-area-inset-top, 0px);
+  --topbar-total: calc(var(--topbar-h) + var(--topbar-inset));
+  --tabbar-h: 56px;
+  --tabbar-inset: max(env(safe-area-inset-bottom, 0px), 6px);
+  --tabbar-total: calc(var(--tabbar-h) + var(--tabbar-inset));
+
+  /* Type scale (desktop; phone values are overridden further down) */
+  --fs-body: 15px;
+  --fs-sm: 14px;
+  --fs-muted: 13px;
+  --fs-label: 13px;
+  --fs-btn: 14px;
+  --fs-input: 14px;
+
   --radius:    12px;
   --radius-sm: 8px;
   --shadow-sm: 0 1px 2px rgba(20, 32, 24, 0.05);
@@ -61,8 +78,21 @@ body {
   background: var(--bg);
   color: var(--text);
   line-height: 1.5;
-  font-size: 15px;
+  font-size: var(--fs-body);
   overscroll-behavior-y: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+a, button, summary, label[role="button"], .tab, .btn { touch-action: manipulation; }
+
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 a { color: var(--green-700); text-decoration: none; }
@@ -87,11 +117,11 @@ h1 { font-size: 1.5rem;  font-weight: 700; letter-spacing: -0.02em; margin: 0 0 
 h2 { font-size: 1.02rem; font-weight: 650; letter-spacing: -0.01em; margin: 0 0 12px; }
 h3 { font-size: 0.95rem; font-weight: 650; margin: 16px 0 8px; }
 
-.muted { color: var(--muted); font-size: 0.88em; }
+.muted { color: var(--muted); font-size: var(--fs-muted); }
 
 .page-head { margin: 0 0 24px; }
 .page-head h1 { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-.page-sub { color: var(--muted); font-size: 0.9rem; margin: 2px 0 0; max-width: 70ch; }
+.page-sub { color: var(--muted); font-size: var(--fs-muted); margin: 2px 0 0; max-width: 70ch; }
 
 /* --------------------------------------------------------------------------
    App shell
@@ -110,12 +140,26 @@ body.authed main.container {
 }
 
 @media (max-width: 767px) {
+  /* Phone type scale. --fs-input must stay at 16px: iOS zooms any smaller
+     focused control, and that zoom shrinks the visual viewport, which is what
+     leaves the fixed bars sitting off-screen. */
+  :root {
+    --fs-body: 16px;
+    --fs-sm: 15px;
+    --fs-muted: 14px;
+    --fs-label: 14px;
+    --fs-btn: 16px;
+    --fs-input: 16px;
+  }
+
   body.authed main.container {
     margin-left: 0;
-    padding: 16px 14px calc(92px + env(safe-area-inset-bottom, 0px));
+    padding: 16px 16px calc(var(--tabbar-total) + 16px);
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
   }
   body.authed {
-    padding-top: calc(56px + env(safe-area-inset-top, 0px)); /* room for fixed mobile topbar */
+    padding-top: var(--topbar-total); /* room for fixed mobile topbar */
     /* On short pages (little content — e.g. Routes before a gardener/date is
        picked, an empty Issues list, Profile), the document was shorter than
        one screen. Mobile Safari never needs to scroll such a page, so it
@@ -320,7 +364,9 @@ body.authed main.container {
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
   border-top: 1px solid var(--border);
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-bottom: var(--tabbar-inset);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
   /* Force its own compositing layer so iOS Safari keeps it pinned to the true
      visual-viewport bottom edge (rather than a stale layout-viewport bottom)
      as the address bar/toolbar collapses, avoiding a gap under the bar. */
@@ -340,27 +386,89 @@ body.authed main.container {
   background: inherit;
 }
 
-.tabbar-inner { display: flex; }
+.tabbar-inner {
+  display: flex;
+  /* Fixed height, not min-height: a wrapped label used to grow the bar past
+     the space the page reserves for it, covering content. */
+  height: var(--tabbar-h);
+  max-width: 560px;
+  margin: 0 auto;
+}
 
 .tab {
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 0;          /* lets the label ellipsize rather than widen the tab */
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
-  min-height: 62px;
-  padding: 7px 2px;
+  gap: 4px;
+  padding: 2px 4px;
   color: var(--muted);
-  font-size: 0.72rem;
+  font-size: clamp(10px, 2.9vw, 11px);
   font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.01em;
   text-decoration: none;
+  cursor: pointer;
+  user-select: none;
+  -webkit-touch-callout: none;
   position: relative;
 }
-.tab svg { width: 26px; height: 26px; }
-.tab:hover { text-decoration: none; }
-.tab.active { color: var(--green-700); }
-.tab .badge { position: absolute; top: 4px; left: calc(50% + 4px); }
+
+/* The icon wrapper is the active pill and the badge anchor. */
+.tab .tab-ico {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 32px;
+  flex: none;
+  border-radius: 16px;
+  transition: background-color 0.18s ease;
+}
+.tab svg { width: 24px; height: 24px; flex: none; }
+
+.tab .tab-label {
+  display: block;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;      /* overflow:hidden clips descenders at line-height 1 */
+}
+
+.tab.active { color: var(--green-800); }
+.tab.active .tab-ico { background: var(--green-100); }
+.tab.active svg { stroke-width: 2; }
+.tab.active .tab-label { font-weight: 700; }
+.tab:active .tab-ico { background: var(--green-50); }
+@media (hover: hover) and (pointer: fine) {
+  .tab:hover { color: var(--green-700); text-decoration: none; }
+}
+
+.tab .badge {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translate(6px, -4px);
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  font-size: 10px;
+  line-height: 16px;
+  box-shadow: 0 0 0 2px var(--card);
+}
+
+/* Landscape / short viewports: compact bar, icon beside label. */
+@media (max-height: 480px) and (orientation: landscape) {
+  :root { --tabbar-h: 48px; }
+  .tab { flex-direction: row; gap: 6px; padding: 4px 8px; }
+  .tab .tab-ico { width: auto; height: auto; background: none !important; }
+  .tab svg { width: 22px; height: 22px; }
+}
 
 /* ----- Mobile "More" sheet (checkbox-driven) ----- */
 
@@ -560,14 +668,14 @@ details.card[open] > summary::before { transform: rotate(45deg); }
   font-size: 20px;
 }
 .empty-icon svg { width: 22px; height: 22px; }
-.empty p { margin: 0; font-size: 0.9rem; }
+.empty p { margin: 0; font-size: var(--fs-sm); }
 .empty .btn, .empty .btn-sm { margin-top: 12px; }
 
 /* --------------------------------------------------------------------------
    Forms
    -------------------------------------------------------------------------- */
 
-label { display: block; margin: 8px 0; font-size: 0.85rem; font-weight: 550; color: var(--text-soft); }
+label { display: block; margin: 8px 0; font-size: var(--fs-label); font-weight: 550; color: var(--text-soft); }
 
 input, select, textarea {
   width: 100%;
@@ -575,11 +683,11 @@ input, select, textarea {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   font: inherit;
-  font-size: 0.92rem;
+  font-size: max(16px, var(--fs-input));
   color: var(--text);
   background: var(--card);
   margin-top: 4px;
-  min-height: 42px;
+  min-height: 44px;
   transition: border-color 0.12s ease, box-shadow 0.12s ease;
 }
 textarea { min-height: 0; resize: vertical; }
@@ -678,7 +786,7 @@ select {
   background: var(--card);
   color: var(--text-soft);
   font: inherit;
-  font-size: 0.9rem;
+  font-size: var(--fs-btn);
   font-weight: 600;
   cursor: pointer;
   text-decoration: none;
@@ -708,10 +816,10 @@ select {
   color: var(--green-700);
   cursor: pointer;
   font: inherit;
-  font-size: 0.9rem;
+  font-size: var(--fs-btn);
   font-weight: 550;
   padding: 4px 2px;
-  min-height: 32px;
+  min-height: 44px;
 }
 .link-btn:hover { text-decoration: underline; }
 .link-btn-danger { color: var(--danger); }
@@ -721,7 +829,7 @@ select {
    Tables
    -------------------------------------------------------------------------- */
 
-.table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
 .table th {
   text-align: left;
   font-size: 0.7rem;
@@ -1027,7 +1135,7 @@ body.anon {
   gap: 16px;
   padding: 10px 0;
   border-bottom: 1px solid var(--border);
-  font-size: 0.92rem;
+  font-size: var(--fs-sm);
 }
 .profile-rows > div:last-child { border-bottom: 0; }
 .profile-rows dt { color: var(--muted); font-weight: 600; }
@@ -1360,15 +1468,25 @@ a, button, .btn, .nav-item, .tab, .photo-pick, label.confirm-line {
    desktop sidebar.
    ========================================================================== */
 @media (pointer: coarse) and (max-width: 1024px) {
+  /* Same phone type scale as the width-based block, so a spoofed desktop width
+     doesn't leave a phone on the desktop sizes. */
+  :root {
+    --fs-body: 16px;
+    --fs-sm: 15px;
+    --fs-muted: 14px;
+    --fs-label: 14px;
+    --fs-btn: 16px;
+    --fs-input: 16px;
+  }
   .sidebar { display: none !important; }
   .topbar { display: flex !important; }
   .tabbar { display: block !important; }
   body.authed main.container {
     margin-left: 0 !important;
     max-width: none !important;
-    padding: 16px 14px calc(92px + env(safe-area-inset-bottom, 0px)) !important;
+    padding: 16px 16px calc(var(--tabbar-total) + 16px) !important;
   }
-  body.authed { padding-top: calc(56px + env(safe-area-inset-top, 0px)) !important; } /* room for the fixed topbar */
+  body.authed { padding-top: var(--topbar-total) !important; } /* room for the fixed topbar */
 }
 
 /* --------------------------------------------------------------------------
