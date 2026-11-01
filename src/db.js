@@ -468,7 +468,7 @@ function ensureCriticalSchema() {
 
 // Bump when SCHEMA or the migrations below change, so existing databases
 // re-run the DDL exactly once instead of on every serverless cold start.
-const SCHEMA_VERSION = '13';
+const SCHEMA_VERSION = '14';
 
 /**
  * Numeric, forward-only comparison of a stored schema_version against this
@@ -557,6 +557,8 @@ async function runMigrations() {
   // Set the first time a visit reaches a terminal state and schedules the
   // next occurrence, so reopening/re-completing never books a duplicate.
   await pool.query('ALTER TABLE visits ADD COLUMN IF NOT EXISTS advanced_at TIMESTAMP');
+  // Per-admin opt-in/out of the emailed job report (on by default).
+  await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS receive_job_reports BOOLEAN NOT NULL DEFAULT true');
   await pool.query(`UPDATE visits SET advanced_at = COALESCE(finished_at, now())
     WHERE advanced_at IS NULL AND status IN ('completed','approved','skipped','cancelled')`);
   const { c } = (await pool.query('SELECT COUNT(*)::int AS c FROM users')).rows[0];

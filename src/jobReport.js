@@ -69,7 +69,7 @@ async function emailJobReport(visitId, baseUrl = '') {
   try {
     const useSmtp = !!(await smtpConfig());
     if (!useSmtp && !emailConfigured()) return 0;
-    const admins = (await q("SELECT email FROM users WHERE role = 'admin' AND active ORDER BY id"))
+    const admins = (await q("SELECT email FROM users WHERE role = 'admin' AND active AND receive_job_reports ORDER BY id"))
       .filter((a) => deliverable(a.email));
     if (!admins.length) return 0;
     const d = await loadReportData(visitId);

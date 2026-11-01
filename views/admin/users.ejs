@@ -33,7 +33,7 @@
 
 <div class="card">
   <table class="table table--stack">
-    <tr class="thead-row"><th>Name</th><th>Email</th><th>Role</th><th>Phone</th><th>Last login</th><th>Status</th><th>Action</th></tr>
+    <tr class="thead-row"><th>Name</th><th>Email</th><th>Role</th><th>Phone</th><th>Last login</th><th>Status</th><th>Job reports</th><th>Action</th></tr>
     <% users.forEach(u => { %>
     <tr>
       <td class="stack-main"><strong><%= u.name %></strong></td>
@@ -42,6 +42,16 @@
       <td class="muted" data-label="Phone"><%= u.phone || '' %></td>
       <td class="muted" data-label="Last login"><%= u.last_login_at ? fmtDateTime(u.last_login_at) : 'Never' %></td>
       <td data-label="Status"><%= u.active ? 'active' : 'disabled' %></td>
+      <td data-label="Job reports">
+        <% if (u.role === 'admin') { %>
+        <form method="post" action="/admin/users/<%= u.id %>/reports" class="inline"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+          <label class="report-tick" title="Email this admin a report when a job is completed">
+            <input type="checkbox" name="receive_job_reports" data-autosubmit <%= u.receive_job_reports ? 'checked' : '' %>
+              aria-label="Email job reports to <%= u.name %>"> Email
+          </label>
+        </form>
+        <% } else { %><span class="muted">—</span><% } %>
+      </td>
       <td data-label="Action">
         <% if (u.id !== user.id) { %>
         <form method="post" action="/admin/users/<%= u.id %>/toggle" class="inline"<% if (u.active) { %> data-confirm="Disable <%= u.name %>? They will no longer be able to sign in."<% } %>><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>

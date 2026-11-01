@@ -224,7 +224,7 @@ router.post('/properties/:id/update', requireRole('supervisor'), asyncHandler(as
 
 router.get('/users', requireRole(), asyncHandler(async (req, res) => {
   const users = await q(
-    'SELECT id, name, email, role, phone, active, last_login_at, created_at FROM users ORDER BY role, name');
+    'SELECT id, name, email, role, phone, active, last_login_at, created_at, receive_job_reports FROM users ORDER BY role, name');
   res.render('admin/users', {
     title: 'Users', users,
     error: req.query.error || null,
@@ -295,6 +295,17 @@ router.post('/users/:id/password', requireRole(), asyncHandler(async (req, res) 
   await q('UPDATE users SET password_hash = $1 WHERE id = $2', [await bcrypt.hash(password, 10), id]);
   await logActivity(req.user.id, 'user.password_reset', 'user', id, `Reset password for ${target.name}`);
   res.redirect('/admin/users?reset=1');
+}));
+
+// Admin chooses whether an admin user receives the emailed job report.
+router.post('/users/:id/reports', requireRole(), asyncHandler(async (req, res) => {
+  const on = req.body.receive_job_reports === 'on';
+  const u = await q1('UPDATE users SET receive_job_reports = $1 WHERE id = $2 RETURNING name', [on, Number(req.params.id) || 0]);
+  if (u) {
+    await logActivity(req.user.id, 'user.reports', 'user', Number(req.params.id),
+      `${on ? 'Turned on' : 'Turned off'} job report emails for ${u.name}`);
+  }
+  res.redirect('/admin/users?updated=1');
 }));
 
 router.post('/users/:id/toggle', requireRole(), asyncHandler(async (req, res) => {

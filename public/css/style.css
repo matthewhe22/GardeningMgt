@@ -1781,3 +1781,5 @@ details.fold[open] > summary { margin-bottom: 10px; }
 .owners-send { margin-top: 12px; }
 .owners-send > summary { cursor: pointer; padding: 6px 0; }
 .photo-previews[hidden] { display: none !important; }
+.report-tick { display: inline-flex; align-items: center; gap: 6px; margin: 0; cursor: pointer; }
+.report-tick input { width: 20px; height: 20px; margin: 0; }
