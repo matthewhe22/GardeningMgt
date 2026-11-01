@@ -5,7 +5,7 @@
 // and keeps a localStorage draft of whatever was typed so it isn't lost; see
 // the comments there. The offline page (public/offline.html) is honest about
 // this: no job/photo/property data is cached, only this app shell.
-const CACHE = 'gmgt-v4';
+const CACHE = 'gmgt-v5';
 const STATIC = ['/manifest.json', '/icon.svg', '/offline.html'];
 
 self.addEventListener('install', (e) => {
