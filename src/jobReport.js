@@ -59,11 +59,18 @@ function summaryHtml(d, link, attached) {
 </div>`;
 }
 
+// Reserved/placeholder domains (e.g. the bootstrap admin@example.com) that
+// providers refuse outright — one of these in "to" makes Resend reject the
+// whole message, so they're skipped.
+const PLACEHOLDER_DOMAIN = /@(example\.(com|net|org)|[^@]*\.(example|test|invalid|localhost))$/i;
+const deliverable = (email) => !!email && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) && !PLACEHOLDER_DOMAIN.test(email);
+
 async function emailJobReport(visitId, baseUrl = '') {
   try {
     const useSmtp = !!(await smtpConfig());
     if (!useSmtp && !emailConfigured()) return 0;
-    const admins = await q("SELECT email FROM users WHERE role = 'admin' AND active ORDER BY id");
+    const admins = (await q("SELECT email FROM users WHERE role = 'admin' AND active ORDER BY id"))
+      .filter((a) => deliverable(a.email));
     if (!admins.length) return 0;
     const d = await loadReportData(visitId);
     if (!d) return 0;
@@ -81,17 +88,22 @@ async function emailJobReport(visitId, baseUrl = '') {
     const subject = `Job report: ${v.property_name} — ${v.scheduled_date} (#${v.id})`;
     const filename = `job-${v.id}-${v.scheduled_date}-report.html`;
     const to = admins.map((a) => a.email);
-    let ok;
+    let sent = 0;
     if (useSmtp) {
       const r = await sendMail({ to: to.join(', '), subject, text, html,
         attachments: attach ? [{ filename, content: fullHtml, contentType: 'text/html' }] : [] });
-      ok = r.ok;
+      if (r.ok) sent = to.length;
     } else {
-      ok = await sendEmail(to, subject, text, { html, attachments: attach ? [{ filename, content: fullHtml }] : [] });
+      // One message per admin, so a single rejected address can't block the rest.
+      const attachments = attach ? [{ filename, content: fullHtml }] : [];
+      for (const addr of to) {
+        if (await sendEmail(addr, subject, text, { html, attachments })) sent++;
+      }
     }
-    await logActivity(null, ok ? 'report.email' : 'report.email_failed', 'visit', v.id,
-      ok ? `Emailed job #${v.id} report to ${to.length} admin(s)` : `Emailing job #${v.id} report failed`);
-    return ok ? to.length : 0;
+    await logActivity(null, sent ? 'report.email' : 'report.email_failed', 'visit', v.id,
+      sent ? `Emailed job #${v.id} report to ${sent}/${to.length} admin(s)`
+        : `Emailing job #${v.id} report failed (see server logs)`);
+    return sent;
   } catch (e) {
     console.error(`[email] job #${visitId} report failed:`, e.message);
     await logActivity(null, 'report.email_failed', 'visit', visitId,
@@ -100,4 +112,4 @@ async function emailJobReport(visitId, baseUrl = '') {
   }
 }
 
-module.exports = { emailJobReport, baseUrlFrom, summaryHtml };
+module.exports = { emailJobReport, baseUrlFrom, summaryHtml, deliverable };

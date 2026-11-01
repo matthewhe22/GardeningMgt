@@ -727,6 +727,14 @@ router.post('/:id/approve', requireRole(), asyncHandler(async (req, res) => {
   res.redirect(req.body.next === 'review' ? '/visits?status=completed' : `/visits/${visit.id}`);
 }));
 
+// Staff re-send the job report email to all admins (e.g. after fixing email setup).
+router.post('/:id/report/email', requireRole('supervisor'), asyncHandler(async (req, res) => {
+  const visit = await getVisit(req.params.id);
+  if (!visit || !visit.finished_at) return res.redirect(visit ? `/visits/${visit.id}` : '/visits');
+  const n = await emailJobReport(visit.id, baseUrlFrom(req));
+  res.redirect(`/visits/${visit.id}?error=${n ? 'emailsent' : 'emailfailed'}`);
+}));
+
 // Admin withdraws an approval (mistake): approved -> completed.
 router.post('/:id/unapprove', requireRole(), asyncHandler(async (req, res) => {
   const visit = await getVisit(req.params.id);

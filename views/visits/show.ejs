@@ -32,6 +32,10 @@
     <p class="alert alert-error">⚠ That photo couldn’t be uploaded, so nothing was saved. Use a JPG, PNG or HEIC photo under 10 MB and try again.</p>
   <% } else if (locals.flash === 'dateclash') { %>
     <p class="alert alert-error">⚠ This site already has a visit booked on that date — pick another date.</p>
+  <% } else if (locals.flash === 'emailsent') { %>
+    <p class="alert alert-ok">✔ Job report emailed to the admins.</p>
+  <% } else if (locals.flash === 'emailfailed') { %>
+    <p class="alert alert-error">⚠ The job report email couldn’t be sent — check the email setup on Settings (SMTP), or the Activity log for details.</p>
   <% } else if (locals.flash === 'future') { %>
     <p class="alert alert-error">⚠ This visit is booked for <%= visit.scheduled_date %>. To do it today, first move it to today (Change visit date), then start.</p>
   <% } else if (locals.flash === 'notstarted') { %>
@@ -98,6 +102,8 @@
         <button class="btn btn-primary">✔ Approve for payment</button></form>
       <% } else { %><span class="muted">An admin approves jobs for payment.</span><% } %>
       <a class="btn" href="/visits/<%= visit.id %>/report" target="_blank">📄 Full report</a>
+      <form method="post" action="/visits/<%= visit.id %>/report/email" class="inline"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+        <button class="btn">📧 Email report to admins</button></form>
     </div>
   <% } %>
 </div>
