@@ -1,18 +1,49 @@
 <%- include('../partials/header') %>
 <h1>Activity log</h1>
 <p class="muted">Every change in the system is recorded here: who did what, and when.</p>
+
 <div class="card">
-  <table class="table">
-    <tr><th>When (UTC)</th><th>Who</th><th>Action</th><th>Details</th></tr>
+  <form method="get" class="filter-row">
+    <label>Search <input type="text" name="search" value="<%= search %>" placeholder="Text in the details column"></label>
+    <label>User
+      <select name="user_id">
+        <option value="">All</option>
+        <% users.forEach(u => { %>
+          <option value="<%= u.id %>" <%= String(u.id) === String(actingUserId) ? 'selected' : '' %>><%= u.name %></option>
+        <% }) %>
+      </select>
+    </label>
+    <label>Category
+      <select name="category">
+        <option value="">All</option>
+        <% categories.forEach(c => { %>
+          <option value="<%= c.value %>" <%= c.value === category ? 'selected' : '' %>><%= c.label %></option>
+        <% }) %>
+      </select>
+    </label>
+    <button class="btn">Filter</button>
+    <% if (search || actingUserId || category) { %><a class="btn btn-sm" href="/admin/activity"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg> Clear</a><% } %>
+  </form>
+</div>
+
+<div class="card">
+  <table class="table table--stack">
+    <tr class="thead-row"><th>When</th><th>Who</th><th>Action</th><th>Details</th></tr>
     <% entries.forEach(e => { %>
     <tr>
-      <td class="muted"><%= e.created_at %></td>
-      <td><%= e.user_name || 'System' %></td>
-      <td><code><%= e.action %></code></td>
-      <td><%= e.details || '' %></td>
+      <td class="muted stack-main" data-label="When"><%= fmtDateTime(e.created_at) %></td>
+      <td data-label="Who"><%= e.user_name || 'System' %></td>
+      <td data-label="Action"><code><%= e.action %></code></td>
+      <td data-label="Details"><%= e.details || '' %></td>
     </tr>
     <% }) %>
   </table>
-  <% if (!entries.length) { %><p class="muted">No activity yet.</p><% } %>
+  <% if (!entries.length) { %>
+    <div class="empty">
+      <span class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg></span>
+      <p>No activity yet.</p>
+    </div>
+  <% } %>
 </div>
+<%- include('../partials/pagination') %>
 <%- include('../partials/footer') %>

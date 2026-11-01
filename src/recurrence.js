@@ -44,6 +44,17 @@ function nextOccurrenceAfter(anchor, frequency, afterDate) {
 }
 
 /**
+ * The next occurrence on/after `date` (inclusive), anchored to `anchor`.
+ * Unlike nextOccurrenceAfter, this correctly returns `date` itself when it
+ * lands exactly on an occurrence, instead of skipping ahead a full cycle.
+ */
+function nextOccurrenceOnOrAfter(anchor, frequency, date) {
+  if (anchor >= date) return anchor;
+  const dayBefore = fmt(new Date(toUTC(date).getTime() - 86400000));
+  return nextOccurrenceAfter(anchor, frequency, dayBefore);
+}
+
+/**
  * Backwards-compatible single-step helper (still anchored-safe for weekly/
  * fortnightly; monthly now derives from the given date treated as anchor).
  */
@@ -74,7 +85,16 @@ function isValidDate(s) {
   return fmt(toUTC(s)) === s;
 }
 
+// A free-text "time window" (e.g. "08:00-10:00") displayed as-is on route
+// plans and job lists — validate the shape server-side too, since the
+// client-side `pattern` attribute on these inputs is only a UX nicety and
+// can't be trusted alone.
+const TIME_WINDOW_RE = /^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/;
+function isValidTimeWindow(s) {
+  return TIME_WINDOW_RE.test(s || '');
+}
+
 module.exports = {
-  nextDate, occurrence, nextOccurrenceAfter, occurrencesBetween,
-  contractEnd, isValidDate, FREQUENCIES,
+  nextDate, occurrence, nextOccurrenceAfter, nextOccurrenceOnOrAfter, occurrencesBetween,
+  contractEnd, isValidDate, isValidTimeWindow, FREQUENCIES,
 };

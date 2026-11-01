@@ -64,7 +64,7 @@ router.post('/library', asyncHandler(async (req, res) => {
 router.post('/library/:id/update', asyncHandler(async (req, res) => {
   const title = String(req.body.title || '').trim().slice(0, 300);
   const row = title && await q1('UPDATE scope_library SET title = $1 WHERE id = $2 RETURNING id', [title, Number(req.params.id) || 0]);
-  if (row) await resyncFollowers(); // sites following a template get the new wording
+  if (row) await resyncFollowers(null, { libraryId: row.id }); // following sites get the new wording
   back(res, null, '#library');
 }));
 
@@ -85,9 +85,9 @@ router.post('/library/:id/move', asyncHandler(async (req, res) => {
 }));
 
 router.post('/library/:id/delete', asyncHandler(async (req, res) => {
-  const row = await q1('DELETE FROM scope_library WHERE id = $1 RETURNING title', [Number(req.params.id) || 0]);
+  const row = await q1('DELETE FROM scope_library WHERE id = $1 RETURNING id, title', [Number(req.params.id) || 0]);
   if (row) {
-    await resyncFollowers(); // removed from every template and following site
+    await resyncFollowers(null, { libraryId: row.id }); // removed from every template and following site
     await logActivity(req.user.id, 'scope.library.delete', 'scope_library', null, `Deleted library scope item "${row.title}"`);
   }
   back(res, null, '#library');
@@ -169,8 +169,11 @@ router.post('/templates/:id/delete', asyncHandler(async (req, res) => {
 router.post('/templates/:id/apply', asyncHandler(async (req, res) => {
   const t = await q1('SELECT * FROM scope_templates WHERE id = $1', [Number(req.params.id) || 0]);
   if (!t) return back(res);
+  // "Apply to ALL" leaves hand-adjusted sites alone unless the admin unticks
+  // "Skip adjusted sites" — overwriting a site's custom scope is rarely intended.
+  const skipAdjusted = req.body.skip_adjusted === 'on';
   const jobIds = req.body.target === 'all'
-    ? (await q('SELECT id FROM jobs WHERE active')).map((j) => j.id)
+    ? (await q(`SELECT id FROM jobs WHERE active ${skipAdjusted ? 'AND NOT scope_customized' : ''}`)).map((j) => j.id)
     : (await q('SELECT id FROM jobs WHERE active AND id = ANY($1::int[])', [idList(req.body.job_ids)])).map((j) => j.id);
   if (!jobIds.length) return back(res, 'nosites', `#tpl-${t.id}`);
   const n = await applyTemplate(t.id, jobIds);

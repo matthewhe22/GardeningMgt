@@ -4,12 +4,16 @@
  * Each email has an HTML summary (scope of duties with tick / comment / photo
  * count, plus a link to the online report) and the full self-contained report
  * (all photos embedded) attached as an .html file. Best-effort: failures are
- * logged and never block job completion. Requires RESEND_API_KEY + RESEND_FROM.
+ * logged and never block job completion. Sent through the SMTP server set up
+ * on the admin Settings page; falls back to Resend (RESEND_API_KEY +
+ * RESEND_FROM) when SMTP isn't configured. One message goes to all admins.
  */
 const { q } = require('./db');
 const { loadReportData, renderReportHtml } = require('./report');
 const { sendEmail, emailConfigured } = require('./notify');
+const { sendMail, getConfig: smtpConfig } = require('./email');
 const { logActivity } = require('./activity');
+const { fmtDateTime } = require('./time');
 
 // Keep well under the provider's 40 MB message cap (base64 adds ~33%).
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
@@ -40,7 +44,7 @@ function summaryHtml(d, link, attached) {
   <p style="color:#707b72;margin:0 0 16px">${esc(v.address)} · ${esc(v.scheduled_date)}</p>
   <table style="font-size:14px;margin-bottom:16px">
     <tr><td style="color:#707b72;padding:2px 12px 2px 0">Gardener</td><td>${esc(v.gardener_name || '—')}</td></tr>
-    <tr><td style="color:#707b72;padding:2px 12px 2px 0">Completed</td><td>${esc(v.finished_at || '—')} UTC</td></tr>
+    <tr><td style="color:#707b72;padding:2px 12px 2px 0">Completed</td><td>${esc(v.finished_at ? fmtDateTime(v.finished_at) : '—')}</td></tr>
     <tr><td style="color:#707b72;padding:2px 12px 2px 0">Time on site</td><td>${v.duration_minutes ?? '—'} min</td></tr>
     <tr><td style="color:#707b72;padding:2px 12px 2px 0">Photos</td><td>${d.photos.length}</td></tr>
   </table>
@@ -57,13 +61,15 @@ function summaryHtml(d, link, attached) {
 
 async function emailJobReport(visitId, baseUrl = '') {
   try {
-    if (!emailConfigured()) return 0;
+    const useSmtp = !!(await smtpConfig());
+    if (!useSmtp && !emailConfigured()) return 0;
     const admins = await q("SELECT email FROM users WHERE role = 'admin' AND active ORDER BY id");
     if (!admins.length) return 0;
     const d = await loadReportData(visitId);
     if (!d) return 0;
     const v = d.visit;
     const link = `${baseUrl}/visits/${v.id}`;
+    // Render the self-contained report once and send ONE message to all admins.
     const fullHtml = await renderReportHtml(d, { inlinePhotos: true });
     const attach = Buffer.byteLength(fullHtml) <= MAX_ATTACHMENT_BYTES;
     const html = summaryHtml(d, link, attach);
@@ -73,15 +79,19 @@ async function emailJobReport(visitId, baseUrl = '') {
       `${d.checks.length ? `scope ${done}/${d.checks.length} done, ` : ''}${d.photos.length} photo(s).\n` +
       `Review and approve: ${link}`;
     const subject = `Job report: ${v.property_name} — ${v.scheduled_date} (#${v.id})`;
-    const attachments = attach
-      ? [{ filename: `job-${v.id}-${v.scheduled_date}-report.html`, content: fullHtml }] : [];
-    let sent = 0;
-    for (const a of admins) {
-      if (await sendEmail(a.email, subject, text, { html, attachments })) sent++;
+    const filename = `job-${v.id}-${v.scheduled_date}-report.html`;
+    const to = admins.map((a) => a.email);
+    let ok;
+    if (useSmtp) {
+      const r = await sendMail({ to: to.join(', '), subject, text, html,
+        attachments: attach ? [{ filename, content: fullHtml, contentType: 'text/html' }] : [] });
+      ok = r.ok;
+    } else {
+      ok = await sendEmail(to, subject, text, { html, attachments: attach ? [{ filename, content: fullHtml }] : [] });
     }
-    await logActivity(null, 'report.email', 'visit', v.id,
-      `Emailed job #${v.id} report to ${sent}/${admins.length} admin(s)`);
-    return sent;
+    await logActivity(null, ok ? 'report.email' : 'report.email_failed', 'visit', v.id,
+      ok ? `Emailed job #${v.id} report to ${to.length} admin(s)` : `Emailing job #${v.id} report failed`);
+    return ok ? to.length : 0;
   } catch (e) {
     console.error(`[email] job #${visitId} report failed:`, e.message);
     await logActivity(null, 'report.email_failed', 'visit', visitId,

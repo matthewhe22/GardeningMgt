@@ -110,6 +110,9 @@
             <span class="muted">— <%= j.template_id ? tplName[j.template_id] + (j.scope_customized ? ' (adjusted)' : '') : (j.scope_count ? 'custom scope' : 'no scope') %></span></label>
         <% }) %>
       </div>
+      <% const adjusted = jobs.filter(j => j.scope_customized).length; const other = jobs.filter(j => j.template_id && j.template_id !== t.id && !j.scope_customized).length; %>
+      <% if (adjusted) { %><label class="pick"><input type="checkbox" name="skip_adjusted" checked> When applying to ALL, skip the <%= adjusted %> adjusted site(s)</label><% } %>
+      <% if (other) { %><p class="muted">“Apply to ALL” also moves <%= other %> site(s) that use another template onto <%= t.name %>.</p><% } %>
       <div class="btn-row">
         <button class="btn btn-primary" name="target" value="selected">Apply to selected sites</button>
         <button class="btn" name="target" value="all">Apply to ALL sites (<%= jobs.length %>)</button>

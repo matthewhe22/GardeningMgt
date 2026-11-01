@@ -3,34 +3,66 @@
 <div class="page-head job-head">
   <h1><%= visit.property_name %></h1>
   <div class="chips">
-    <span class="chip">📅 <%= visit.scheduled_date %><% if (visit.time_window) { %> · <%= visit.time_window %><% } %></span>
-    <a class="chip chip-link" href="https://www.google.com/maps/dir/?api=1&destination=<%= encodeURIComponent((visit.lat != null && visit.lng != null) ? (visit.lat + ',' + visit.lng) : (visit.property_name + ', ' + visit.address)) %>" target="_blank" rel="noopener">🧭 Navigate</a>
-    <span class="chip">📍 <%= visit.address %></span>
-    <span class="chip">👤 <%= visit.gardener_name || 'Unassigned' %></span>
+    <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M8 3v4M16 3v4M3.5 10h17"/></svg> <%= visit.scheduled_date %><% if (visit.time_window) { %> · <%= visit.time_window %><% } %></span>
+    <a class="chip chip-link" href="https://www.google.com/maps/dir/?api=1&destination=<%= encodeURIComponent((visit.lat != null && visit.lng != null) ? (visit.lat + ',' + visit.lng) : (visit.property_name + ', ' + visit.address)) %>" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m15 9-2 6-6 2 2-6 6-2Z"/></svg> Navigate</a>
+    <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s7-6.5 7-11.5A7 7 0 0 0 5 9.5C5 14.5 12 21 12 21Z"/><circle cx="12" cy="9.5" r="2.3"/></svg> <%= visit.address %></span>
+    <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.6"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg> <%= visit.gardener_name || 'Unassigned' %></span>
     <span class="status status-<%= visit.status %>"><%= visit.status === 'approved' ? 'approved for payment' : visit.status.replace('_',' ') %></span>
     <% if (locals.job && job.default_gardener_name && visit.gardener_name && job.gardener_id !== visit.gardener_id) { %>
       <span class="status status-in_progress">replacement for <%= job.default_gardener_name %></span>
     <% } %>
   </div>
+  <p class="page-sub"><a class="btn btn-sm" href="/issues?property_id=<%= visit.property_id %>&visit_id=<%= visit.id %>"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg> Report an issue at this site</a></p>
+  <% if (locals.warning === 'busy') { %>
+    <p class="alert alert-error"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg> Heads up: this gardener already has other visits scheduled that day — check for a clash.</p>
+  <% } %>
   <% if (locals.flash === 'photos') { %>
-    <p class="alert alert-error">⚠ Add at least one photo for this site before completing the job.</p>
+    <p class="alert alert-error"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg> Add at least one photo for this site before completing the job.</p>
   <% } else if (locals.flash === 'confirm') { %>
-    <p class="alert alert-error">⚠ Please tick the confirmation box to complete the job.</p>
+    <p class="alert alert-error"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg> Please tick the confirmation box to complete the job.</p>
   <% } else if (locals.flash === 'scope') { %>
     <p class="alert alert-error">⚠ Tick every scope item (or add a comment saying why it wasn’t done) before completing.</p>
   <% } else if (locals.flash === 'locked') { %>
-    <p class="alert alert-error">⚠ This job is already completed — the checklist can’t be changed.</p>
+    <p class="alert alert-error">⚠ This job is completed — it can’t be changed now. Ask the office if something needs fixing.</p>
   <% } else if (locals.flash === 'approval') { %>
-    <p class="alert alert-error">⚠ Use the Approve button to approve a job for payment (admins only).</p>
+    <p class="alert alert-error">⚠ This job is approved for payment and locked. An admin must withdraw the approval before it can be changed.</p>
   <% } else if (locals.flash === 'notcompleted') { %>
     <p class="alert alert-error">⚠ Only a completed job can be approved.</p>
+  <% } else if (locals.flash === 'notready') { %>
+    <p class="alert alert-error">⚠ This job isn’t ready to approve: some scope items are unticked without a comment, or there are no photos. Tick “approve anyway” to override.</p>
+  <% } else if (locals.flash === 'upload') { %>
+    <p class="alert alert-error">⚠ That photo couldn’t be uploaded, so nothing was saved. Use a JPG, PNG or HEIC photo under 10 MB and try again.</p>
+  <% } else if (locals.flash === 'dateclash') { %>
+    <p class="alert alert-error">⚠ This site already has a visit booked on that date — pick another date.</p>
+  <% } else if (locals.flash === 'future') { %>
+    <p class="alert alert-error">⚠ This visit is booked for <%= visit.scheduled_date %>. To do it today, first move it to today (Change visit date), then start.</p>
+  <% } else if (locals.flash === 'notstarted') { %>
+    <p class="alert alert-error">⚠ Start the job before ticking off the checklist.</p>
   <% } else if (locals.flash === 'invalid') { %>
-    <p class="alert alert-error">⚠ Some details were invalid — please check and try again.</p>
+    <p class="alert alert-error"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg> Some details were invalid — please check and try again.</p>
+  <% } else if (locals.flash === 'badphoto') { %>
+    <p class="alert alert-error"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg> One or more photos couldn't be uploaded — please check the file and try again.</p>
+  <% } else if (locals.flash === 'piqconfirm') { %>
+    <p class="alert alert-error"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg> Please tick the confirmation box to send the report to owners.</p>
+  <% } else if (locals.flash === 'piqnotconfigured') { %>
+    <p class="alert alert-error"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg> PropertyIQ isn't configured yet — set it up on <a href="/admin/settings">Settings</a>.</p>
+  <% } else if (locals.flash === 'piqnomatch') { %>
+    <p class="alert alert-error"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg> Couldn't find a matching PropertyIQ building for this site's address.</p>
+  <% } else if (locals.flash === 'piqerror') { %>
+    <p class="alert alert-error"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg> PropertyIQ couldn't be reached just now — please try again shortly.</p>
+  <% } else if (locals.flash === 'piqnoemails') { %>
+    <p class="alert alert-error"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg> Matched the PropertyIQ building, but it has no lot owner email addresses on file.</p>
+  <% } else if (locals.flash === 'piqsendfailed') { %>
+    <p class="alert alert-error"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg> Owner emails were found, but sending failed — check the Email (SMTP) setup on Settings.</p>
+  <% } else if (locals.flash === 'piqsent') { %>
+    <p class="alert alert-ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 5 5L19 7"/></svg> Report sent to the building's owners via PropertyIQ.</p>
+  <% } else if (locals.flash === 'piqstale') { %>
+    <p class="alert alert-error"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg> This site's details changed since you looked up the owners — please review them again before sending.</p>
   <% } %>
   <% if (locals.job) { %>
-  <p class="page-sub">🔁 <%= job.frequency %> · <%= job.contract_years %>-year contract
+  <p class="page-sub"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg> <%= job.frequency %> · <%= job.contract_years %>-year contract
     (<%= job.start_date %> → <%= job.end_date %>)
-    · last completed: <%= job.last_completed_at ? job.last_completed_at + ' UTC' : 'never' %>
+    · last completed: <%= job.last_completed_at ? fmtDateTime(job.last_completed_at) : 'never' %>
     <% if (staff) { %> · <a href="/jobs/site/<%= visit.property_id %>">site history</a><% } %>
     · <a href="/jobs">all sites</a></p>
   <% } %>
@@ -40,27 +72,33 @@
   const running = visit.started_at && !visit.finished_at;
   const resolvedCount = checks.filter(isResolved).length;
   const allResolved = resolvedCount === checks.length;
-  const firstOpen = (running && !locked) ? (checks.find(c => !isResolved(c)) || {}).id : null;
+  const approved = visit.status === 'approved';
+  // Open the first unfinished item while working (or the one named in ?item=).
+  const openItem = Number(locals.openItem) || ((running && !locked) ? (checks.find(c => !isResolved(c)) || {}).id : null);
 %>
 
 <!-- ===== Admin review & payment approval ===== -->
 <% if (staff && ['completed','approved'].includes(visit.status)) { %>
-<div class="card review-card <%= visit.status === 'approved' ? 'is-approved' : '' %>">
-  <% if (visit.status === 'approved') { %>
+<div class="card review-card <%= approved ? 'is-approved' : '' %>" id="review">
+  <% if (approved) { %>
     <h2>💰 Approved for payment</h2>
-    <p>By <strong><%= visit.approved_by_name || 'admin' %></strong> on <%= visit.approved_at %> UTC.</p>
+    <p>By <strong><%= visit.approved_by_name || 'admin' %></strong> on <%= fmtDateTime(visit.approved_at) %>. The job is locked.</p>
     <% if (isAdmin) { %>
-    <form method="post" action="/visits/<%= visit.id %>/unapprove" class="inline" data-confirm="Withdraw payment approval?">
+    <form method="post" action="/visits/<%= visit.id %>/unapprove" class="inline" data-confirm="Withdraw payment approval? The job goes back to awaiting review and can be edited again."><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
       <button class="link-btn">Withdraw approval</button></form>
     <% } %>
   <% } else { %>
     <h2>🔎 Review this job</h2>
-    <p><% if (checks.length) { %>Scope: <strong><%= checks.filter(c => c.done).length %>/<%= checks.length %></strong> done · <% } %>
-      <strong><%= totalPhotos %></strong> photo(s) · <%= visit.duration_minutes %> min on site.
+    <p><% if (checks.length) { %>Scope: <strong><%= checks.filter(c => c.done).length %>/<%= checks.length %></strong> done<% if (resolvedCount > checks.filter(c => c.done).length) { %>, <%= resolvedCount - checks.filter(c => c.done).length %> explained<% } %> · <% } %>
+      <strong><%= totalPhotos %></strong> photo(s) · <%= visit.duration_minutes != null ? visit.duration_minutes + ' min on site' : 'no time recorded' %>.
       Check the items and photos below, then approve.</p>
+    <% const ready = allResolved && totalPhotos > 0; %>
+    <% if (!ready) { %><p class="alert alert-error">⚠ Not everything was filled in: <%= !allResolved ? (checks.length - resolvedCount) + ' scope item(s) unticked without a comment' : '' %><%= !allResolved && !totalPhotos ? ' and ' : '' %><%= !totalPhotos ? 'no photos' : '' %>.</p><% } %>
     <div class="btn-row">
       <% if (isAdmin) { %>
-      <form method="post" action="/visits/<%= visit.id %>/approve" class="inline">
+      <form method="post" action="/visits/<%= visit.id %>/approve" class="inline"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+        <input type="hidden" name="next" value="review">
+        <% if (!ready) { %><label class="confirm-line"><input type="checkbox" name="force" value="1" required> Approve anyway</label><% } %>
         <button class="btn btn-primary">✔ Approve for payment</button></form>
       <% } else { %><span class="muted">An admin approves jobs for payment.</span><% } %>
       <a class="btn" href="/visits/<%= visit.id %>/report" target="_blank">📄 Full report</a>
@@ -69,26 +107,85 @@
 </div>
 <% } %>
 
-<!-- ===== 1. Start / running / completed ===== -->
-<div class="card timer-card">
-  <% if (running) { %>
-    <h2>⏱ Job running</h2>
-    <p class="muted">Started <%= visit.started_at %> UTC<% if (checks.length) { %> · checklist <strong><%= resolvedCount %>/<%= checks.length %></strong><% } %></p>
+<!-- ===== 1. The job action: start / complete ===== -->
+<div class="card timer-card"<% if (visit.started_at && !visit.finished_at) { %> data-gps-ping-visit="<%= visit.id %>"<% } %>>
+  <% if (visit.started_at && !visit.finished_at) { %>
+    <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2"/><path d="M9 2h6"/></svg> Job running</h2>
+    <p>Started at <strong><%= fmtDateTime(visit.started_at) %></strong>.</p>
+    <p class="muted">Completing records the date &amp; time, notifies your supervisor,
+      and files the report and photos.</p>
+    <% if (locals.longRunning) { %>
+      <p class="alert alert-error">⏰ This job has been running for over 4 hours — still working?
+        (If the timer was left on by mistake, a supervisor can correct the recorded hours after you complete the job.)</p>
+    <% } %>
+    <form method="post" action="/visits/<%= visit.id %>/timer/stop" class="gps-form mobile-sticky-cta"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+      <input type="hidden" name="lat"><input type="hidden" name="lng">
+      <% if (['scope','photos','confirm'].includes(locals.flash)) { %>
+        <p class="alert alert-error"><%= flash === 'scope' ? '⚠ ' + (checks.length - resolvedCount) + ' scope item(s) still need a tick or a comment.' : flash === 'photos' ? '⚠ Add at least one photo first.' : '⚠ Tick the box below first.' %></p>
+      <% } %>
+      <p class="cta-note"><% if (checks.length) { %>Checklist <strong><%= resolvedCount %>/<%= checks.length %></strong> · <% } %><strong><%= totalPhotos %></strong> photo(s) uploaded so far.
+        <% if (!totalPhotos) { %><br><span class="muted"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg> <a href="#photos">Upload your photos</a> before completing.</span><% } %></p>
+      <label class="confirm-line"><input type="checkbox" name="confirm_photos" required>
+        All work and photos are done</label>
+      <button class="btn btn-danger btn-block"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 5 5L19 7"/></svg> Complete job</button>
+    </form>
   <% } else if (visit.finished_at) { %>
-    <h2>✅ Job completed</h2>
+    <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 5 5L19 7"/></svg> Job completed</h2>
     <p>Worked <strong><%= visit.duration_minutes %> min</strong>
-      (<%= visit.started_at %> → <%= visit.finished_at %> UTC).</p>
+      (<%= fmtDateTime(visit.started_at) %> → <%= fmtDateTime(visit.finished_at) %>).</p>
     <div class="btn-row">
-      <a class="btn btn-primary" href="/visits/<%= visit.id %>/report" target="_blank">📄 Completion report</a>
-      <% if (visit.status !== 'approved') { %>
-      <form method="post" action="/visits/<%= visit.id %>/timer/start" class="gps-form inline" data-confirm="Re-open this job and restart the timer?">
+      <a class="btn btn-primary" href="/visits/<%= visit.id %>/report" target="_blank"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h9l4 4v14H6V3Z"/><path d="M14.5 3.5V8H19"/><path d="M9.5 13H15"/><path d="M9.5 16.5H15"/></svg> View report</a>
+      <a class="btn" href="/visits/<%= visit.id %>/report?download=1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 19.5h16"/></svg> Download PDF</a>
+<% if (staff && !approved) { %>
+      <form method="post" action="/visits/<%= visit.id %>/timer/start" class="gps-form inline" data-confirm="Reopen this job? It goes back to in progress so the gardener can fix it; the original start time is kept."><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
         <input type="hidden" name="lat"><input type="hidden" name="lng">
-        <button class="btn">↻ Restart timer</button>
+        <button class="btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v5h-5"/></svg> Reopen job</button>
       </form>
       <% } %>
     </div>
+    <% if (staff) { %>
+    <div class="card" style="margin-top:16px">
+      <h3 class="next-stop-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h16v16H4z"/><path d="m4 6 8 7 8-7"/></svg> Send report to owners</h3>
+      <p class="muted">Once you've reviewed the report and it's ready to go out, confirm below. Owners are
+        looked up from PropertyIQ by matching this site's address to a PropertyIQ building — you'll see the
+        matched building and the exact recipient list to check before anything is sent.</p>
+      <form method="post" action="/visits/<%= visit.id %>/report/owners/preview" class="gps-form"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+        <label class="confirm-line"><input type="checkbox" name="confirm_report" required>
+          I confirm this job report is satisfactory and ready to send to the owners</label>
+        <button class="btn btn-primary">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg> Look up owners &amp; review
+        </button>
+      </form>
+    </div>
+    <% } %>
+    <% if (locals.nextVisit) { %>
+    <div class="next-stop-card">
+      <h3 class="next-stop-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h16"/><path d="m13 5 7 7-7 7"/></svg> Next stop</h3>
+      <p><strong><%= nextVisit.property_name %></strong> — <%= nextVisit.address %>
+        <% if (nextVisit.time_window) { %><span class="muted">(<%= nextVisit.time_window %>)</span><% } %></p>
+      <div class="btn-row">
+        <a class="btn btn-primary" href="/visits/<%= nextVisit.id %>">Open job</a>
+        <a class="btn" href="https://www.google.com/maps/dir/?api=1&destination=<%= encodeURIComponent((nextVisit.lat != null && nextVisit.lng != null) ? (nextVisit.lat + ',' + nextVisit.lng) : (nextVisit.property_name + ', ' + nextVisit.address)) %>" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m15 9-2 6-6 2 2-6 6-2Z"/></svg> Navigate</a>
+      </div>
+    </div>
+    <% } %>
+    <% if (staff && !approved) { %>
+    <details class="manage-duration">
+      <summary class="muted">Correct recorded hours (staff)</summary>
+      <p class="muted">A skipped or forgotten timer can leave the worked time wrong — this
+        feeds invoicing and the hours-worked report, so correct it here rather than editing it
+        anywhere else. The change is logged with who made it and the previous value.</p>
+      <form method="post" action="/visits/<%= visit.id %>/duration" class="filter-row"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+        <label>Minutes worked <input type="number" name="duration_minutes" min="0" step="1" value="<%= visit.duration_minutes || 0 %>" required></label>
+        <button class="btn">Save correction</button>
+      </form>
+    </details>
+    <% } %>
   <% } else { %>
-    <form method="post" action="/visits/<%= visit.id %>/timer/start" class="gps-form">
+    <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2"/><path d="M9 2h6"/></svg> Ready to start</h2>
+    <p class="muted">Your GPS position is recorded when you start and finish
+      (if location access is allowed).</p>
+    <form method="post" action="/visits/<%= visit.id %>/timer/start" class="gps-form mobile-sticky-cta"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
       <input type="hidden" name="lat"><input type="hidden" name="lng">
       <button class="btn btn-primary btn-block">▶ Start job</button>
     </form>
@@ -97,33 +194,73 @@
   <% if (checks.length) { %>
     <a class="btn btn-block btn-soft" href="/visits/<%= visit.id %>/standards">📋 View scope standards</a>
   <% } %>
+
+  <% if (!staff && !visit.finished_at) { %>
+    <form method="post" action="/visits/<%= visit.id %>/status" class="skip-job-form"
+      data-confirm="Mark this job as skipped? Use this only if the job genuinely can't be done today (e.g. site inaccessible, no one home). Your supervisor will see it as skipped.">
+      <% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+      <input type="hidden" name="status" value="skipped">
+      <button class="btn btn-block skip-job-btn" type="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg> Can't do this job</button>
+    </form>
+  <% } %>
+
+  <% if (locals.mapSvg && (visit.started_at || gpsPoints.length)) { %>
+    <div class="map-snapshot">
+      <h3 class="map-snapshot-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s7-6.5 7-11.5A7 7 0 0 0 5 9.5C5 14.5 12 21 12 21Z"/><circle cx="12" cy="9.5" r="2.3"/></svg> Job location</h3>
+      <%- mapSvg %>
+      <p class="muted">From the GPS captured on this visit.<% if (locals.mapLink) { %>
+        · <a href="<%= mapLink %>" target="_blank" rel="noopener">Open in map ↗</a><% } %></p>
+    </div>
+  <% } %>
+
+  <% if (gpsPoints.length) { %>
+    <details><summary class="muted"><%= gpsPoints.length %> GPS point(s) recorded</summary>
+      <table class="table">
+        <tr><th>Kind</th><th>Coordinates</th><th>Recorded</th></tr>
+        <% gpsPoints.forEach(g => { %>
+          <tr><td><%= g.kind %></td><td><%= g.lat.toFixed(5) %>, <%= g.lng.toFixed(5) %></td><td class="muted"><%= fmtDateTime(g.recorded_at) %></td></tr>
+        <% }) %>
+      </table>
+    </details>
+  <% } %>
+  <% if (!locked) { %>
+  <details>
+    <summary class="muted">Change visit date</summary>
+    <form method="post" action="/visits/<%= visit.id %>/reschedule" class="filter-row"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+      <label>New date <input type="date" name="scheduled_date" value="<%= visit.scheduled_date %>" required></label>
+      <button class="btn">Move visit</button>
+    </form>
+  </details>
+  <% } %>
 </div>
 
-<!-- ===== 2. Scope of duties checklist ===== -->
+<!-- ===== Scope of duties checklist ===== -->
 <% if (checks.length) { %>
 <section class="card" id="scope">
   <h2>Scope of duties <span class="muted">(<%= resolvedCount %>/<%= checks.length %>)</span></h2>
   <div class="progress"><span style="width: <%= Math.round(100 * resolvedCount / checks.length) %>%"></span></div>
+  <% if (running && !locked) { %><p class="muted scope-help">Tick <strong>Done</strong> (it saves straight away), add a photo, or write why it wasn’t needed.</p><% } %>
   <% checks.forEach((c, i) => { %>
-  <details class="scope-item <%= c.done ? 'is-done' : (isResolved(c) ? 'is-noted' : '') %>" id="check-<%= c.id %>" <%= c.id === firstOpen ? 'open' : '' %>>
+  <details class="scope-item <%= c.done ? 'is-done' : (isResolved(c) ? 'is-noted' : '') %><%= c.scope_id == null ? ' is-removed' : '' %>" id="check-<%= c.id %>" <%= c.id === openItem ? 'open' : '' %>>
     <summary>
       <span class="scope-mark"><%= c.done ? '✔' : (isResolved(c) ? '💬' : i + 1) %></span>
-      <span class="scope-title"><%= c.title %></span>
+      <span class="scope-title"><%= c.title %><% if (c.scope_id == null) { %> <span class="muted">(removed from scope)</span><% } %></span>
       <% if (c.photos.length) { %><span class="scope-count">📷 <%= c.photos.length %></span><% } %>
     </summary>
     <div class="scope-body">
       <% if (c.standard_photo) { %>
         <a class="scope-std" href="/uploads/<%= c.standard_photo %>" target="_blank">
-          <img src="/uploads/<%= c.standard_photo %>" alt="Standard" loading="lazy"><span>👁 Standard — tap to enlarge</span></a>
+          <img src="/uploads/<%= c.standard_photo %>/thumb" alt="Standard" loading="lazy"><span>👁 Standard — tap to enlarge</span></a>
       <% } %>
       <% if (locked || !visit.started_at) { %>
-        <% if (c.comment) { %><p>💬 <%= c.comment %></p><% } %>
+        <% if (c.comment) { %><p class="scope-comment">💬 <%= c.comment %></p><% } %>
         <% if (!c.done && !c.comment) { %><p class="muted"><%= visit.started_at ? 'Not done.' : 'Start the job to fill this in.' %></p><% } %>
       <% } else { %>
-      <form method="post" action="/visits/<%= visit.id %>/scope/<%= c.id %>" enctype="multipart/form-data" class="scope-form">
-        <label class="scope-done"><input type="checkbox" name="done" <%= c.done ? 'checked' : '' %>> Done</label>
-        <label class="btn file-btn">📷 Add photo<input type="file" name="photos" accept="image/*" capture="environment" multiple hidden class="file-count"></label>
-        <textarea name="comment" rows="1" placeholder="Comment (needed if not done)"><%= c.comment || '' %></textarea>
+      <form method="post" action="/visits/<%= visit.id %>/scope/<%= c.id %>" enctype="multipart/form-data" class="scope-form" data-upload data-scope-form><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+        <label class="scope-done"><input type="checkbox" name="done" <%= c.done ? 'checked' : '' %> data-tick-save> Done</label>
+        <label class="btn file-btn photo-pick">📷 Add photo<input type="file" name="photos" accept="image/*" capture="environment" multiple hidden class="file-count"></label>
+        <div class="photo-previews" data-upload-previews hidden></div>
+        <textarea name="comment" rows="2" maxlength="2000" placeholder="Comment (needed if not done)"><%= c.comment || '' %></textarea>
         <button class="btn btn-primary btn-block">Save</button>
       </form>
       <% } %>
@@ -131,9 +268,9 @@
       <div class="scope-photos">
         <% c.photos.forEach(ph => { %>
           <figure class="photo">
-            <a href="/uploads/<%= ph.filename %>" target="_blank"><img src="/uploads/<%= ph.filename %>" alt="<%= c.title %>" loading="lazy"></a>
+            <a href="/uploads/<%= ph.filename %>" target="_blank"><img src="/uploads/<%= ph.filename %>/thumb" alt="<%= c.title %>" loading="lazy"></a>
             <% if (!locked) { %>
-            <form method="post" action="/visits/<%= visit.id %>/scope/<%= c.id %>/photos/<%= ph.id %>/delete" data-confirm="Remove this photo?">
+            <form method="post" action="/visits/<%= visit.id %>/scope/<%= c.id %>/photos/<%= ph.id %>/delete" data-confirm="Remove this photo?"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
               <button class="link-btn danger-link">✕ remove</button></form>
             <% } %>
           </figure>
@@ -146,57 +283,25 @@
 </section>
 <% } %>
 
-<!-- ===== 3. Complete ===== -->
-<% if (running) { %>
-<div class="card timer-card" id="complete">
-  <form method="post" action="/visits/<%= visit.id %>/timer/stop" class="gps-form">
-    <input type="hidden" name="lat"><input type="hidden" name="lng">
-    <% if (checks.length && !allResolved) { %>
-      <p class="muted">⚠ <%= checks.length - resolvedCount %> scope item(s) still to tick.</p>
-    <% } %>
-    <% if (!totalPhotos) { %><p class="muted">⚠ Add at least one photo before completing.</p><% } %>
-    <label class="confirm-line"><input type="checkbox" name="confirm_photos" required>
-      All work and photos are done</label>
-    <button class="btn btn-danger btn-block">✔ Complete job</button>
-  </form>
-  <p class="muted">Completing records the time, sends the job report to the admins for review, and schedules the next visit.</p>
-</div>
-<% } %>
-
-<% if (gpsPoints.length || !locked) { %>
-<details class="card">
-  <summary class="muted">More — <%= gpsPoints.length %> GPS point(s), change visit date</summary>
-  <% if (gpsPoints.length) { %>
-    <table class="table">
-      <% gpsPoints.forEach(g => { %>
-        <tr><td><%= g.kind %></td><td><%= g.lat.toFixed(5) %>, <%= g.lng.toFixed(5) %></td><td class="muted"><%= g.recorded_at %></td></tr>
-      <% }) %>
-    </table>
-  <% } %>
-  <% if (!locked) { %>
-  <form method="post" action="/visits/<%= visit.id %>/reschedule" class="filter-row">
-    <label>New date <input type="date" name="scheduled_date" value="<%= visit.scheduled_date %>" required></label>
-    <button class="btn">Move visit</button>
-  </form>
-  <% } %>
-</details>
-<% } %>
-
-<!-- ===== 4. Extra: tasks, other photos, comments (collapsed for gardeners when a checklist exists) ===== -->
-<% const openExtra = staff || !checks.length; %>
+<!-- ===== 2. The work: tasks, photos, comments ===== -->
 <div class="grid">
-  <% if (tasks.length || staff) { %>
-  <details class="card" id="tasks" <%= openExtra ? 'open' : '' %>>
-    <summary><h2 class="inline-h">Tasks <span class="muted">(<%= tasks.filter(t => t.status === 'done').length %>/<%= tasks.length %>)</span></h2></summary>
-    <table class="table">
+  <section class="card" id="tasks">
+    <h2>Tasks</h2>
+    <table class="table table-tasks">
       <% tasks.forEach(t => { %>
       <tr>
-        <td><strong><%= t.title %></strong><% if (t.description) { %><br><span class="muted"><%= t.description %></span><% } %></td>
-        <td>
-          <form method="post" action="/tasks/<%= t.id %>/status" class="inline">
-            <select name="status" class="auto-submit">
-              <% ['pending','in_progress','done','blocked'].forEach(st => { %>
-                <option value="<%= st %>" <%= t.status === st ? 'selected' : '' %>><%= st.replace('_',' ') %></option>
+        <td class="task-main">
+          <div class="task-title-line">
+            <strong><%= t.title %></strong>
+            <span class="status status-<%= t.status %>"><%= t.status.replace('_',' ') %></span>
+          </div>
+          <% if (t.description) { %><span class="muted"><%= t.description %></span><% } %>
+        </td>
+        <td class="task-status-cell">
+          <form method="post" action="/tasks/<%= t.id %>/status" class="inline"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+            <select name="status" data-autosubmit aria-label="Change task status">
+              <% ['pending','in_progress','done','blocked'].forEach(s => { %>
+                <option value="<%= s %>" <%= t.status === s ? 'selected' : '' %>><%= s.replace('_',' ') %></option>
               <% }) %>
             </select>
           </form>
@@ -204,78 +309,128 @@
       </tr>
       <% }) %>
     </table>
-    <% if (!tasks.length) { %><p class="muted">No tasks for this visit.</p><% } %>
-    <form method="post" action="/visits/<%= visit.id %>/tasks" class="add-row">
+    <% if (!tasks.length) { %>
+      <div class="empty">
+        <span class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="4"/><path d="m8.5 12.5 2.5 2.5 5-5.5"/></svg></span>
+        <p>No tasks for this visit.</p>
+      </div>
+    <% } %>
+<% if (!approved) { %>
+    <form method="post" action="/visits/<%= visit.id %>/tasks" class="add-row" data-draft-label="task"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
       <input type="text" name="title" placeholder="New task…" required>
       <button class="btn">Add</button>
     </form>
-  </details>
-  <% } %>
+    <% } %>
+  </section>
 
-  <details class="card" id="photos" <%= openExtra ? 'open' : '' %>>
-    <summary><h2 class="inline-h"><%= checks.length ? 'Other photos' : 'Photos' %> <span class="muted">(<%= photos.length %>)</span></h2></summary>
+  <section class="card" id="photos">
+    <h2><%= checks.length ? 'Other photos' : 'Photos' %> <span class="muted">(<%= photos.length %>)</span></h2>
     <div class="photo-grid">
       <% photos.forEach(ph => { %>
         <figure class="photo">
-          <a href="/uploads/<%= ph.filename %>" target="_blank"><img src="/uploads/<%= ph.filename %>" alt="<%= ph.caption || ph.original_name %>" loading="lazy"></a>
+          <a href="/uploads/<%= ph.filename %>" target="_blank"><img src="/uploads/<%= ph.filename %>/thumb" alt="<%= ph.caption || ph.original_name %>" loading="lazy"></a>
           <figcaption>
-            <span class="photo-stamp">📅 <%= ph.created_at %> UTC</span><br>
+            <span class="photo-stamp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M8 3v4M16 3v4M3.5 10h17"/></svg> <%= fmtDateTime(ph.created_at) %></span><br>
             <% if (ph.caption) { %><%= ph.caption %> · <% } %><span class="muted">by <%= ph.uploader_name %></span>
+            <% if (staff || ph.uploaded_by === user.id) { %>
+              <form method="post" action="/photos/<%= ph.id %>/delete" class="inline" data-confirm="Delete this photo?"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %><button class="link-btn link-btn-danger">Delete</button></form>
+            <% } %>
           </figcaption>
         </figure>
       <% }) %>
     </div>
-    <form method="post" action="/visits/<%= visit.id %>/photos" enctype="multipart/form-data" class="form-grid">
-      <label class="span2">Photos <input type="file" name="photos" accept="image/*" multiple required></label>
-      <label class="span2">Caption <input type="text" name="caption"></label>
-      <label><input type="checkbox" name="shared" checked> Share with the whole team</label>
-      <button class="btn btn-primary">Upload</button>
+    <% if (!photos.length) { %>
+      <div class="empty">
+        <span class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h3l2-2.5h6L17 7h3a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Z"/><circle cx="12" cy="13" r="3.5"/></svg></span>
+        <p>No photos yet — add them before completing the job.</p>
+      </div>
+    <% } %>
+<% if (!approved) { %>
+    <form method="post" action="/visits/<%= visit.id %>/photos" enctype="multipart/form-data" class="photo-upload" data-upload data-draft-label="photo caption"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+      <div class="photo-actions">
+        <label class="btn btn-primary photo-pick" data-camera>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h3l2-2.5h6L17 7h3a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Z"/><circle cx="12" cy="13" r="3.5"/></svg> Take photo
+          <input type="file" name="photos" accept="image/*" capture="environment" multiple hidden>
+        </label>
+        <label class="btn photo-pick" data-library>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="m4 17 5-5 3.5 3.5L17 10l3 3"/></svg> Choose from library
+          <input type="file" name="photos" accept="image/*" multiple hidden>
+        </label>
+      </div>
+      <div class="photo-previews" data-upload-previews hidden></div>
+      <p class="upload-status muted" data-upload-status hidden></p>
+      <label>Caption <input type="text" name="caption" placeholder="Optional note for these photos"></label>
+      <label class="confirm-line share-line"><input type="checkbox" name="shared" checked> Share with the whole team</label>
+      <button class="btn btn-primary btn-block" type="submit" data-upload-submit>Upload photos</button>
+      <p class="muted">On a phone you can snap a picture with the camera or pick from your
+        library. Every photo is timestamped automatically.</p>
     </form>
-  </details>
+    <% } %>
+  </section>
 
-  <details class="card" id="comments" <%= openExtra || comments.length ? 'open' : '' %>>
-    <summary><h2 class="inline-h">Comments <span class="muted">(<%= comments.length %>)</span></h2></summary>
+  <section class="card" id="comments">
+    <h2>Comments</h2>
     <% comments.forEach(c => { %>
       <div class="comment">
         <strong><%= c.author_name %></strong> <span class="tag tag-<%= c.author_role %>"><%= c.author_role %></span>
-        <span class="muted"><%= c.created_at %> UTC</span>
+        <span class="muted"><%= fmtDateTime(c.created_at) %></span>
         <p><%= c.body %></p>
         <% (photosByComment[c.id] || []).forEach(ph => { %>
           <figure class="photo comment-photo">
-            <a href="/uploads/<%= ph.filename %>" target="_blank"><img src="/uploads/<%= ph.filename %>" alt="comment photo" loading="lazy"></a>
-            <figcaption><span class="photo-stamp">📅 <%= ph.created_at %> UTC</span></figcaption>
+            <a href="/uploads/<%= ph.filename %>" target="_blank"><img src="/uploads/<%= ph.filename %>/thumb" alt="comment photo" loading="lazy"></a>
+            <figcaption><span class="photo-stamp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M8 3v4M16 3v4M3.5 10h17"/></svg> <%= fmtDateTime(ph.created_at) %></span></figcaption>
           </figure>
         <% }) %>
       </div>
     <% }) %>
-    <form method="post" action="/visits/<%= visit.id %>/comments" enctype="multipart/form-data">
-      <textarea name="body" rows="2" placeholder="Message to <%= staff ? 'the gardener' : 'the office' %>…" required></textarea>
-      <label class="muted">Attach photos (optional)
-        <input type="file" name="photos" accept="image/*" multiple></label>
-      <button class="btn">Send</button>
+    <% if (!comments.length) { %>
+      <div class="empty">
+        <span class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5.5h16v10H9l-4 3.5v-3.5H4Z"/></svg></span>
+        <p>No comments yet.</p>
+      </div>
+    <% } %>
+    <form method="post" action="/visits/<%= visit.id %>/comments" enctype="multipart/form-data" class="comment-form" data-upload data-draft-label="comment"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+      <textarea name="body" rows="2" placeholder="Message to <%= staff ? 'the gardener' : 'the office' %>…"></textarea>
+      <div class="comment-actions">
+        <label class="btn comment-attach photo-pick" data-camera>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 12.5 15 4.5a3.2 3.2 0 0 1 4.5 4.5l-9 9a5 5 0 0 1-7-7l8.5-8.5"/></svg> Attach photo
+          <input type="file" name="photos" accept="image/*" multiple hidden>
+        </label>
+        <span class="upload-status muted" data-upload-status hidden></span>
+        <button class="btn btn-primary comment-send" type="submit">Send</button>
+      </div>
+      <div class="photo-previews" data-upload-previews hidden></div>
+      <p class="muted">Staff comments notify the assigned gardener; gardener comments notify supervisors and admins.</p>
     </form>
-  </details>
+  </section>
 </div>
 
 <!-- ===== 3. Staff-only management, kept out of the gardener's way ===== -->
 <% if (staff) { %>
 <details class="card manage-card">
-  <summary><strong>⚙ Manage job</strong> <span class="muted">— reassign, reschedule, status, invoice (staff only)</span></summary>
-  <form method="post" action="/visits/<%= visit.id %>/update" class="form-grid">
+  <summary><strong><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 13.5a1.6 1.6 0 0 0 .32 1.76l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.6 1.6 0 0 0-1.76-.32 1.6 1.6 0 0 0-.97 1.46V19.5a2 2 0 1 1-4 0v-.09a1.6 1.6 0 0 0-1.05-1.46 1.6 1.6 0 0 0-1.76.32l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.6 1.6 0 0 0 .32-1.76 1.6 1.6 0 0 0-1.46-.97H4.5a2 2 0 1 1 0-4h.09a1.6 1.6 0 0 0 1.46-1.05 1.6 1.6 0 0 0-.32-1.76l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.6 1.6 0 0 0 1.76.32h.09a1.6 1.6 0 0 0 .97-1.46V4.5a2 2 0 1 1 4 0v.09a1.6 1.6 0 0 0 .97 1.46 1.6 1.6 0 0 0 1.76-.32l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.6 1.6 0 0 0-.32 1.76v.09a1.6 1.6 0 0 0 1.46.97h.09a2 2 0 1 1 0 4h-.09a1.6 1.6 0 0 0-1.46.97Z"/></svg> Manage job</strong> <span class="muted">— reassign, reschedule, status, invoice (staff only)</span></summary>
+  <% if (approved) { %>
+  <p class="muted">This job is approved for payment and locked.<% if (isAdmin) { %> Use <a href="#review">Withdraw approval</a> to change it.<% } %></p>
+  <% } else { %>
+  <form method="post" action="/visits/<%= visit.id %>/update" class="form-grid"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
     <label>Gardener
       <select name="gardener_id">
         <option value="">Unassigned</option>
         <% gardeners.forEach(g => { %>
           <option value="<%= g.id %>" <%= visit.gardener_id === g.id ? 'selected' : '' %>><%= g.name %></option>
         <% }) %>
+        <% if (visit.gardener_id && !gardeners.some(g => g.id === visit.gardener_id)) { %>
+          <option value="<%= visit.gardener_id %>" selected><%= visit.gardener_name %> (disabled)</option>
+        <% } %>
       </select>
     </label>
     <label>Date <input type="date" name="scheduled_date" value="<%= visit.scheduled_date %>" required></label>
-    <label>Time window <input type="text" name="time_window" value="<%= visit.time_window || '' %>"></label>
+    <label>Time window <input type="text" name="time_window" value="<%= visit.time_window || '' %>" placeholder="08:00-10:00"
+      pattern="([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d" title="Format HH:MM-HH:MM, e.g. 08:00-10:00"></label>
     <label>Status
       <select name="status">
-        <% ['scheduled','in_progress','completed','skipped','cancelled'].concat(visit.status === 'approved' ? ['approved'] : []).forEach(s => { %>
-          <option value="<%= s %>" <%= visit.status === s ? 'selected' : '' %>><%= s === 'approved' ? 'approved for payment' : s.replace('_',' ') %></option>
+        <% ['scheduled','in_progress','completed','skipped','cancelled'].forEach(s => { %>
+          <option value="<%= s %>" <%= visit.status === s ? 'selected' : '' %>><%= s.replace('_',' ') %></option>
         <% }) %>
       </select>
     </label>
@@ -283,16 +438,18 @@
     <label class="span2">Notes <input type="text" name="notes" value="<%= visit.notes || '' %>"></label>
     <button class="btn btn-primary">Save changes</button>
   </form>
+  <% } %>
   <hr>
   <h3>Invoice</h3>
   <% if (invoice) { %>
     <p><a class="btn" href="/invoices/<%= invoice.id %>">View <%= invoice.number %> (<%= invoice.status %>)</a></p>
   <% } else { %>
-    <form method="post" action="/invoices">
+    <form method="post" action="/invoices"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
       <input type="hidden" name="visit_id" value="<%= visit.id %>">
       <button class="btn">Create invoice for this job</button>
     </form>
   <% } %>
 </details>
 <% } %>
+<% if (!visit.finished_at) { %><div class="cta-spacer" aria-hidden="true"></div><% } %>
 <%- include('../partials/footer') %>

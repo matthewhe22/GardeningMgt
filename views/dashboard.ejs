@@ -1,57 +1,128 @@
 <%- include('partials/header') %>
 <h1>Dashboard <span class="muted">· <%= today %></span></h1>
 
+<% if (overdueVisits.length) { %>
+<div class="card overdue-card">
+  <div class="card-head">
+    <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg> <%= overdueVisits.length %> overdue visit<%= overdueVisits.length === 1 ? '' : 's' %><% if (staff) { %> (all gardeners)<% } %></h2>
+    <a class="btn btn-sm" href="/visits?upto=<%= today %>">View all →</a>
+  </div>
+  <div class="job-list">
+    <% overdueVisits.forEach(v => { %>
+    <a class="job-row" href="/visits/<%= v.id %>">
+      <span class="job-row-main">
+        <strong><%= v.property_name %></strong>
+        <span class="muted">was <%= v.scheduled_date %> · <%= v.address %></span>
+        <% if (staff) { %><span class="muted"><%= v.gardener_name || 'Unassigned' %></span><% } %>
+      </span>
+      <span class="job-row-meta">
+        <span class="status status-open">overdue</span>
+      </span>
+    </a>
+    <% }) %>
+  </div>
+</div>
+<% } %>
+
 <div class="grid">
   <section class="card">
-    <h2>Today's visits<% if (staff) { %> (all gardeners)<% } %></h2>
-    <% if (!todayVisits.length) { %><p class="muted">No visits scheduled for today.</p><% } %>
-    <table class="table">
+    <div class="card-head">
+      <h2>Today's visits<% if (staff) { %> (all gardeners)<% } %></h2>
+      <% if (todayVisits.length > 1) { %>
+        <% if (staff) { %>
+        <form method="post" action="/routes/optimize-all" class="inline"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+          <input type="hidden" name="date" value="<%= today %>">
+          <button class="btn btn-sm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z"/></svg> Optimize all routes</button>
+        </form>
+        <% } else { %>
+        <form method="post" action="/visits/optimize" class="inline"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+          <input type="hidden" name="date" value="<%= today %>">
+          <button class="btn btn-sm btn-primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z"/></svg> Optimize my day</button>
+        </form>
+        <% } %>
+      <% } %>
+    </div>
+    <% if (!todayVisits.length) { %>
+      <div class="empty">
+        <span class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2.5"/><path d="M8.5 7V5.5A2.5 2.5 0 0 1 11 3h2a2.5 2.5 0 0 1 2.5 2.5V7"/><path d="M3 12.5h18"/></svg></span>
+        <p>No visits scheduled for today.</p>
+      </div>
+    <% } else { %>
+    <div class="job-list">
       <% todayVisits.forEach(v => { %>
-      <tr>
-        <td><span class="route-no"><%= v.route_order || '–' %></span></td>
-        <td>
-          <a href="/visits/<%= v.id %>"><strong><%= v.property_name %></strong></a><br>
+      <a class="job-row" href="/visits/<%= v.id %>">
+        <% if (v.route_order) { %>
+          <span class="route-no"><%= v.route_order %></span>
+        <% } else { %>
+          <span class="route-no unrouted" title="Not yet on an optimized route" aria-hidden="true"></span>
+        <% } %>
+        <span class="job-row-main">
+          <strong><%= v.property_name %></strong>
           <span class="muted"><%= v.address %><% if (v.time_window) { %> · <%= v.time_window %><% } %></span>
-        </td>
-        <% if (staff) { %><td><%= v.gardener_name || 'Unassigned' %></td><% } %>
-        <td><span class="status status-<%= v.status %>"><%= v.status.replace('_',' ') %></span></td>
-      </tr>
+          <% if (staff) { %><span class="muted"><%= v.gardener_name || 'Unassigned' %></span><% } %>
+        </span>
+        <span class="job-row-meta">
+          <span class="status status-<%= v.status %>"><%= v.status.replace('_',' ') %></span>
+        </span>
+      </a>
       <% }) %>
-    </table>
+    </div>
+    <% } %>
   </section>
 
   <section class="card">
     <h2>Open tasks</h2>
-    <% if (!myTasks.length) { %><p class="muted">Nothing pending. 🎉</p><% } %>
-    <table class="table">
+    <% if (!myTasks.length) { %>
+      <div class="empty">
+        <span class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="4"/><path d="m8.5 12.5 2.5 2.5 5-5.5"/></svg></span>
+        <p>Nothing pending.</p>
+      </div>
+    <% } else { %>
+    <div class="job-list">
       <% myTasks.forEach(t => { %>
-      <tr>
-        <td>
-          <% if (t.visit_id) { %><a href="/visits/<%= t.visit_id %>"><%= t.title %></a>
-          <% } else { %><%= t.title %><% } %>
-          <% if (t.property_name) { %><br><span class="muted"><%= t.property_name %></span><% } %>
-        </td>
-        <td class="muted"><%= t.due_date || t.scheduled_date || '' %></td>
-        <td><span class="status status-<%= t.status %>"><%= t.status.replace('_',' ') %></span></td>
-      </tr>
+      <% if (t.visit_id) { %>
+      <a class="job-row" href="/visits/<%= t.visit_id %>">
+      <% } else { %>
+      <div class="job-row job-row--static">
+      <% } %>
+        <span class="job-row-main">
+          <strong><%= t.title %></strong>
+          <% if (t.property_name) { %><span class="muted"><%= t.property_name %></span><% } %>
+          <% if (t.due_date || t.scheduled_date) { %><span class="muted"><%= t.due_date || t.scheduled_date %></span><% } %>
+        </span>
+        <span class="job-row-meta">
+          <span class="status status-<%= t.status %>"><%= t.status.replace('_',' ') %></span>
+        </span>
+      <% if (t.visit_id) { %></a><% } else { %></div><% } %>
       <% }) %>
-    </table>
+    </div>
+    <% } %>
     <a class="btn" href="/tasks">All tasks →</a>
   </section>
 
   <section class="card">
     <h2>Open issues</h2>
-    <% if (!openIssues.length) { %><p class="muted">No open issues.</p><% } %>
-    <table class="table">
+    <% if (!openIssues.length) { %>
+      <div class="empty">
+        <span class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg></span>
+        <p>No open issues.</p>
+      </div>
+    <% } else { %>
+    <div class="job-list">
       <% openIssues.forEach(i => { %>
-      <tr>
-        <td><a href="/issues/<%= i.id %>"><%= i.title %></a>
-          <% if (i.property_name) { %><br><span class="muted"><%= i.property_name %></span><% } %></td>
-        <td><span class="prio prio-<%= i.priority %>"><%= i.priority %></span></td>
-        <td><span class="status status-<%= i.status %>"><%= i.status.replace('_',' ') %></span></td>
-      </tr>
+      <a class="job-row" href="/issues/<%= i.id %>">
+        <span class="job-row-main">
+          <strong><%= i.title %></strong>
+          <% if (i.property_name) { %><span class="muted"><%= i.property_name %></span><% } %>
+        </span>
+        <span class="job-row-meta">
+          <span class="prio prio-<%= i.priority %>"><%= i.priority %></span>
+          <span class="status status-<%= i.status %>"><%= i.status.replace('_',' ') %></span>
+        </span>
+      </a>
       <% }) %>
-    </table>
+    </div>
+    <% } %>
     <a class="btn" href="/issues">All issues →</a>
   </section>
 </div>

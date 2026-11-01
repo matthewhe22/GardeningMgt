@@ -2,7 +2,8 @@
 <div class="page-head">
   <h1><%= property.name %></h1>
   <p class="page-sub"><%= property.address %><% if (property.lots != null) { %> · <%= property.lots %> lots<% } %>
-    <% if (property.contact_name) { %> · contact: <%= property.contact_name %> <%= property.contact_phone || '' %><% } %></p>
+    <% if (property.contact_name) { %> · contact: <%= property.contact_name %> <%= property.contact_phone || '' %><% } %>
+    <% if (property.contact_email) { %> · <a href="mailto:<%= property.contact_email %>"><%= property.contact_email %></a><% } %></p>
 </div>
 
 <div class="stat-row">
@@ -28,7 +29,13 @@
       <% }) %>
     </table>
   </div>
-  <% if (!visits.length) { %><p class="muted">No visits recorded for this site yet.</p><% } %>
+  <% if (!visits.length) { %>
+    <div class="empty">
+      <span class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2.5"/><path d="M8.5 7V5.5A2.5 2.5 0 0 1 11 3h2a2.5 2.5 0 0 1 2.5 2.5V7"/><path d="M3 12.5h18"/></svg></span>
+      <p>No visits recorded for this site yet.</p>
+    </div>
+  <% } %>
+  <%- include('../partials/pagination') %>
 </div>
 
 <% if (invoices.length) { %>
@@ -40,7 +47,7 @@
       <% invoices.forEach(inv => { %>
         <tr><td><a href="/invoices/<%= inv.id %>"><%= inv.number %></a></td>
           <td><span class="status status-<%= inv.status %>"><%= inv.status %></span></td>
-          <td class="muted"><%= inv.created_at %></td></tr>
+          <td class="muted"><%= fmtDateTime(inv.created_at) %></td></tr>
       <% }) %>
     </table>
   </div>

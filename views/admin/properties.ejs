@@ -7,10 +7,13 @@
 <% if (locals.importErrors) { %>
   <p class="alert alert-error">Some rows were skipped: <%= importErrors %></p>
 <% } %>
+<% if (locals.geocoded !== undefined && geocoded !== null) { %>
+  <p class="alert alert-ok">Found coordinates for <%= geocoded %> site(s)<% if (Number(geoFailed) > 0) { %> · <%= geoFailed %> address(es) couldn't be matched<% } %><% if (Number(remaining) > 0) { %> · <strong><%= remaining %> still missing</strong> — click “Find missing coordinates” again to continue<% } else { %> · all sites now have coordinates<% } %>.</p>
+<% } %>
 
 <details class="card">
-  <summary><strong>📥 Import sites from Excel / CSV</strong></summary>
-  <form method="post" action="/admin/properties/import" enctype="multipart/form-data" class="filter-row">
+  <summary><strong><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 19.5h16"/></svg> Import sites from Excel / CSV</strong></summary>
+  <form method="post" action="/admin/properties/import" enctype="multipart/form-data" class="filter-row"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
     <input type="file" name="file" accept=".xlsx,.csv" required>
     <button class="btn btn-primary">Upload &amp; import</button>
   </form>
@@ -23,33 +26,93 @@
 
 <details class="card">
   <summary><strong>＋ Add a single site</strong></summary>
-  <form method="post" action="/admin/properties" class="form-grid">
+  <form method="post" action="/admin/properties" class="form-grid"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
     <label>Site name <input type="text" name="name" required></label>
     <label>Address <input type="text" name="address" required></label>
     <label>Contact name <input type="text" name="contact_name"></label>
     <label>Contact phone <input type="text" name="contact_phone"></label>
+    <label>Contact email <input type="email" name="contact_email"></label>
     <label># of lots <input type="number" name="lots" min="0"></label>
-    <label>Latitude <input type="number" name="lat" step="any" placeholder="-36.8485"></label>
-    <label>Longitude <input type="number" name="lng" step="any" placeholder="174.7633"></label>
+    <label>Latitude <span class="muted">(optional)</span> <input type="number" name="lat" step="any" placeholder="auto from address"></label>
+    <label>Longitude <span class="muted">(optional)</span> <input type="number" name="lng" step="any" placeholder="auto from address"></label>
     <label class="span2">Notes <input type="text" name="notes"></label>
+    <label class="span2"><strong>Invoice billing</strong> <span class="muted">(optional — falls back to the site name/address/contact email above)</span></label>
+    <label>Billing business name <input type="text" name="billing_name" placeholder="e.g. ABC Property Management"></label>
+    <label class="span2">Billing address <input type="text" name="billing_address" placeholder="if different from the site address above"></label>
+    <label>Billing email <input type="email" name="billing_email" placeholder="invoices are emailed here"></label>
+    <label><input type="checkbox" name="gst_applicable" checked> GST applicable</label>
     <button class="btn btn-primary">Add site</button>
   </form>
-  <p class="muted">Latitude/longitude enable route optimization for visits to this site.</p>
+  <p class="muted">Coordinates enable route optimization. Leave latitude/longitude
+    blank and they'll be looked up from the address automatically on save.</p>
 </details>
 
 <div class="card">
-  <table class="table">
-    <tr><th>Site</th><th>Address</th><th>Lots</th><th>Contact</th><th>Coordinates</th></tr>
-    <% properties.forEach(p => { %>
-    <tr>
-      <td><strong><%= p.name %></strong></td>
-      <td><%= p.address %></td>
-      <td><%= p.lots != null ? p.lots : '—' %></td>
-      <td class="muted"><%= p.contact_name || '' %> <%= p.contact_phone || '' %></td>
-      <td class="muted"><%= p.lat != null ? p.lat.toFixed(4) + ', ' + p.lng.toFixed(4) : '⚠ none' %></td>
-    </tr>
-    <% }) %>
-  </table>
-  <% if (!properties.length) { %><p class="muted">No sites yet — import a spreadsheet or add one above.</p><% } %>
+  <div class="card-head">
+    <h2>Coordinates</h2>
+    <% if (missingCoords > 0) { %>
+    <form method="post" action="/admin/properties/geocode" class="inline"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+      <button class="btn btn-primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s7-6.5 7-11.5A7 7 0 0 0 5 9.5C5 14.5 12 21 12 21Z"/><circle cx="12" cy="9.5" r="2.3"/></svg> Find missing coordinates</button>
+    </form>
+    <% } %>
+  </div>
+  <% if (missingCoords > 0) { %>
+    <p class="muted"><strong><%= missingCoords %></strong> site(s) have no coordinates and would be
+      dropped to the end of any optimized route. Click the button to look them up from their
+      addresses (processed in small batches — click again if any remain).</p>
+  <% } else { %>
+    <p class="muted"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 5 5L19 7"/></svg> Every site has coordinates — route optimization can use them all.</p>
+  <% } %>
 </div>
+
+<h2><%= properties.length %> site<%= properties.length === 1 ? '' : 's' %></h2>
+<% if (!properties.length) { %>
+  <div class="card">
+    <div class="empty">
+      <span class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10.5c0 5.5-8 11-8 11s-8-5.5-8-11a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10.5" r="3"/></svg></span>
+      <p>No sites yet — import a spreadsheet or add one above.</p>
+    </div>
+  </div>
+<% } %>
+<% properties.forEach(p => { %>
+<details class="card">
+  <summary>
+    <strong><%= p.name %></strong>
+    <span class="muted">· <%= p.address %></span>
+    <% if (p.contact_email) { %>
+      <span class="muted">· <a href="mailto:<%= p.contact_email %>"><%= p.contact_email %></a></span>
+    <% } %>
+    <% if (p.billing_email) { %>
+      <span class="chip">Bill: <a href="mailto:<%= p.billing_email %>"><%= p.billing_email %></a></span>
+    <% } %>
+    <% if (!p.gst_applicable) { %><span class="muted">· no GST</span><% } %>
+    <% if (p.lat != null && p.lng != null) { %>
+      <span class="status status-completed"><%= p.lat.toFixed(4) %>, <%= p.lng.toFixed(4) %></span>
+    <% } else { %>
+      <span class="status status-open"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg> no coordinates</span>
+    <% } %>
+  </summary>
+  <form method="post" action="/admin/properties/<%= p.id %>/update" class="form-grid"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+    <label>Site name <input type="text" name="name" value="<%= p.name %>" required></label>
+    <label>Address <input type="text" name="address" value="<%= p.address %>" required></label>
+    <label>Contact name <input type="text" name="contact_name" value="<%= p.contact_name || '' %>"></label>
+    <label>Contact phone <input type="text" name="contact_phone" value="<%= p.contact_phone || '' %>"></label>
+    <label>Contact email <input type="email" name="contact_email" value="<%= p.contact_email || '' %>"></label>
+    <label># of lots <input type="number" name="lots" min="0" value="<%= p.lots != null ? p.lots : '' %>"></label>
+    <label class="span2">&nbsp;</label>
+    <label>Latitude <input type="number" name="lat" step="any" value="<%= p.lat != null ? p.lat : '' %>"></label>
+    <label>Longitude <input type="number" name="lng" step="any" value="<%= p.lng != null ? p.lng : '' %>"></label>
+    <label class="span2 confirm-line"><input type="checkbox" name="regeocode">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v5h-5"/></svg> Re-detect coordinates from the address (overrides the lat/lng above)</label>
+    <label class="span2">Notes <input type="text" name="notes" value="<%= p.notes || '' %>"></label>
+    <label class="span2"><strong>Invoice billing</strong> <span class="muted">(optional — falls back to the site name/address/contact email above)</span></label>
+    <label>Billing business name <input type="text" name="billing_name" value="<%= p.billing_name || '' %>" placeholder="e.g. ABC Property Management"></label>
+    <label class="span2">Billing address <input type="text" name="billing_address" value="<%= p.billing_address || '' %>" placeholder="if different from the site address above"></label>
+    <label>Billing email <input type="email" name="billing_email" value="<%= p.billing_email || '' %>" placeholder="invoices are emailed here"></label>
+    <label><input type="checkbox" name="gst_applicable" <%= p.gst_applicable ? 'checked' : '' %>> GST applicable</label>
+    <button class="btn btn-primary">Save changes</button>
+  </form>
+  <p class="muted">Changed the address? Tick “Re-detect” (or clear lat/lng) and save to look up new coordinates.</p>
+</details>
+<% }) %>
 <%- include('../partials/footer') %>

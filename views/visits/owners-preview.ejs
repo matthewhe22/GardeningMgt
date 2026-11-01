@@ -1,0 +1,45 @@
+<%- include('../partials/header') %>
+
+<div class="page-head">
+  <h1>Send report to owners</h1>
+  <p class="page-sub"><a href="/visits/<%= visit.id %>">&larr; Back to job</a></p>
+</div>
+
+<div class="card">
+  <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 21v-6h6v6"/></svg> Check the matched building</h2>
+  <p class="muted">PropertyIQ matched this site to the building below. <strong>Confirm it's the right building</strong>
+    before sending — the report includes the site address, GPS, photos and comments, so it must only go to the
+    correct building's owners.</p>
+
+  <table class="kv">
+    <tr><th>This site</th><td><%= visit.property_name %> — <%= visit.address %></td></tr>
+    <tr><th>Matched PropertyIQ building</th><td>
+      <% if (buildingName) { %><strong><%= buildingName %></strong><br><% } %>
+      <%= buildingAddress || '(no address on the PropertyIQ record)' %>
+      <span class="muted">· building #<%= buildingId %></span>
+    </td></tr>
+    <tr><th>Owner recipients</th><td><strong><%= emails.length %></strong> email address(es)</td></tr>
+  </table>
+
+  <% if (emails.length) { %>
+    <ul class="owner-list">
+      <% emails.forEach(e => { %><li><%= e %></li><% }) %>
+    </ul>
+
+    <form method="post" action="/visits/<%= visit.id %>/report/send-to-owners" class="gps-form">
+      <% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+      <input type="hidden" name="building_id" value="<%= buildingId %>">
+      <label class="confirm-line"><input type="checkbox" name="confirm_send" required>
+        I've checked this is the correct building — send the report to the <%= emails.length %> owner(s) above</label>
+      <button class="btn btn-primary" data-confirm="Send this job report to the <%= emails.length %> owner(s) listed above?">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg> Send to <%= emails.length %> owner(s)
+      </button>
+    </form>
+  <% } else { %>
+    <p class="alert alert-error"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg>
+      This building has no lot owner email addresses on file in PropertyIQ, so there's nobody to send to.</p>
+    <p><a class="btn" href="/visits/<%= visit.id %>">Back to job</a></p>
+  <% } %>
+</div>
+
+<%- include('../partials/footer') %>

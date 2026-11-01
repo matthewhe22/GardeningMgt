@@ -70,6 +70,7 @@ async function loadChecks(visitId) {
  * An item is "resolved" when ticked done, or left unticked with a comment
  * explaining why (e.g. "time clock didn't need adjusting").
  */
-const isResolved = (c) => c.done || !!(c.comment && c.comment.trim());
+const isResolved = (c) => c.scope_id == null // item removed from the job's scope mid-visit
+  || c.done || !!(c.comment && c.comment.trim());
 
 module.exports = { MAX_SCOPES, LOCKED, loadJobScopes, syncChecks, loadChecks, isResolved };

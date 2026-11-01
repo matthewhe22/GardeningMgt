@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { nextDate, occurrence, nextOccurrenceAfter, occurrencesBetween, contractEnd, isValidDate } = require('../src/recurrence');
+const { nextDate, occurrence, nextOccurrenceAfter, nextOccurrenceOnOrAfter, occurrencesBetween, contractEnd, isValidDate } = require('../src/recurrence');
 
 test('weekly and fortnightly add days', () => {
   assert.strictEqual(nextDate('2026-06-11', 'weekly'), '2026-06-18');
@@ -19,6 +19,15 @@ test('monthly is anchored to the start, no drift', () => {
 test('nextOccurrenceAfter walks forward from the anchor', () => {
   assert.strictEqual(nextOccurrenceAfter('2026-01-31', 'monthly', '2026-02-28'), '2026-03-31');
   assert.strictEqual(nextOccurrenceAfter('2026-06-01', 'weekly', '2026-06-10'), '2026-06-15');
+});
+
+test('nextOccurrenceOnOrAfter includes the date itself when it lands on an occurrence', () => {
+  // 2026-07-03 is exactly 26 weeks after the anchor — must return today, not skip to next week.
+  assert.strictEqual(nextOccurrenceOnOrAfter('2026-01-02', 'weekly', '2026-07-03'), '2026-07-03');
+  // A date that falls between occurrences still rolls forward to the next one.
+  assert.strictEqual(nextOccurrenceOnOrAfter('2026-01-02', 'weekly', '2026-07-04'), '2026-07-10');
+  // A date on/before the anchor returns the anchor itself.
+  assert.strictEqual(nextOccurrenceOnOrAfter('2026-01-02', 'weekly', '2025-12-01'), '2026-01-02');
 });
 
 test('occurrencesBetween generates the in-term schedule', () => {
