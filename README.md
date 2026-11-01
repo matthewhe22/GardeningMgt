@@ -20,7 +20,8 @@ normal Node.js server.
 | Per-job comments (supervisor ↔ gardener) | Job page |
 | Invoicing per job (labour pre-filled from the timer) | **Invoices** (staff) |
 | Reporting (visits, hours per gardener, issues, invoice totals) | **Reports** (staff) |
-| Scope of duties per site (≤20 items, each with a standard photo) | **Sites** → 📋 Scope of duties |
+| Global scope library (≤20 items + standard photos) → templates (Standard 1, 2…) → apply to all / selected sites | **Scope standards** |
+| Per-site scope adjustment (optional; marks the site “adjusted”) | **Sites** → 📋 scope chip |
 | Gardener checklist: tick / photo / comment per scope item, “View scope standards” | Job page |
 | Job report emailed to every active admin on completion (photos attached) | Email (needs Resend) |
 | Admin review → **Approve for payment** (status `approved`) | Job page, **Jobs** → Awaiting review |

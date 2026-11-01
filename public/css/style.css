@@ -1043,3 +1043,14 @@ details > summary .inline-h { font-size: 1.05rem; }
 .scope-no { flex: 0 0 28px; height: 28px; border-radius: 50%; background: var(--green-700); color: #fff;
   display: grid; place-items: center; font-size: 0.85rem; }
 .status-approved { background: var(--ok); color: #fff; }
+
+/* ===== Scope templates ===== */
+.pick { display: inline-flex; align-items: center; gap: 6px; font-size: 0.85rem; color: var(--muted); margin: 0 0 4px; }
+.pick input { width: 18px; height: 18px; margin: 0; }
+.tpl-new { flex-wrap: wrap; align-items: center; }
+.tpl-new input[type=text] { max-width: 220px; }
+.tpl-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.tpl-items { margin: 8px 0 16px; padding-left: 22px; columns: 2 280px; font-size: 0.92rem; }
+.check-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px 16px; margin: 10px 0 14px; }
+.check-list label { display: flex; gap: 8px; align-items: flex-start; margin: 0; font-weight: 400; }
+.check-list input { width: 18px; height: 18px; margin: 2px 0 0; flex: 0 0 auto; }

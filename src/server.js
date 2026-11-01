@@ -101,6 +101,7 @@ app.use('/routes', requireLogin, require('./routes/routeplan'));
 app.use('/invoices', requireLogin, require('./routes/invoices'));
 app.use('/reports', requireLogin, require('./routes/reports'));
 app.use('/notifications', requireLogin, require('./routes/notifications'));
+app.use('/admin/scopes', requireLogin, require('./routes/scopes'));
 app.use('/admin', requireLogin, require('./routes/admin'));
 
 app.use((req, res) => {

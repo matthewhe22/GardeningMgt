@@ -26,6 +26,12 @@ document.querySelectorAll('.auto-submit').forEach((el) => {
   });
 });
 
+// --- "Select all" checkboxes: <input type=checkbox data-select-all=".selector"> ---
+document.querySelectorAll('input[data-select-all]').forEach((all) => {
+  const items = () => document.querySelectorAll(all.dataset.selectAll);
+  all.addEventListener('change', () => items().forEach((i) => { i.checked = all.checked; }));
+});
+
 // --- Show how many photos were picked on "📷 Add photo" buttons ---
 document.querySelectorAll('input[type=file].file-count').forEach((input) => {
   const label = input.closest('label');

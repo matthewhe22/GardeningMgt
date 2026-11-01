@@ -1,0 +1,122 @@
+<%- include('../partials/header') %>
+<% const tplName = Object.fromEntries(templates.map(t => [t.id, t.name])); %>
+<div class="page-head">
+  <h1>Scope standards</h1>
+  <p class="page-sub"><strong>1.</strong> Keep one library of up to <%= max %> scope-of-duties items, each with a standard photo.
+    <strong>2.</strong> Save all or some of them as a template (Standard 1, Standard 2 …).
+    <strong>3.</strong> Apply a template to all sites or chosen sites — gardeners then see those items on every job there.
+    Sites following a template update automatically when you change it here.</p>
+</div>
+
+<% if (msg === 'full') { %><p class="alert alert-error">⚠ The library holds at most <%= max %> items — extra lines were not added.</p><% } %>
+<% if (msg === 'badphoto') { %><p class="alert alert-error">⚠ That file isn’t a valid image.</p><% } %>
+<% if (msg === 'noitems') { %><p class="alert alert-error">⚠ Give the template a name and tick at least one item.</p><% } %>
+<% if (msg === 'dupname') { %><p class="alert alert-error">⚠ A template with that name already exists.</p><% } %>
+<% if (msg === 'nosites') { %><p class="alert alert-error">⚠ Tick at least one site, or use “Apply to all sites”.</p><% } %>
+<% if (msg === 'created') { %><p class="alert alert-ok">✔ Template saved. Now apply it to sites below.</p><% } %>
+<% if (msg === 'saved') { %><p class="alert alert-ok">✔ Template saved — sites following it were updated.</p><% } %>
+<% if (msg === 'applied') { %><p class="alert alert-ok">✔ Applied to <%= applied %> site(s).</p><% } %>
+
+<!-- ===== 1. Library ===== -->
+<div class="card" id="library">
+  <h2>1. Scope library <span class="muted">(<%= library.length %>/<%= max %>)</span></h2>
+  <% if (!library.length) { %><p class="muted">No items yet — paste your scope of duties below, one per line.</p><% } %>
+  <ol class="scope-admin">
+    <% library.forEach((s, i) => { %>
+    <li class="scope-admin-item">
+      <div class="scope-admin-main">
+        <label class="pick"><input type="checkbox" name="item_ids" value="<%= s.id %>" form="tpl-new" class="pick-item" checked> include in new template</label>
+        <form method="post" action="/admin/scopes/library/<%= s.id %>/update" class="add-row scope-title-form">
+          <input type="text" name="title" value="<%= s.title %>" maxlength="300" required>
+          <button class="btn">Save</button>
+        </form>
+        <div class="btn-row scope-admin-actions">
+          <% if (i > 0) { %><form method="post" action="/admin/scopes/library/<%= s.id %>/move" class="inline"><input type="hidden" name="dir" value="up"><button class="link-btn">▲ up</button></form><% } %>
+          <% if (i < library.length - 1) { %><form method="post" action="/admin/scopes/library/<%= s.id %>/move" class="inline"><input type="hidden" name="dir" value="down"><button class="link-btn">▼ down</button></form><% } %>
+          <form method="post" action="/admin/scopes/library/<%= s.id %>/delete" class="inline" data-confirm="Delete this item from the library, every template and every site following a template?"><button class="link-btn danger-link">✕ delete</button></form>
+        </div>
+      </div>
+      <div class="scope-admin-photo">
+        <% if (s.photo) { %>
+          <a href="/uploads/<%= s.photo %>" target="_blank"><img src="/uploads/<%= s.photo %>" alt="Standard for <%= s.title %>" loading="lazy"></a>
+          <form method="post" action="/admin/scopes/library/<%= s.id %>/photo/delete" class="inline"><button class="link-btn danger-link">remove photo</button></form>
+        <% } else { %>
+          <div class="scope-noimg muted">No standard photo</div>
+        <% } %>
+        <form method="post" action="/admin/scopes/library/<%= s.id %>/photo" enctype="multipart/form-data">
+          <label class="btn btn-sm file-btn">📷 <%= s.photo ? 'Replace' : 'Add' %> standard photo
+            <input type="file" name="photo" accept="image/*" class="auto-submit" hidden></label>
+        </form>
+      </div>
+    </li>
+    <% }) %>
+  </ol>
+
+  <% if (library.length < max) { %>
+  <form method="post" action="/admin/scopes/library">
+    <label>Add items — one per line (paste straight from the contract)
+      <textarea name="titles" rows="4" placeholder="Mechanically blow concrete stairwells&#10;Dust and clean the metal handrails" required></textarea></label>
+    <button class="btn">Add to library</button>
+  </form>
+  <% } %>
+
+  <% if (library.length) { %>
+  <hr>
+  <h3>2. Save as template</h3>
+  <form method="post" action="/admin/scopes/templates" id="tpl-new" class="add-row tpl-new">
+    <label class="pick"><input type="checkbox" data-select-all=".pick-item" checked> All items</label>
+    <input type="text" name="name" value="<%= nextName %>" maxlength="80" required>
+    <button class="btn btn-primary">💾 Save ticked items as template</button>
+  </form>
+  <p class="muted">Untick items above to leave them out of this template.</p>
+  <% } %>
+</div>
+
+<!-- ===== 2/3. Templates & apply ===== -->
+<div id="templates">
+  <% if (!templates.length) { %><div class="card"><p class="muted">No templates yet.</p></div><% } %>
+  <% templates.forEach(t => { %>
+  <div class="card tpl-card" id="tpl-<%= t.id %>">
+    <div class="tpl-head">
+      <h2>📋 <%= t.name %> <span class="muted">· <%= t.item_ids.length %> items · used by <%= t.site_count %> site(s)</span></h2>
+      <form method="post" action="/admin/scopes/templates/<%= t.id %>/delete" class="inline" data-confirm="Delete template <%= t.name %>? Sites keep their current items."><button class="link-btn danger-link">✕ delete template</button></form>
+    </div>
+
+    <details>
+      <summary class="muted">Edit items / rename</summary>
+      <form method="post" action="/admin/scopes/templates/<%= t.id %>/update">
+        <label>Name <input type="text" name="name" value="<%= t.name %>" maxlength="80" required></label>
+        <div class="check-list">
+          <% library.forEach((s, i) => { %>
+            <label><input type="checkbox" name="item_ids" value="<%= s.id %>" <%= t.item_ids.includes(s.id) ? 'checked' : '' %>> <%= i + 1 %>. <%= s.title %></label>
+          <% }) %>
+        </div>
+        <button class="btn">Save template</button>
+        <span class="muted">Sites following this template update automatically.</span>
+      </form>
+    </details>
+    <ol class="tpl-items">
+      <% library.filter(s => t.item_ids.includes(s.id)).forEach(s => { %><li><%= s.title %><% if (s.photo) { %> <span class="muted">📷</span><% } %></li><% }) %>
+    </ol>
+
+    <h3>3. Apply <%= t.name %> to…</h3>
+    <form method="post" action="/admin/scopes/templates/<%= t.id %>/apply" data-confirm="Apply <%= t.name %>? The chosen sites' scope of duties will be replaced by this template.">
+      <% if (jobs.length) { %>
+      <label class="pick"><input type="checkbox" data-select-all=".site-<%= t.id %>"> Select all sites</label>
+      <div class="check-list">
+        <% jobs.forEach(j => { %>
+          <label><input type="checkbox" name="job_ids" value="<%= j.id %>" class="site-<%= t.id %>">
+            <%= j.property_name %>
+            <span class="muted">— <%= j.template_id ? tplName[j.template_id] + (j.scope_customized ? ' (adjusted)' : '') : (j.scope_count ? 'custom scope' : 'no scope') %></span></label>
+        <% }) %>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" name="target" value="selected">Apply to selected sites</button>
+        <button class="btn" name="target" value="all">Apply to ALL sites (<%= jobs.length %>)</button>
+      </div>
+      <% } else { %><p class="muted">No active sites yet — create them on the <a href="/jobs">Sites</a> page.</p><% } %>
+    </form>
+  </div>
+  <% }) %>
+</div>
+<%- include('../partials/footer') %>

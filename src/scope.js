@@ -7,6 +7,14 @@ const { q, q1 } = require('./db');
 
 const MAX_SCOPES = 20;
 
+/**
+ * SQL for a job scope item's standard photo: its own (site-specific) photo if
+ * one was uploaded, otherwise the photo of the global library item it came from.
+ */
+const STANDARD_PHOTO = (a) => `COALESCE(
+  (SELECT ph.filename FROM photos ph WHERE ph.job_scope_id = ${a}.id ORDER BY ph.created_at DESC LIMIT 1),
+  (SELECT ph.filename FROM photos ph WHERE ph.library_scope_id = ${a}.library_id ORDER BY ph.created_at DESC LIMIT 1))`;
+
 /** Visit statuses after which the checklist is frozen. */
 const LOCKED = ['completed', 'approved'];
 
@@ -15,7 +23,8 @@ function loadJobScopes(jobId) {
   return q(`
     SELECT s.*,
       (SELECT ph.filename FROM photos ph WHERE ph.job_scope_id = s.id
-        ORDER BY ph.created_at DESC LIMIT 1) AS standard_photo
+        ORDER BY ph.created_at DESC LIMIT 1) AS own_photo,
+      ${STANDARD_PHOTO('s')} AS standard_photo
     FROM job_scopes s WHERE s.job_id = $1 ORDER BY s.position, s.id`, [jobId]);
 }
 
@@ -43,9 +52,9 @@ async function syncChecks(visit) {
 async function loadChecks(visitId) {
   const checks = await q(`
     SELECT c.*, u.name AS checked_by_name,
-      (SELECT ph.filename FROM photos ph WHERE ph.job_scope_id = c.scope_id
-        ORDER BY ph.created_at DESC LIMIT 1) AS standard_photo
+      ${STANDARD_PHOTO('s')} AS standard_photo
     FROM visit_scope_checks c LEFT JOIN users u ON u.id = c.checked_by
+    LEFT JOIN job_scopes s ON s.id = c.scope_id
     WHERE c.visit_id = $1 ORDER BY c.position, c.id`, [visitId]);
   if (!checks.length) return checks;
   const photos = await q(`

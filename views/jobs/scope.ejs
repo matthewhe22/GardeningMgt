@@ -8,11 +8,35 @@
     the gardener can view it while working.</p>
 </div>
 
+<div class="card">
+  <h2>Standard template</h2>
+  <% if (job.template_name) { %>
+    <p>This site uses <strong><%= job.template_name %></strong>
+    <% if (job.scope_customized) { %><span class="status status-in_progress">adjusted for this site</span>
+      — it no longer picks up changes to the template. Re-apply to reset it.
+    <% } else { %><span class="status status-completed">following template</span>
+      — changes to the template or library update this site automatically.<% } %></p>
+  <% } else { %>
+    <p class="muted">No template applied — this site’s scope is set individually.</p>
+  <% } %>
+  <% if (templates.length) { %>
+  <form method="post" action="/jobs/<%= job.id %>/scope/template" class="add-row" data-confirm="Replace this site's scope with the selected template?">
+    <select name="template_id">
+      <% templates.forEach(t => { %><option value="<%= t.id %>" <%= t.id === job.template_id ? 'selected' : '' %>><%= t.name %> (<%= t.n %> items)</option><% }) %>
+    </select>
+    <button class="btn btn-primary"><%= job.template_id ? 'Re-apply' : 'Apply' %> template</button>
+  </form>
+  <% } else { %>
+    <p class="muted">No templates yet — create them in <a href="/admin/scopes">Scope standards</a>.</p>
+  <% } %>
+</div>
+
+<details class="card" <%= (!job.template_id || job.scope_customized || !scopes.length) ? 'open' : '' %>>
+<summary><strong>Adjust this site’s items</strong> <span class="muted">(<%= scopes.length %>/<%= max %>)<% if (job.template_id && !job.scope_customized) { %> — editing marks the site as adjusted<% } %></span></summary>
 <% if (msg === 'full') { %><p class="alert alert-error">⚠ Limit reached — a job can have at most <%= max %> scope items. Extra lines were not added.</p><% } %>
 <% if (msg === 'badphoto') { %><p class="alert alert-error">⚠ That file isn’t a valid image.</p><% } %>
 
-<div class="card">
-  <h2>Items <span class="muted">(<%= scopes.length %>/<%= max %>)</span></h2>
+<div>
   <% if (!scopes.length) { %><p class="muted">No scope items yet — add them below.</p><% } %>
   <ol class="scope-admin">
     <% scopes.forEach((s, i) => { %>
@@ -31,12 +55,13 @@
       <div class="scope-admin-photo">
         <% if (s.standard_photo) { %>
           <a href="/uploads/<%= s.standard_photo %>" target="_blank"><img src="/uploads/<%= s.standard_photo %>" alt="Standard for <%= s.title %>" loading="lazy"></a>
-          <form method="post" action="/jobs/<%= job.id %>/scope/<%= s.id %>/photo/delete" class="inline"><button class="link-btn danger-link">remove photo</button></form>
+          <% if (s.own_photo) { %><form method="post" action="/jobs/<%= job.id %>/scope/<%= s.id %>/photo/delete" class="inline"><button class="link-btn danger-link">remove site photo</button></form><% } %>
         <% } else { %>
           <div class="scope-noimg muted">No standard photo</div>
         <% } %>
+        <% if (s.library_id && !s.own_photo) { %><span class="muted">from library</span><% } %>
         <form method="post" action="/jobs/<%= job.id %>/scope/<%= s.id %>/photo" enctype="multipart/form-data" class="scope-photo-form">
-          <label class="btn btn-sm file-btn">📷 <%= s.standard_photo ? 'Replace' : 'Add' %> standard photo
+          <label class="btn btn-sm file-btn">📷 <%= s.own_photo ? 'Replace site' : 'Add site' %> photo
             <input type="file" name="photo" accept="image/*" class="auto-submit" hidden></label>
         </form>
       </div>
@@ -52,6 +77,7 @@
   </form>
   <% } %>
 </div>
+</details>
 
 <% if (sources.length && scopes.length < max) { %>
 <details class="card">

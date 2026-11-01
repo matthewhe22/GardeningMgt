@@ -248,6 +248,26 @@ CREATE INDEX IF NOT EXISTS idx_jobs_property ON jobs (property_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_visits_job_day_scheduled
   ON visits (job_id, scheduled_date) WHERE status = 'scheduled' AND job_id IS NOT NULL;
 
+-- Global scope-of-duties library (max 20 items, standard photo stored in
+-- photos.library_scope_id) and named templates built from a subset of it
+-- ("Standard 1", "Standard 2", ...). A template is applied to sites' jobs.
+CREATE TABLE IF NOT EXISTS scope_library (
+  id         SERIAL PRIMARY KEY,
+  position   INTEGER NOT NULL DEFAULT 0,
+  title      TEXT NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS scope_templates (
+  id         SERIAL PRIMARY KEY,
+  name       TEXT NOT NULL UNIQUE,
+  created_at TIMESTAMP NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS scope_template_items (
+  template_id INTEGER NOT NULL REFERENCES scope_templates(id) ON DELETE CASCADE,
+  library_id  INTEGER NOT NULL REFERENCES scope_library(id) ON DELETE CASCADE,
+  PRIMARY KEY (template_id, library_id)
+);
+
 -- Scope of duties: up to 20 standard items per recurring job, each with an
 -- optional reference ("standard") photo stored in photos.job_scope_id.
 CREATE TABLE IF NOT EXISTS job_scopes (
@@ -302,6 +322,12 @@ function ready() {
       await pool.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS scope_check_id INTEGER REFERENCES visit_scope_checks(id) ON DELETE SET NULL');
       await pool.query('CREATE INDEX IF NOT EXISTS idx_photos_job_scope ON photos (job_scope_id)');
       await pool.query('CREATE INDEX IF NOT EXISTS idx_photos_scope_check ON photos (scope_check_id)');
+      // Scope templates: job items linked to the global library, jobs linked to a template.
+      await pool.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS library_scope_id INTEGER REFERENCES scope_library(id) ON DELETE CASCADE');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_photos_library_scope ON photos (library_scope_id)');
+      await pool.query('ALTER TABLE job_scopes ADD COLUMN IF NOT EXISTS library_id INTEGER REFERENCES scope_library(id) ON DELETE SET NULL');
+      await pool.query('ALTER TABLE jobs ADD COLUMN IF NOT EXISTS template_id INTEGER REFERENCES scope_templates(id) ON DELETE SET NULL');
+      await pool.query('ALTER TABLE jobs ADD COLUMN IF NOT EXISTS scope_customized BOOLEAN NOT NULL DEFAULT false');
       // Payment approval: new 'approved' visit status + who/when.
       await pool.query('ALTER TABLE visits ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP');
       await pool.query('ALTER TABLE visits ADD COLUMN IF NOT EXISTS approved_by INTEGER REFERENCES users(id)');

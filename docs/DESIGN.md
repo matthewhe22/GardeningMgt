@@ -34,7 +34,11 @@ visit_comments (supervisor/gardener discussion per job)
 gps_points (visit_id, lat/lng, kind: start|ping|finish ← GPS tracking)
 invoices + invoice_items (per job; labour line pre-filled from timer)
 notifications (in-app: reminders, job completion summaries)
-job_scopes (scope of duties per job, ≤20; standard photo = photos.job_scope_id)
+scope_library (global ≤20 items; standard photo = photos.library_scope_id)
+scope_templates + scope_template_items (named subsets: Standard 1, 2 …)
+jobs.template_id / jobs.scope_customized (site follows a template unless adjusted)
+job_scopes (scope of duties per job, ≤20; library_id links to the library;
+            site-specific photo = photos.job_scope_id, else the library photo)
 visit_scope_checks (per-visit checklist: done, comment, title snapshot;
                     evidence photos = photos.scope_check_id)
 visits.status adds 'approved' (+ approved_at/approved_by) = approved for payment
@@ -75,6 +79,16 @@ self-contained HTML attachment) is emailed to every active admin via Resend.
 Admins review on the job page or **Jobs → Awaiting review** and click
 **Approve for payment** (`completed → approved`); approved jobs can't be
 restarted, and only an admin can withdraw the approval.
+
+### Scope templates
+Admins keep one global library (≤20 items with standard photos) on
+**Scope standards**, save all or some items as named templates, and apply a
+template to all active sites or chosen ones. Applying is a diff on job_scopes
+(rows keep their ids), so in-progress checklists keep ticks/photos. Sites
+that follow a template are re-synced automatically when the template's items
+or the library (wording, order, deletion) change. Editing one site's items
+sets `scope_customized`, which stops automatic re-sync until the template is
+re-applied to that site.
 
 ### Activity log
 `logActivity(userId, action, entityType, entityId, details)` is called from every

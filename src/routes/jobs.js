@@ -8,6 +8,10 @@ const { asyncHandler } = require('../asyncHandler');
 const { assertCsrf } = require('../csrf');
 const { upload, savePhoto } = require('../upload');
 const { MAX_SCOPES, loadJobScopes } = require('../scope');
+const { applyTemplate } = require('../scopeTemplates');
+
+// A site-level edit means the site no longer follows its template's updates.
+const markCustomized = (jobId) => q('UPDATE jobs SET scope_customized = true WHERE id = $1', [jobId]);
 
 const router = express.Router();
 
@@ -30,7 +34,8 @@ router.get('/', asyncHandler(async (req, res) => {
         WHERE v.job_id = j.id AND v.status = 'scheduled'
         ORDER BY v.scheduled_date LIMIT 1) AS next_visit_id,
       (SELECT COUNT(*) FROM visits v WHERE v.job_id = j.id AND v.status = 'scheduled') AS upcoming_count,
-      (SELECT COUNT(*) FROM job_scopes s WHERE s.job_id = j.id) AS scope_count
+      (SELECT COUNT(*) FROM job_scopes s WHERE s.job_id = j.id) AS scope_count,
+      (SELECT t.name FROM scope_templates t WHERE t.id = j.template_id) AS template_name
     FROM jobs j
     JOIN properties p ON p.id = j.property_id
     LEFT JOIN users u ON u.id = j.gardener_id
@@ -149,8 +154,9 @@ router.get('/site/:propertyId', requireRole('supervisor'), asyncHandler(async (r
 
 async function getJob(id) {
   return q1(`
-    SELECT j.*, p.name AS property_name, p.address FROM jobs j
-    JOIN properties p ON p.id = j.property_id WHERE j.id = $1`, [Number(id) || 0]);
+    SELECT j.*, p.name AS property_name, p.address, t.name AS template_name FROM jobs j
+    JOIN properties p ON p.id = j.property_id
+    LEFT JOIN scope_templates t ON t.id = j.template_id WHERE j.id = $1`, [Number(id) || 0]);
 }
 async function getScope(job, sid) {
   return q1('SELECT * FROM job_scopes WHERE id = $1 AND job_id = $2', [Number(sid) || 0, job.id]);
@@ -166,8 +172,11 @@ router.get('/:id/scope', requireRole('supervisor'), asyncHandler(async (req, res
     SELECT j.id, p.name, COUNT(s.id)::int AS n FROM jobs j
     JOIN properties p ON p.id = j.property_id JOIN job_scopes s ON s.job_id = j.id
     WHERE j.id <> $1 GROUP BY j.id, p.name ORDER BY p.name`, [job.id]);
+  const templates = await q(`SELECT t.id, t.name,
+    (SELECT COUNT(*) FROM scope_template_items ti WHERE ti.template_id = t.id)::int AS n
+    FROM scope_templates t ORDER BY t.name`);
   res.render('jobs/scope', {
-    title: `Scope of duties — ${job.property_name}`, job, scopes, sources,
+    title: `Scope of duties — ${job.property_name}`, job, scopes, sources, templates,
     max: MAX_SCOPES, msg: req.query.msg || null,
   });
 }));
@@ -193,7 +202,10 @@ router.post('/:id/scope', requireRole('supervisor'), asyncHandler(async (req, re
       added++;
     }
   });
-  if (added) await logActivity(req.user.id, 'scope.add', 'job', job.id, `Added ${added} scope item(s) to job #${job.id}`);
+  if (added) {
+    await markCustomized(job.id);
+    await logActivity(req.user.id, 'scope.add', 'job', job.id, `Added ${added} scope item(s) to job #${job.id}`);
+  }
   res.redirect(scopeUrl(job, full ? 'full' : null));
 }));
 
@@ -222,8 +234,23 @@ router.post('/:id/scope/copy', requireRole('supervisor'), asyncHandler(async (re
       copied++;
     }
   });
+  if (copied) await markCustomized(job.id);
   if (copied) await logActivity(req.user.id, 'scope.copy', 'job', job.id, `Copied ${copied} scope item(s) from job #${from}`);
   res.redirect(scopeUrl(job, full ? 'full' : null));
+}));
+
+// Apply a template to just this site ("" = stop following any template).
+router.post('/:id/scope/template', requireRole('supervisor'), asyncHandler(async (req, res) => {
+  const job = await getJob(req.params.id);
+  if (!job) return res.redirect('/jobs');
+  const t = await q1('SELECT id, name FROM scope_templates WHERE id = $1', [Number(req.body.template_id) || 0]);
+  if (t) {
+    await applyTemplate(t.id, [job.id]);
+    await logActivity(req.user.id, 'scope.template.apply', 'job', job.id, `Applied "${t.name}" to job #${job.id}`);
+  } else {
+    await q('UPDATE jobs SET template_id = NULL, scope_customized = false WHERE id = $1', [job.id]);
+  }
+  res.redirect(scopeUrl(job));
 }));
 
 router.post('/:id/scope/:sid/update', requireRole('supervisor'), asyncHandler(async (req, res) => {
@@ -231,7 +258,10 @@ router.post('/:id/scope/:sid/update', requireRole('supervisor'), asyncHandler(as
   const scope = job && await getScope(job, req.params.sid);
   if (!scope) return res.redirect('/jobs');
   const title = String(req.body.title || '').trim().slice(0, 300);
-  if (title) await q('UPDATE job_scopes SET title = $1 WHERE id = $2', [title, scope.id]);
+  if (title && title !== scope.title) {
+    await q('UPDATE job_scopes SET title = $1 WHERE id = $2', [title, scope.id]);
+    await markCustomized(job.id);
+  }
   res.redirect(scopeUrl(job));
 }));
 
@@ -249,6 +279,7 @@ router.post('/:id/scope/:sid/move', requireRole('supervisor'), asyncHandler(asyn
     for (const [pos, r] of all.entries()) {
       await tx.q('UPDATE job_scopes SET position = $1 WHERE id = $2', [pos + 1, r.id]);
     }
+    await tx.q('UPDATE jobs SET scope_customized = true WHERE id = $1', [job.id]);
   });
   res.redirect(scopeUrl(job));
 }));
@@ -258,6 +289,7 @@ router.post('/:id/scope/:sid/delete', requireRole('supervisor'), asyncHandler(as
   const scope = job && await getScope(job, req.params.sid);
   if (!scope) return res.redirect('/jobs');
   await q('DELETE FROM job_scopes WHERE id = $1', [scope.id]); // standard photo cascades
+  await markCustomized(job.id);
   await logActivity(req.user.id, 'scope.delete', 'job', job.id, `Removed scope item "${scope.title}" from job #${job.id}`);
   res.redirect(scopeUrl(job));
 }));
