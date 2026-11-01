@@ -23,7 +23,7 @@
         <td><span class="status status-<%= v.status %>"><%= v.status.replace('_',' ') %></span></td>
         <td class="muted"><%= v.duration_minutes != null ? v.duration_minutes + ' min' : '—' %></td>
         <td class="muted"><%= v.photo_count %></td>
-        <td><a href="/visits/<%= v.id %>">open</a><% if (v.status === 'completed') { %> · <a href="/visits/<%= v.id %>/report" target="_blank">report</a><% } %></td>
+        <td><a href="/visits/<%= v.id %>">open</a><% if (['completed','approved'].includes(v.status)) { %> · <a href="/visits/<%= v.id %>/report" target="_blank">report</a><% } %></td>
       </tr>
       <% }) %>
     </table>

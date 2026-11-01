@@ -7,7 +7,7 @@
     <a class="chip chip-link" href="https://www.google.com/maps/dir/?api=1&destination=<%= encodeURIComponent((visit.lat != null && visit.lng != null) ? (visit.lat + ',' + visit.lng) : (visit.property_name + ', ' + visit.address)) %>" target="_blank" rel="noopener">🧭 Navigate</a>
     <span class="chip">📍 <%= visit.address %></span>
     <span class="chip">👤 <%= visit.gardener_name || 'Unassigned' %></span>
-    <span class="status status-<%= visit.status %>"><%= visit.status.replace('_',' ') %></span>
+    <span class="status status-<%= visit.status %>"><%= visit.status === 'approved' ? 'approved for payment' : visit.status.replace('_',' ') %></span>
     <% if (locals.job && job.default_gardener_name && visit.gardener_name && job.gardener_id !== visit.gardener_id) { %>
       <span class="status status-in_progress">replacement for <%= job.default_gardener_name %></span>
     <% } %>
@@ -16,6 +16,14 @@
     <p class="alert alert-error">⚠ Add at least one photo for this site before completing the job.</p>
   <% } else if (locals.flash === 'confirm') { %>
     <p class="alert alert-error">⚠ Please tick the confirmation box to complete the job.</p>
+  <% } else if (locals.flash === 'scope') { %>
+    <p class="alert alert-error">⚠ Tick every scope item (or add a comment saying why it wasn’t done) before completing.</p>
+  <% } else if (locals.flash === 'locked') { %>
+    <p class="alert alert-error">⚠ This job is already completed — the checklist can’t be changed.</p>
+  <% } else if (locals.flash === 'approval') { %>
+    <p class="alert alert-error">⚠ Use the Approve button to approve a job for payment (admins only).</p>
+  <% } else if (locals.flash === 'notcompleted') { %>
+    <p class="alert alert-error">⚠ Only a completed job can be approved.</p>
   <% } else if (locals.flash === 'invalid') { %>
     <p class="alert alert-error">⚠ Some details were invalid — please check and try again.</p>
   <% } %>
@@ -28,74 +36,167 @@
   <% } %>
 </div>
 
-<!-- ===== 1. The job action: start / complete ===== -->
+<%
+  const running = visit.started_at && !visit.finished_at;
+  const resolvedCount = checks.filter(isResolved).length;
+  const allResolved = resolvedCount === checks.length;
+  const firstOpen = (running && !locked) ? (checks.find(c => !isResolved(c)) || {}).id : null;
+%>
+
+<!-- ===== Admin review & payment approval ===== -->
+<% if (staff && ['completed','approved'].includes(visit.status)) { %>
+<div class="card review-card <%= visit.status === 'approved' ? 'is-approved' : '' %>">
+  <% if (visit.status === 'approved') { %>
+    <h2>💰 Approved for payment</h2>
+    <p>By <strong><%= visit.approved_by_name || 'admin' %></strong> on <%= visit.approved_at %> UTC.</p>
+    <% if (isAdmin) { %>
+    <form method="post" action="/visits/<%= visit.id %>/unapprove" class="inline" data-confirm="Withdraw payment approval?">
+      <button class="link-btn">Withdraw approval</button></form>
+    <% } %>
+  <% } else { %>
+    <h2>🔎 Review this job</h2>
+    <p><% if (checks.length) { %>Scope: <strong><%= checks.filter(c => c.done).length %>/<%= checks.length %></strong> done · <% } %>
+      <strong><%= totalPhotos %></strong> photo(s) · <%= visit.duration_minutes %> min on site.
+      Check the items and photos below, then approve.</p>
+    <div class="btn-row">
+      <% if (isAdmin) { %>
+      <form method="post" action="/visits/<%= visit.id %>/approve" class="inline">
+        <button class="btn btn-primary">✔ Approve for payment</button></form>
+      <% } else { %><span class="muted">An admin approves jobs for payment.</span><% } %>
+      <a class="btn" href="/visits/<%= visit.id %>/report" target="_blank">📄 Full report</a>
+    </div>
+  <% } %>
+</div>
+<% } %>
+
+<!-- ===== 1. Start / running / completed ===== -->
 <div class="card timer-card">
-  <% if (visit.started_at && !visit.finished_at) { %>
+  <% if (running) { %>
     <h2>⏱ Job running</h2>
-    <p>Started at <strong><%= visit.started_at %></strong> UTC.</p>
-    <form method="post" action="/visits/<%= visit.id %>/timer/stop" class="gps-form">
-      <input type="hidden" name="lat"><input type="hidden" name="lng">
-      <p><strong><%= photos.length %></strong> photo(s) uploaded for this site so far.
-        <% if (!photos.length) { %><br><span class="muted">⚠ Upload your photos below before completing.</span><% } %></p>
-      <label class="confirm-line"><input type="checkbox" name="confirm_photos" required>
-        I confirm all photos for this site have been uploaded</label>
-      <button class="btn btn-danger btn-block">✔ Complete job</button>
-    </form>
-    <p class="muted">Completing records the date &amp; time, notifies your supervisor,
-      and files the report and photos.</p>
+    <p class="muted">Started <%= visit.started_at %> UTC<% if (checks.length) { %> · checklist <strong><%= resolvedCount %>/<%= checks.length %></strong><% } %></p>
   <% } else if (visit.finished_at) { %>
     <h2>✅ Job completed</h2>
     <p>Worked <strong><%= visit.duration_minutes %> min</strong>
       (<%= visit.started_at %> → <%= visit.finished_at %> UTC).</p>
     <div class="btn-row">
       <a class="btn btn-primary" href="/visits/<%= visit.id %>/report" target="_blank">📄 Completion report</a>
-      <form method="post" action="/visits/<%= visit.id %>/timer/start" class="gps-form inline">
+      <% if (visit.status !== 'approved') { %>
+      <form method="post" action="/visits/<%= visit.id %>/timer/start" class="gps-form inline" data-confirm="Re-open this job and restart the timer?">
         <input type="hidden" name="lat"><input type="hidden" name="lng">
         <button class="btn">↻ Restart timer</button>
       </form>
+      <% } %>
     </div>
   <% } else { %>
-    <h2>⏱ Ready to start</h2>
     <form method="post" action="/visits/<%= visit.id %>/timer/start" class="gps-form">
       <input type="hidden" name="lat"><input type="hidden" name="lng">
       <button class="btn btn-primary btn-block">▶ Start job</button>
     </form>
-    <p class="muted">Your GPS position is recorded when you start and finish
-      (if location access is allowed).</p>
+    <% if (checks.length) { %><p class="muted"><%= checks.length %> items in the scope of duties — tick each one as you go.</p><% } %>
   <% } %>
-
-  <% if (gpsPoints.length) { %>
-    <details><summary class="muted"><%= gpsPoints.length %> GPS point(s) recorded</summary>
-      <table class="table">
-        <% gpsPoints.forEach(g => { %>
-          <tr><td><%= g.kind %></td><td><%= g.lat.toFixed(5) %>, <%= g.lng.toFixed(5) %></td><td class="muted"><%= g.recorded_at %></td></tr>
-        <% }) %>
-      </table>
-    </details>
+  <% if (checks.length) { %>
+    <a class="btn btn-block btn-soft" href="/visits/<%= visit.id %>/standards">📋 View scope standards</a>
   <% } %>
-  <details>
-    <summary class="muted">Change visit date</summary>
-    <form method="post" action="/visits/<%= visit.id %>/reschedule" class="filter-row">
-      <label>New date <input type="date" name="scheduled_date" value="<%= visit.scheduled_date %>" required></label>
-      <button class="btn">Move visit</button>
-    </form>
-  </details>
 </div>
 
-<!-- ===== 2. The work: tasks, photos, comments ===== -->
+<!-- ===== 2. Scope of duties checklist ===== -->
+<% if (checks.length) { %>
+<section class="card" id="scope">
+  <h2>Scope of duties <span class="muted">(<%= resolvedCount %>/<%= checks.length %>)</span></h2>
+  <div class="progress"><span style="width: <%= Math.round(100 * resolvedCount / checks.length) %>%"></span></div>
+  <% checks.forEach((c, i) => { %>
+  <details class="scope-item <%= c.done ? 'is-done' : (isResolved(c) ? 'is-noted' : '') %>" id="check-<%= c.id %>" <%= c.id === firstOpen ? 'open' : '' %>>
+    <summary>
+      <span class="scope-mark"><%= c.done ? '✔' : (isResolved(c) ? '💬' : i + 1) %></span>
+      <span class="scope-title"><%= c.title %></span>
+      <% if (c.photos.length) { %><span class="scope-count">📷 <%= c.photos.length %></span><% } %>
+    </summary>
+    <div class="scope-body">
+      <% if (c.standard_photo) { %>
+        <a class="scope-std" href="/uploads/<%= c.standard_photo %>" target="_blank">
+          <img src="/uploads/<%= c.standard_photo %>" alt="Standard" loading="lazy"><span>👁 Standard — tap to enlarge</span></a>
+      <% } %>
+      <% if (locked || !visit.started_at) { %>
+        <% if (c.comment) { %><p>💬 <%= c.comment %></p><% } %>
+        <% if (!c.done && !c.comment) { %><p class="muted"><%= visit.started_at ? 'Not done.' : 'Start the job to fill this in.' %></p><% } %>
+      <% } else { %>
+      <form method="post" action="/visits/<%= visit.id %>/scope/<%= c.id %>" enctype="multipart/form-data" class="scope-form">
+        <label class="scope-done"><input type="checkbox" name="done" <%= c.done ? 'checked' : '' %>> Done</label>
+        <label class="btn file-btn">📷 Add photo<input type="file" name="photos" accept="image/*" capture="environment" multiple hidden class="file-count"></label>
+        <textarea name="comment" rows="1" placeholder="Comment (needed if not done)"><%= c.comment || '' %></textarea>
+        <button class="btn btn-primary btn-block">Save</button>
+      </form>
+      <% } %>
+      <% if (c.photos.length) { %>
+      <div class="scope-photos">
+        <% c.photos.forEach(ph => { %>
+          <figure class="photo">
+            <a href="/uploads/<%= ph.filename %>" target="_blank"><img src="/uploads/<%= ph.filename %>" alt="<%= c.title %>" loading="lazy"></a>
+            <% if (!locked) { %>
+            <form method="post" action="/visits/<%= visit.id %>/scope/<%= c.id %>/photos/<%= ph.id %>/delete" data-confirm="Remove this photo?">
+              <button class="link-btn danger-link">✕ remove</button></form>
+            <% } %>
+          </figure>
+        <% }) %>
+      </div>
+      <% } %>
+    </div>
+  </details>
+  <% }) %>
+</section>
+<% } %>
+
+<!-- ===== 3. Complete ===== -->
+<% if (running) { %>
+<div class="card timer-card" id="complete">
+  <form method="post" action="/visits/<%= visit.id %>/timer/stop" class="gps-form">
+    <input type="hidden" name="lat"><input type="hidden" name="lng">
+    <% if (checks.length && !allResolved) { %>
+      <p class="muted">⚠ <%= checks.length - resolvedCount %> scope item(s) still to tick.</p>
+    <% } %>
+    <% if (!totalPhotos) { %><p class="muted">⚠ Add at least one photo before completing.</p><% } %>
+    <label class="confirm-line"><input type="checkbox" name="confirm_photos" required>
+      All work and photos are done</label>
+    <button class="btn btn-danger btn-block">✔ Complete job</button>
+  </form>
+  <p class="muted">Completing records the time, sends the job report to the admins for review, and schedules the next visit.</p>
+</div>
+<% } %>
+
+<% if (gpsPoints.length || !locked) { %>
+<details class="card">
+  <summary class="muted">More — <%= gpsPoints.length %> GPS point(s), change visit date</summary>
+  <% if (gpsPoints.length) { %>
+    <table class="table">
+      <% gpsPoints.forEach(g => { %>
+        <tr><td><%= g.kind %></td><td><%= g.lat.toFixed(5) %>, <%= g.lng.toFixed(5) %></td><td class="muted"><%= g.recorded_at %></td></tr>
+      <% }) %>
+    </table>
+  <% } %>
+  <% if (!locked) { %>
+  <form method="post" action="/visits/<%= visit.id %>/reschedule" class="filter-row">
+    <label>New date <input type="date" name="scheduled_date" value="<%= visit.scheduled_date %>" required></label>
+    <button class="btn">Move visit</button>
+  </form>
+  <% } %>
+</details>
+<% } %>
+
+<!-- ===== 4. Extra: tasks, other photos, comments (collapsed for gardeners when a checklist exists) ===== -->
+<% const openExtra = staff || !checks.length; %>
 <div class="grid">
-  <section class="card" id="tasks">
-    <h2>Tasks</h2>
+  <% if (tasks.length || staff) { %>
+  <details class="card" id="tasks" <%= openExtra ? 'open' : '' %>>
+    <summary><h2 class="inline-h">Tasks <span class="muted">(<%= tasks.filter(t => t.status === 'done').length %>/<%= tasks.length %>)</span></h2></summary>
     <table class="table">
       <% tasks.forEach(t => { %>
       <tr>
         <td><strong><%= t.title %></strong><% if (t.description) { %><br><span class="muted"><%= t.description %></span><% } %></td>
-        <td><span class="status status-<%= t.status %>"><%= t.status.replace('_',' ') %></span></td>
         <td>
           <form method="post" action="/tasks/<%= t.id %>/status" class="inline">
-            <select name="status" onchange="this.form.submit()">
-              <% ['pending','in_progress','done','blocked'].forEach(s => { %>
-                <option value="<%= s %>" <%= t.status === s ? 'selected' : '' %>><%= s.replace('_',' ') %></option>
+            <select name="status" class="auto-submit">
+              <% ['pending','in_progress','done','blocked'].forEach(st => { %>
+                <option value="<%= st %>" <%= t.status === st ? 'selected' : '' %>><%= st.replace('_',' ') %></option>
               <% }) %>
             </select>
           </form>
@@ -108,10 +209,11 @@
       <input type="text" name="title" placeholder="New task…" required>
       <button class="btn">Add</button>
     </form>
-  </section>
+  </details>
+  <% } %>
 
-  <section class="card" id="photos">
-    <h2>Photos <span class="muted">(<%= photos.length %>)</span></h2>
+  <details class="card" id="photos" <%= openExtra ? 'open' : '' %>>
+    <summary><h2 class="inline-h"><%= checks.length ? 'Other photos' : 'Photos' %> <span class="muted">(<%= photos.length %>)</span></h2></summary>
     <div class="photo-grid">
       <% photos.forEach(ph => { %>
         <figure class="photo">
@@ -123,19 +225,16 @@
         </figure>
       <% }) %>
     </div>
-    <% if (!photos.length) { %><p class="muted">No photos yet — add them before completing the job.</p><% } %>
     <form method="post" action="/visits/<%= visit.id %>/photos" enctype="multipart/form-data" class="form-grid">
       <label class="span2">Photos <input type="file" name="photos" accept="image/*" multiple required></label>
       <label class="span2">Caption <input type="text" name="caption"></label>
       <label><input type="checkbox" name="shared" checked> Share with the whole team</label>
       <button class="btn btn-primary">Upload</button>
-      <p class="muted span2">On a phone you can take a picture or pick from your library.
-        Every photo is timestamped automatically.</p>
     </form>
-  </section>
+  </details>
 
-  <section class="card" id="comments">
-    <h2>Comments</h2>
+  <details class="card" id="comments" <%= openExtra || comments.length ? 'open' : '' %>>
+    <summary><h2 class="inline-h">Comments <span class="muted">(<%= comments.length %>)</span></h2></summary>
     <% comments.forEach(c => { %>
       <div class="comment">
         <strong><%= c.author_name %></strong> <span class="tag tag-<%= c.author_role %>"><%= c.author_role %></span>
@@ -149,15 +248,13 @@
         <% }) %>
       </div>
     <% }) %>
-    <% if (!comments.length) { %><p class="muted">No comments yet.</p><% } %>
     <form method="post" action="/visits/<%= visit.id %>/comments" enctype="multipart/form-data">
-      <textarea name="body" rows="2" placeholder="Add a comment…" required></textarea>
+      <textarea name="body" rows="2" placeholder="Message to <%= staff ? 'the gardener' : 'the office' %>…" required></textarea>
       <label class="muted">Attach photos (optional)
         <input type="file" name="photos" accept="image/*" multiple></label>
-      <button class="btn">Comment</button>
-      <p class="muted">Staff comments notify the assigned gardener; gardener comments notify supervisors and admins.</p>
+      <button class="btn">Send</button>
     </form>
-  </section>
+  </details>
 </div>
 
 <!-- ===== 3. Staff-only management, kept out of the gardener's way ===== -->
@@ -177,8 +274,8 @@
     <label>Time window <input type="text" name="time_window" value="<%= visit.time_window || '' %>"></label>
     <label>Status
       <select name="status">
-        <% ['scheduled','in_progress','completed','skipped','cancelled'].forEach(s => { %>
-          <option value="<%= s %>" <%= visit.status === s ? 'selected' : '' %>><%= s.replace('_',' ') %></option>
+        <% ['scheduled','in_progress','completed','skipped','cancelled'].concat(visit.status === 'approved' ? ['approved'] : []).forEach(s => { %>
+          <option value="<%= s %>" <%= visit.status === s ? 'selected' : '' %>><%= s === 'approved' ? 'approved for payment' : s.replace('_',' ') %></option>
         <% }) %>
       </select>
     </label>

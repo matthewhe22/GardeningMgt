@@ -3,15 +3,17 @@ const ejs = require('ejs');
 const { q, q1 } = require('./db');
 const { uploadFile } = require('./onedrive');
 const { logActivity } = require('./activity');
+const { loadChecks } = require('./scope');
 
 /** Everything needed to render a job completion report. */
 async function loadReportData(visitId) {
   const visit = await q1(`
     SELECT v.*, p.name AS property_name, p.address, p.lots, p.contact_name,
-           u.name AS gardener_name
+           u.name AS gardener_name, ap.name AS approved_by_name
     FROM visits v
     JOIN properties p ON p.id = v.property_id
     LEFT JOIN users u ON u.id = v.gardener_id
+    LEFT JOIN users ap ON ap.id = v.approved_by
     WHERE v.id = $1`, [visitId]);
   if (!visit) return null;
   const job = visit.job_id
@@ -21,7 +23,8 @@ async function loadReportData(visitId) {
   const comments = await q('SELECT c.*, u.name AS author_name, u.role AS author_role FROM visit_comments c LEFT JOIN users u ON u.id = c.user_id WHERE c.visit_id = $1 ORDER BY c.created_at', [visitId]);
   const photos = await q('SELECT ph.id, ph.filename, ph.mime, ph.caption, ph.created_at, u.name AS uploader_name FROM photos ph LEFT JOIN users u ON u.id = ph.uploaded_by WHERE ph.visit_id = $1 ORDER BY ph.created_at', [visitId]);
   const gpsPoints = await q('SELECT * FROM gps_points WHERE visit_id = $1 ORDER BY recorded_at', [visitId]);
-  return { visit, job, tasks, comments, photos, gpsPoints };
+  const checks = await loadChecks(visitId);
+  return { visit, job, tasks, comments, photos, gpsPoints, checks };
 }
 
 /**

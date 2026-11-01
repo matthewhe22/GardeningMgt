@@ -1,0 +1,68 @@
+<%- include('../partials/header') %>
+<div class="page-head">
+  <h1>Scope of duties</h1>
+  <p class="page-sub"><strong><%= job.property_name %></strong> — <%= job.address %> · <%= job.frequency %>
+    · <a href="/jobs">all sites</a></p>
+  <p class="page-sub">Up to <%= max %> standard items. The gardener ticks each one, adds photos and an
+    optional comment on every visit. Add a <strong>standard photo</strong> to show what “done right” looks like —
+    the gardener can view it while working.</p>
+</div>
+
+<% if (msg === 'full') { %><p class="alert alert-error">⚠ Limit reached — a job can have at most <%= max %> scope items. Extra lines were not added.</p><% } %>
+<% if (msg === 'badphoto') { %><p class="alert alert-error">⚠ That file isn’t a valid image.</p><% } %>
+
+<div class="card">
+  <h2>Items <span class="muted">(<%= scopes.length %>/<%= max %>)</span></h2>
+  <% if (!scopes.length) { %><p class="muted">No scope items yet — add them below.</p><% } %>
+  <ol class="scope-admin">
+    <% scopes.forEach((s, i) => { %>
+    <li class="scope-admin-item">
+      <div class="scope-admin-main">
+        <form method="post" action="/jobs/<%= job.id %>/scope/<%= s.id %>/update" class="add-row scope-title-form">
+          <input type="text" name="title" value="<%= s.title %>" maxlength="300" required>
+          <button class="btn">Save</button>
+        </form>
+        <div class="btn-row scope-admin-actions">
+          <% if (i > 0) { %><form method="post" action="/jobs/<%= job.id %>/scope/<%= s.id %>/move" class="inline"><input type="hidden" name="dir" value="up"><button class="link-btn" title="Move up">▲ up</button></form><% } %>
+          <% if (i < scopes.length - 1) { %><form method="post" action="/jobs/<%= job.id %>/scope/<%= s.id %>/move" class="inline"><input type="hidden" name="dir" value="down"><button class="link-btn" title="Move down">▼ down</button></form><% } %>
+          <form method="post" action="/jobs/<%= job.id %>/scope/<%= s.id %>/delete" class="inline" data-confirm="Delete this scope item?"><button class="link-btn danger-link">✕ delete</button></form>
+        </div>
+      </div>
+      <div class="scope-admin-photo">
+        <% if (s.standard_photo) { %>
+          <a href="/uploads/<%= s.standard_photo %>" target="_blank"><img src="/uploads/<%= s.standard_photo %>" alt="Standard for <%= s.title %>" loading="lazy"></a>
+          <form method="post" action="/jobs/<%= job.id %>/scope/<%= s.id %>/photo/delete" class="inline"><button class="link-btn danger-link">remove photo</button></form>
+        <% } else { %>
+          <div class="scope-noimg muted">No standard photo</div>
+        <% } %>
+        <form method="post" action="/jobs/<%= job.id %>/scope/<%= s.id %>/photo" enctype="multipart/form-data" class="scope-photo-form">
+          <label class="btn btn-sm file-btn">📷 <%= s.standard_photo ? 'Replace' : 'Add' %> standard photo
+            <input type="file" name="photo" accept="image/*" class="auto-submit" hidden></label>
+        </form>
+      </div>
+    </li>
+    <% }) %>
+  </ol>
+
+  <% if (scopes.length < max) { %>
+  <form method="post" action="/jobs/<%= job.id %>/scope">
+    <label>Add items — one per line (you can paste the list from the contract)
+      <textarea name="titles" rows="5" placeholder="Mechanically blow concrete stairwells&#10;Dust and clean the metal handrails&#10;Remove cobwebs where practical" required></textarea></label>
+    <button class="btn btn-primary">Add items</button>
+  </form>
+  <% } %>
+</div>
+
+<% if (sources.length && scopes.length < max) { %>
+<details class="card">
+  <summary><strong>Copy scope from another site</strong></summary>
+  <form method="post" action="/jobs/<%= job.id %>/scope/copy" class="add-row">
+    <select name="from_job_id">
+      <% sources.forEach(src => { %><option value="<%= src.id %>"><%= src.name %> (<%= src.n %> items)</option><% }) %>
+    </select>
+    <button class="btn">Copy items</button>
+  </form>
+  <p class="muted">Items and their standard photos are appended (up to the <%= max %>-item limit).</p>
+</details>
+<% } %>
+<%- include('../partials/footer') %>

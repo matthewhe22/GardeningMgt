@@ -20,6 +20,10 @@ normal Node.js server.
 | Per-job comments (supervisor ↔ gardener) | Job page |
 | Invoicing per job (labour pre-filled from the timer) | **Invoices** (staff) |
 | Reporting (visits, hours per gardener, issues, invoice totals) | **Reports** (staff) |
+| Scope of duties per site (≤20 items, each with a standard photo) | **Sites** → 📋 Scope of duties |
+| Gardener checklist: tick / photo / comment per scope item, “View scope standards” | Job page |
+| Job report emailed to every active admin on completion (photos attached) | Email (needs Resend) |
+| Admin review → **Approve for payment** (status `approved`) | Job page, **Jobs** → Awaiting review |
 
 ## Roles
 
@@ -75,6 +79,8 @@ Demo accounts (after seeding):
 | `SESSION_SECRET` | dev value | **Set in production** — signs the session cookie |
 | `CRON_SECRET` | unset | If set, `/cron/reminders` requires `Authorization: Bearer <secret>` |
 | `BOOTSTRAP_ADMIN_EMAIL/_PASSWORD` | admin@example.com / admin1234 | First admin on an empty database |
+| `RESEND_API_KEY` / `RESEND_FROM` | unset | Email delivery ([Resend](https://resend.com)). Required for job reports to be emailed to admins |
+| `APP_URL` | request origin | Public URL used in email links, e.g. `https://gardeningmgt.vercel.app` |
 | `HOURLY_RATE` | 50 | Default labour rate for invoices |
 | `PORT` | 3000 | HTTP port (non-Vercel) |
 

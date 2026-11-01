@@ -34,6 +34,10 @@ visit_comments (supervisor/gardener discussion per job)
 gps_points (visit_id, lat/lng, kind: start|ping|finish ← GPS tracking)
 invoices + invoice_items (per job; labour line pre-filled from timer)
 notifications (in-app: reminders, job completion summaries)
+job_scopes (scope of duties per job, ≤20; standard photo = photos.job_scope_id)
+visit_scope_checks (per-visit checklist: done, comment, title snapshot;
+                    evidence photos = photos.scope_check_id)
+visits.status adds 'approved' (+ approved_at/approved_by) = approved for payment
 activity_log (append-only audit of every mutation)
 ```
 
@@ -59,6 +63,18 @@ Start/stop buttons on the job page set `started_at`/`finished_at` and compute
 Geolocation API, stored as `gps_points` (`start`/`finish`, plus a `/gps` ping
 endpoint for periodic tracking). On finish, a **job summary notification**
 (duration, tasks done, photo count) goes to every supervisor and admin.
+
+### Scope of duties, review & payment approval
+Staff define up to 20 scope items per recurring job (paste a list, reorder,
+copy from another site) and attach one standard photo per item. When a visit
+is opened its checklist is synced from the job's scope (titles snapshotted;
+frozen once completed). The gardener ticks each item, adds photos and an
+optional comment; completion requires every item ticked or explained by a
+comment, plus ≥1 photo. On completion the report (scope results + all photos,
+self-contained HTML attachment) is emailed to every active admin via Resend.
+Admins review on the job page or **Jobs → Awaiting review** and click
+**Approve for payment** (`completed → approved`); approved jobs can't be
+restarted, and only an admin can withdraw the approval.
 
 ### Activity log
 `logActivity(userId, action, entityType, entityId, details)` is called from every

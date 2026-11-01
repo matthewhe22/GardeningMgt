@@ -1,0 +1,22 @@
+<%- include('../partials/header') %>
+<div class="page-head">
+  <h1>Scope standards</h1>
+  <p class="page-sub"><%= visit.property_name %> · <a href="/visits/<%= visit.id %>#scope">← back to job</a></p>
+</div>
+<% if (!scopes.length) { %>
+  <div class="card"><p class="muted">No scope of duties has been set for this site yet.</p></div>
+<% } %>
+<div class="standards">
+  <% scopes.forEach((s, i) => { %>
+  <div class="card standard" id="std-<%= s.id %>">
+    <h2><span class="scope-no"><%= i + 1 %></span> <%= s.title %></h2>
+    <% if (s.standard_photo) { %>
+      <a href="/uploads/<%= s.standard_photo %>" target="_blank"><img src="/uploads/<%= s.standard_photo %>" alt="Standard: <%= s.title %>" loading="lazy"></a>
+    <% } else { %>
+      <p class="muted">No standard photo for this item.</p>
+    <% } %>
+  </div>
+  <% }) %>
+</div>
+<p><a class="btn btn-block" href="/visits/<%= visit.id %>#scope">← Back to job</a></p>
+<%- include('../partials/footer') %>

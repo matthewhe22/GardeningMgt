@@ -20,6 +20,9 @@
   img { width: 100%; border-radius: 8px; border: 1px solid #e6e4dc; }
   figcaption { font-size: 0.78rem; color: #707b72; margin-top: 4px; }
   .stamp { background: #14532d; color: #fff; padding: 1px 8px; border-radius: 4px; font-size: 0.74rem; }
+  .scope { border: 1px solid #e6e4dc; border-radius: 8px; padding: 10px 12px; margin: 10px 0; page-break-inside: avoid; }
+  .scope .photos { margin-top: 8px; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+  .ok { color: #15803d; font-weight: 700; } .no { color: #b45309; font-weight: 700; }
   .comment { border-left: 3px solid #e6e4dc; padding: 4px 12px; margin: 8px 0; }
   footer { margin-top: 40px; color: #707b72; font-size: 0.78rem; border-top: 1px solid #e6e4dc; padding-top: 12px; }
   @media print { .no-print { display: none; } }
@@ -38,7 +41,8 @@
       <% if (visit.lots != null) { %> (<%= visit.lots %> lots)<% } %></td></tr>
     <% if (visit.contact_name) { %><tr><th>Site contact</th><td><%= visit.contact_name %></td></tr><% } %>
     <tr><th>Gardener</th><td><%= visit.gardener_name || 'Unassigned' %></td></tr>
-    <tr><th>Status</th><td><span class="pill"><%= visit.status.replace('_',' ') %></span></td></tr>
+    <tr><th>Status</th><td><span class="pill"><%= visit.status === 'approved' ? 'approved for payment' : visit.status.replace('_',' ') %></span>
+      <% if (visit.approved_at) { %> <span class="meta">by <%= visit.approved_by_name || 'admin' %> on <%= visit.approved_at %> UTC</span><% } %></td></tr>
     <tr><th>Scheduled date</th><td><%= visit.scheduled_date %><% if (visit.time_window) { %> · <%= visit.time_window %><% } %></td></tr>
     <% if (visit.started_at) { %><tr><th>Started</th><td><%= visit.started_at %> UTC</td></tr><% } %>
     <% if (visit.finished_at) { %><tr><th>Completed</th><td><strong><%= visit.finished_at %> UTC</strong></td></tr><% } %>
@@ -49,6 +53,28 @@
         (<%= job.start_date %> → <%= job.end_date %>) · default gardener: <%= job.default_gardener_name || '—' %></td></tr>
     <% } %>
   </table>
+
+  <% if (checks.length) { %>
+  <h2>Scope of duties (<%= checks.filter(c => c.done).length %>/<%= checks.length %> done)</h2>
+  <% checks.forEach((c, i) => { %>
+    <div class="scope">
+      <div class="scope-head">
+        <span class="<%= c.done ? 'ok' : 'no' %>"><%= c.done ? '✔' : '✘' %></span>
+        <strong><%= i + 1 %>. <%= c.title %></strong>
+        <% if (c.checked_at) { %><span class="meta"> · <%= c.checked_by_name || '' %> · <%= c.checked_at %> UTC</span><% } %>
+      </div>
+      <% if (c.comment) { %><div class="comment">💬 <%= c.comment %></div><% } %>
+      <% if (c.photos.length) { %>
+      <div class="photos">
+        <% c.photos.forEach(ph => { %>
+          <figure><img src="<%= photoSrc(ph) %>" alt="<%= c.title %>">
+            <figcaption><span class="stamp">📅 <%= ph.created_at %> UTC</span></figcaption></figure>
+        <% }) %>
+      </div>
+      <% } %>
+    </div>
+  <% }) %>
+  <% } %>
 
   <% if (tasks.length) { %>
   <h2>Tasks (<%= tasks.filter(t => t.status === 'done').length %>/<%= tasks.length %> done)</h2>
@@ -77,10 +103,12 @@
   <% }) %>
   <% } %>
 
-  <h2>Photos (<%= photos.length %>)</h2>
-  <% if (!photos.length) { %><p class="meta">No photos were uploaded for this job.</p><% } %>
+  <% const scopeIds = new Set(checks.flatMap(c => c.photos.map(p => p.id))); %>
+  <% const otherPhotos = photos.filter(ph => !scopeIds.has(ph.id)); %>
+  <h2><%= checks.length ? 'Other photos' : 'Photos' %> (<%= otherPhotos.length %>)</h2>
+  <% if (!otherPhotos.length) { %><p class="meta">No <%= checks.length ? 'other ' : '' %>photos were uploaded for this job.</p><% } %>
   <div class="photos">
-    <% photos.forEach(ph => { %>
+    <% otherPhotos.forEach(ph => { %>
       <figure>
         <img src="<%= photoSrc(ph) %>" alt="<%= ph.caption || ph.filename %>">
         <figcaption><span class="stamp">📅 <%= ph.created_at %> UTC</span>

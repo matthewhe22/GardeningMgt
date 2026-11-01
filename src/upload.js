@@ -42,16 +42,20 @@ const upload = multer({
 });
 
 /** Insert one uploaded file; returns the generated filename key (or null if rejected). */
-async function savePhoto(file, { caption = null, visitId = null, issueId = null, commentId = null, userId, shared = true }) {
+async function savePhoto(file, {
+  caption = null, visitId = null, issueId = null, commentId = null,
+  jobScopeId = null, scopeCheckId = null, userId, shared = true,
+}) {
   const ext = path.extname(file.originalname).toLowerCase();
   // Content sniff: reject files whose bytes don't match an allowed image type.
   if (!sniffOk(file.buffer, ext)) return null;
   const filename = `${Date.now()}-${crypto.randomBytes(6).toString('hex')}${ext}`;
   await pool.query(
-    `INSERT INTO photos (filename, original_name, mime, data, caption, visit_id, issue_id, visit_comment_id, uploaded_by, shared)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+    `INSERT INTO photos (filename, original_name, mime, data, caption, visit_id, issue_id, visit_comment_id,
+                         job_scope_id, scope_check_id, uploaded_by, shared)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
     [filename, file.originalname, ALLOWED.get(ext) || 'application/octet-stream',
-      file.buffer, caption, visitId, issueId, commentId, userId, shared]
+      file.buffer, caption, visitId, issueId, commentId, jobScopeId, scopeCheckId, userId, shared]
   );
   return filename;
 }

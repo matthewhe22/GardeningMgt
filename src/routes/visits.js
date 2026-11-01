@@ -7,18 +7,22 @@ const { nextOccurrenceAfter, isValidDate } = require('../recurrence');
 const { loadReportData, renderReportHtml, archiveToOneDrive } = require('../report');
 const { asyncHandler } = require('../asyncHandler');
 const { assertCsrf } = require('../csrf');
+const { syncChecks, loadChecks, isResolved, LOCKED } = require('../scope');
+const { emailJobReport, baseUrlFrom } = require('../jobReport');
 
 const router = express.Router();
 
-const VISIT_STATUSES = ['scheduled', 'in_progress', 'completed', 'skipped', 'cancelled'];
+const VISIT_STATUSES = ['scheduled', 'in_progress', 'completed', 'approved', 'skipped', 'cancelled'];
 
 function getVisit(id) {
   return q1(`
-    SELECT v.*, p.name AS property_name, p.address, p.lat, p.lng, u.name AS gardener_name
+    SELECT v.*, p.name AS property_name, p.address, p.lat, p.lng, u.name AS gardener_name,
+           ap.name AS approved_by_name
     FROM visits v
     JOIN properties p ON p.id = v.property_id
     LEFT JOIN users u ON u.id = v.gardener_id
-    WHERE v.id = $1`, [id]);
+    LEFT JOIN users ap ON ap.id = v.approved_by
+    WHERE v.id = $1`, [Number(id) || 0]);
 }
 
 function canSeeVisit(user, visit) {
@@ -29,11 +33,13 @@ function canSeeVisit(user, visit) {
 router.get('/', asyncHandler(async (req, res) => {
   const staff = isStaff(req.user);
   const date = req.query.date || '';
+  const status = VISIT_STATUSES.includes(req.query.status) ? req.query.status : '';
   const gardenerId = staff ? (req.query.gardener_id || '') : String(req.user.id);
   const where = [];
   const args = [];
   if (date) { args.push(date); where.push(`v.scheduled_date = $${args.length}`); }
   if (gardenerId) { args.push(Number(gardenerId)); where.push(`v.gardener_id = $${args.length}`); }
+  if (status) { args.push(status); where.push(`v.status = $${args.length}`); }
   const visits = await q(`
     SELECT v.*, p.name AS property_name, p.address, u.name AS gardener_name
     FROM visits v
@@ -44,7 +50,10 @@ router.get('/', asyncHandler(async (req, res) => {
     LIMIT 200`, args);
   const gardeners = await q("SELECT id, name FROM users WHERE role = 'gardener' AND active");
   const properties = await q('SELECT id, name FROM properties ORDER BY name');
-  res.render('visits/index', { title: 'Visits / Jobs', visits, gardeners, properties, staff, date, gardenerId });
+  const { awaiting } = staff
+    ? await q1("SELECT COUNT(*)::int AS awaiting FROM visits WHERE status = 'completed'")
+    : { awaiting: 0 };
+  res.render('visits/index', { title: 'Visits / Jobs', visits, gardeners, properties, staff, date, gardenerId, status, awaiting });
 }));
 
 // Create (staff only)
@@ -68,8 +77,11 @@ router.get('/:id', asyncHandler(async (req, res) => {
   if (!canSeeVisit(req.user, visit)) {
     return res.status(403).render('error', { title: 'Forbidden', message: 'Not your visit.' });
   }
+  await syncChecks(visit);
+  const checks = await loadChecks(visit.id);
   const tasks = await q('SELECT t.*, u.name AS assignee_name FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id WHERE t.visit_id = $1 ORDER BY t.id', [visit.id]);
-  const photos = await q('SELECT ph.id, ph.filename, ph.caption, ph.original_name, ph.created_at, u.name AS uploader_name FROM photos ph LEFT JOIN users u ON u.id = ph.uploaded_by WHERE ph.visit_id = $1 AND ph.visit_comment_id IS NULL ORDER BY ph.created_at DESC', [visit.id]);
+  const photos = await q('SELECT ph.id, ph.filename, ph.caption, ph.original_name, ph.created_at, u.name AS uploader_name FROM photos ph LEFT JOIN users u ON u.id = ph.uploaded_by WHERE ph.visit_id = $1 AND ph.visit_comment_id IS NULL AND ph.scope_check_id IS NULL ORDER BY ph.created_at DESC', [visit.id]);
+  const { total_photos: totalPhotos } = await q1('SELECT COUNT(*)::int AS total_photos FROM photos WHERE visit_id = $1', [visit.id]);
   const comments = await q('SELECT c.*, u.name AS author_name, u.role AS author_role FROM visit_comments c LEFT JOIN users u ON u.id = c.user_id WHERE c.visit_id = $1 ORDER BY c.created_at', [visit.id]);
   const commentPhotos = await q('SELECT ph.visit_comment_id, ph.filename, ph.created_at FROM photos ph WHERE ph.visit_id = $1 AND ph.visit_comment_id IS NOT NULL ORDER BY ph.created_at', [visit.id]);
   const photosByComment = {};
@@ -83,7 +95,8 @@ router.get('/:id', asyncHandler(async (req, res) => {
   res.render('visits/show', {
     title: `Job #${visit.id} — ${visit.property_name}`,
     visit, tasks, photos, comments, photosByComment, invoice, gardeners, gpsPoints, job,
-    staff: isStaff(req.user), flash: req.query.error || null,
+    checks, totalPhotos, isResolved, locked: LOCKED.includes(visit.status),
+    staff: isStaff(req.user), isAdmin: req.user.role === 'admin', flash: req.query.error || null,
   });
 }));
 
@@ -95,20 +108,31 @@ router.post('/:id/update', requireRole('supervisor'), asyncHandler(async (req, r
   if (!VISIT_STATUSES.includes(status) || !isValidDate(scheduled_date)) {
     return res.redirect(`/visits/${visit.id}?error=invalid`);
   }
+  // Payment approval only goes through the admin "Approve" action, and only an
+  // admin may move a visit back out of the approved state.
+  if ((status === 'approved') !== (visit.status === 'approved') && req.user.role !== 'admin') {
+    return res.redirect(`/visits/${visit.id}?error=approval`);
+  }
+  if (status === 'approved' && visit.status !== 'approved') {
+    return res.redirect(`/visits/${visit.id}?error=approval`);
+  }
   // When staff mark a visit completed here, fill timing if missing so the
   // record (and report) is consistent with the timer path.
   const completing = status === 'completed' && visit.status !== 'completed';
   await q(`
     UPDATE visits SET gardener_id = $1, scheduled_date = $2, time_window = $3, status = $4, notes = $5,
       duration_minutes = $6,
-      finished_at = CASE WHEN $4 = 'completed' AND finished_at IS NULL THEN now() ELSE finished_at END
+      finished_at = CASE WHEN $4 = 'completed' AND finished_at IS NULL THEN now() ELSE finished_at END,
+      approved_at = CASE WHEN $4 = 'approved' THEN approved_at END,
+      approved_by = CASE WHEN $4 = 'approved' THEN approved_by END
     WHERE id = $7`,
     [gardener_id || null, scheduled_date, time_window || null, status, notes || null,
       duration_minutes ? Number(duration_minutes) : visit.duration_minutes, visit.id]);
   await logActivity(req.user.id, 'visit.update', 'visit', visit.id,
     `Updated visit #${visit.id} (status: ${visit.status} -> ${status})`);
   // Advance the recurring contract when this occurrence reaches a terminal state.
-  if (['completed', 'skipped', 'cancelled'].includes(status) && status !== visit.status) {
+  if (['completed', 'skipped', 'cancelled'].includes(status) && status !== visit.status
+      && visit.status !== 'approved') {
     await advanceRecurringJob(visit, req.user.id, status === 'completed');
   }
   res.redirect(`/visits/${visit.id}`);
@@ -136,6 +160,8 @@ router.post('/:id/status', asyncHandler(async (req, res) => {
   if (!['scheduled', 'in_progress', 'skipped', 'cancelled'].includes(status)) {
     return res.redirect(`/visits/${visit.id}`);
   }
+  if (LOCKED.includes(visit.status) && !isStaff(req.user)) return res.redirect(`/visits/${visit.id}`);
+  if (visit.status === 'approved') return res.redirect(`/visits/${visit.id}?error=approval`);
   if (status === visit.status) return res.redirect(`/visits/${visit.id}`);
   await q('UPDATE visits SET status = $1 WHERE id = $2', [status, visit.id]);
   await logActivity(req.user.id, 'visit.status', 'visit', visit.id, `Visit #${visit.id}: ${visit.status} -> ${status}`);
@@ -158,6 +184,8 @@ async function recordGps(visitId, userId, body, kind) {
 router.post('/:id/timer/start', asyncHandler(async (req, res) => {
   const visit = await getVisit(req.params.id);
   if (!visit || !canSeeVisit(req.user, visit)) return res.redirect('/visits');
+  // An approved job is closed for payment — it can't be reopened by the timer.
+  if (visit.status === 'approved') return res.redirect(`/visits/${visit.id}`);
   await q(`UPDATE visits SET started_at = now(), finished_at = NULL, status = 'in_progress' WHERE id = $1`, [visit.id]);
   const gps = await recordGps(visit.id, req.user.id, req.body, 'start');
   await logActivity(req.user.id, 'visit.timer.start', 'visit', visit.id,
@@ -187,13 +215,17 @@ router.post('/:id/timer/stop', asyncHandler(async (req, res) => {
   // Enforce the photo requirement server-side (not just the honor checkbox).
   const { pc } = await q1('SELECT COUNT(*)::int AS pc FROM photos WHERE visit_id = $1', [visit.id]);
   if (pc === 0) return res.redirect(`/visits/${visit.id}?error=photos`);
+  // Every scope-of-duties item must be ticked, or explained with a comment.
+  await syncChecks(visit);
+  const checks = await loadChecks(visit.id);
+  if (checks.some((c) => !isResolved(c))) return res.redirect(`/visits/${visit.id}?error=scope#scope`);
 
   // Atomic gate: only the first request that flips status off 'completed' wins.
   const gate = await q1(`
     UPDATE visits SET finished_at = now(),
       duration_minutes = GREATEST(0, ROUND(EXTRACT(EPOCH FROM (now() - started_at)) / 60))::int,
       status = 'completed'
-    WHERE id = $1 AND status <> 'completed'
+    WHERE id = $1 AND status NOT IN ('completed', 'approved')
     RETURNING id, duration_minutes`, [visit.id]);
   if (!gate) return res.redirect(`/visits/${visit.id}`); // already completed — no double side effects
 
@@ -203,8 +235,11 @@ router.post('/:id/timer/stop', asyncHandler(async (req, res) => {
 
   const { dc } = await q1("SELECT COUNT(*)::int AS dc FROM tasks WHERE visit_id = $1 AND status = 'done'", [visit.id]);
   const { tc } = await q1('SELECT COUNT(*)::int AS tc FROM tasks WHERE visit_id = $1', [visit.id]);
+  const doneScopes = checks.filter((c) => c.done).length;
   const summary = `Job #${visit.id} completed by ${req.user.name} at ${visit.property_name}: ` +
-    `${gate.duration_minutes} min, tasks ${dc}/${tc} done, ${pc} photo(s).`;
+    `${gate.duration_minutes} min, ` +
+    (checks.length ? `scope ${doneScopes}/${checks.length} done, ` : '') +
+    `tasks ${dc}/${tc} done, ${pc} photo(s). Ready for review.`;
   await pool.query(`
     INSERT INTO notifications (user_id, visit_id, type, message)
     SELECT id, $1, 'job_summary', $2 FROM users WHERE role IN ('admin','supervisor') AND active`,
@@ -213,6 +248,8 @@ router.post('/:id/timer/stop', asyncHandler(async (req, res) => {
   await advanceRecurringJob(visit, req.user.id, true);
   // Archive report + photos to OneDrive (best-effort; never blocks completion).
   await archiveToOneDrive(visit.id);
+  // Email the job report (scope items + photos) to every active admin.
+  await emailJobReport(visit.id, baseUrlFrom(req));
   res.redirect(`/visits/${visit.id}`);
 }));
 
@@ -224,6 +261,82 @@ router.get('/:id/report', asyncHandler(async (req, res) => {
   }
   const data = await loadReportData(visit.id);
   res.send(await renderReportHtml(data));
+}));
+
+// Admin approves a reviewed job for payment: completed -> approved.
+router.post('/:id/approve', requireRole(), asyncHandler(async (req, res) => {
+  const visit = await getVisit(req.params.id);
+  if (!visit) return res.redirect('/visits');
+  const row = await q1(`
+    UPDATE visits SET status = 'approved', approved_at = now(), approved_by = $2
+    WHERE id = $1 AND status = 'completed' RETURNING id`, [visit.id, req.user.id]);
+  if (!row) return res.redirect(`/visits/${visit.id}?error=notcompleted`);
+  await logActivity(req.user.id, 'visit.approve', 'visit', visit.id,
+    `Approved job #${visit.id} (${visit.property_name}) for payment`);
+  if (visit.gardener_id) {
+    await q('INSERT INTO notifications (user_id, visit_id, type, message) VALUES ($1, $2, $3, $4)',
+      [visit.gardener_id, visit.id, 'approved',
+        `Job #${visit.id} at ${visit.property_name} (${visit.scheduled_date}) was approved for payment.`]);
+  }
+  res.redirect(req.body.next === 'review' ? '/visits?status=completed' : `/visits/${visit.id}`);
+}));
+
+// Admin withdraws an approval (mistake): approved -> completed.
+router.post('/:id/unapprove', requireRole(), asyncHandler(async (req, res) => {
+  const visit = await getVisit(req.params.id);
+  if (!visit) return res.redirect('/visits');
+  await q(`UPDATE visits SET status = 'completed', approved_at = NULL, approved_by = NULL
+           WHERE id = $1 AND status = 'approved'`, [visit.id]);
+  await logActivity(req.user.id, 'visit.unapprove', 'visit', visit.id, `Withdrew payment approval for job #${visit.id}`);
+  res.redirect(`/visits/${visit.id}`);
+}));
+
+// Scope standards: the reference photos for every item, for the gardener on site.
+router.get('/:id/standards', asyncHandler(async (req, res) => {
+  const visit = await getVisit(req.params.id);
+  if (!visit || !canSeeVisit(req.user, visit)) {
+    return res.status(404).render('error', { title: 'Not found', message: 'Job not found.' });
+  }
+  const scopes = visit.job_id ? await require('../scope').loadJobScopes(visit.job_id) : [];
+  res.render('visits/standards', { title: `Standards — ${visit.property_name}`, visit, scopes });
+}));
+
+// Gardener fills in one scope item: tick, comment, photos (one form per item).
+router.post('/:id/scope/:cid', upload.array('photos', 10), asyncHandler(async (req, res) => {
+  assertCsrf(req);
+  const visit = await getVisit(req.params.id);
+  if (!visit || !canSeeVisit(req.user, visit)) return res.redirect('/visits');
+  const check = await q1('SELECT * FROM visit_scope_checks WHERE id = $1 AND visit_id = $2',
+    [Number(req.params.cid) || 0, visit.id]);
+  if (!check) return res.redirect(`/visits/${visit.id}`);
+  if (LOCKED.includes(visit.status)) return res.redirect(`/visits/${visit.id}?error=locked#scope`);
+  const done = req.body.done === 'on' || req.body.done === '1';
+  const comment = String(req.body.comment || '').trim().slice(0, 2000) || null;
+  await q(`UPDATE visit_scope_checks SET done = $1, comment = $2, checked_by = $3, checked_at = now()
+           WHERE id = $4`, [done, comment, req.user.id, check.id]);
+  let n = 0;
+  for (const f of req.files || []) {
+    if (await savePhoto(f, { visitId: visit.id, scopeCheckId: check.id, userId: req.user.id, caption: check.title })) n++;
+  }
+  await logActivity(req.user.id, 'visit.scope', 'visit', visit.id,
+    `${done ? 'Ticked' : 'Updated'} "${check.title}" on job #${visit.id}${n ? ` with ${n} photo(s)` : ''}`);
+  // Jump straight to the next unfinished item (it renders open), so the
+  // gardener just works down the list.
+  const next = (await loadChecks(visit.id)).find((c) => !isResolved(c));
+  res.redirect(`/visits/${visit.id}#${next ? `check-${next.id}` : 'complete'}`);
+}));
+
+// Remove a photo from a scope item (uploader or staff, before completion).
+router.post('/:id/scope/:cid/photos/:pid/delete', asyncHandler(async (req, res) => {
+  const visit = await getVisit(req.params.id);
+  if (!visit || !canSeeVisit(req.user, visit)) return res.redirect('/visits');
+  if (!LOCKED.includes(visit.status)) {
+    await q(`DELETE FROM photos ph USING visit_scope_checks c
+             WHERE ph.id = $1 AND ph.scope_check_id = c.id AND c.id = $2 AND c.visit_id = $3
+               AND (ph.uploaded_by = $4 OR $5)`,
+      [Number(req.params.pid) || 0, Number(req.params.cid) || 0, visit.id, req.user.id, isStaff(req.user)]);
+  }
+  res.redirect(`/visits/${visit.id}#check-${Number(req.params.cid) || 0}`);
 }));
 
 /**

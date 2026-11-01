@@ -5,6 +5,9 @@ const { logActivity } = require('../activity');
 const { contractEnd, occurrencesBetween, FREQUENCIES, isValidDate } = require('../recurrence');
 const { today: businessToday } = require('../time');
 const { asyncHandler } = require('../asyncHandler');
+const { assertCsrf } = require('../csrf');
+const { upload, savePhoto } = require('../upload');
+const { MAX_SCOPES, loadJobScopes } = require('../scope');
 
 const router = express.Router();
 
@@ -26,7 +29,8 @@ router.get('/', asyncHandler(async (req, res) => {
       (SELECT v.id FROM visits v
         WHERE v.job_id = j.id AND v.status = 'scheduled'
         ORDER BY v.scheduled_date LIMIT 1) AS next_visit_id,
-      (SELECT COUNT(*) FROM visits v WHERE v.job_id = j.id AND v.status = 'scheduled') AS upcoming_count
+      (SELECT COUNT(*) FROM visits v WHERE v.job_id = j.id AND v.status = 'scheduled') AS upcoming_count,
+      (SELECT COUNT(*) FROM job_scopes s WHERE s.job_id = j.id) AS scope_count
     FROM jobs j
     JOIN properties p ON p.id = j.property_id
     LEFT JOIN users u ON u.id = j.gardener_id
@@ -130,13 +134,154 @@ router.get('/site/:propertyId', requireRole('supervisor'), asyncHandler(async (r
     FROM visits v LEFT JOIN users u ON u.id = v.gardener_id
     WHERE v.property_id = $1 ORDER BY v.scheduled_date DESC LIMIT 300`, [req.params.propertyId]);
   const totals = await q1(`
-    SELECT COUNT(*) FILTER (WHERE status = 'completed')::int AS completed,
+    SELECT COUNT(*) FILTER (WHERE status IN ('completed','approved'))::int AS completed,
            COALESCE(SUM(duration_minutes), 0)::int AS minutes
     FROM visits WHERE property_id = $1`, [req.params.propertyId]);
   const invoices = await q(`
     SELECT inv.* FROM invoices inv JOIN visits v ON v.id = inv.visit_id
     WHERE v.property_id = $1 ORDER BY inv.created_at DESC`, [req.params.propertyId]);
   res.render('jobs/site', { title: property.name, property, visits, totals, invoices });
+}));
+
+// ---------------------------------------------------------------------------
+// Scope of duties (max 20 items per job, each with an optional standard photo)
+// ---------------------------------------------------------------------------
+
+async function getJob(id) {
+  return q1(`
+    SELECT j.*, p.name AS property_name, p.address FROM jobs j
+    JOIN properties p ON p.id = j.property_id WHERE j.id = $1`, [Number(id) || 0]);
+}
+async function getScope(job, sid) {
+  return q1('SELECT * FROM job_scopes WHERE id = $1 AND job_id = $2', [Number(sid) || 0, job.id]);
+}
+const scopeUrl = (job, msg) => `/jobs/${job.id}/scope${msg ? `?msg=${msg}` : ''}`;
+
+router.get('/:id/scope', requireRole('supervisor'), asyncHandler(async (req, res) => {
+  const job = await getJob(req.params.id);
+  if (!job) return res.status(404).render('error', { title: 'Not found', message: 'Job not found.' });
+  const scopes = await loadJobScopes(job.id);
+  // Other sites that already have a scope, to copy from.
+  const sources = await q(`
+    SELECT j.id, p.name, COUNT(s.id)::int AS n FROM jobs j
+    JOIN properties p ON p.id = j.property_id JOIN job_scopes s ON s.job_id = j.id
+    WHERE j.id <> $1 GROUP BY j.id, p.name ORDER BY p.name`, [job.id]);
+  res.render('jobs/scope', {
+    title: `Scope of duties — ${job.property_name}`, job, scopes, sources,
+    max: MAX_SCOPES, msg: req.query.msg || null,
+  });
+}));
+
+// Add items: one per line (paste the list from the contract), capped at 20 total.
+router.post('/:id/scope', requireRole('supervisor'), asyncHandler(async (req, res) => {
+  const job = await getJob(req.params.id);
+  if (!job) return res.redirect('/jobs');
+  const lines = String(req.body.titles || '').split(/\r?\n/)
+    .map((l) => l.replace(/^[\s*•\-–]+/, '').replace(/[,;]\s*$/, '').trim())
+    .filter(Boolean).map((l) => l.slice(0, 300));
+  let added = 0;
+  let full = false;
+  await withTransaction(async (tx) => {
+    // Lock the job row so two concurrent adds can't exceed the cap.
+    await tx.q('SELECT id FROM jobs WHERE id = $1 FOR UPDATE', [job.id]);
+    const { n, maxpos } = await tx.q1(
+      'SELECT COUNT(*)::int AS n, COALESCE(MAX(position), 0)::int AS maxpos FROM job_scopes WHERE job_id = $1', [job.id]);
+    const room = MAX_SCOPES - n;
+    full = lines.length > room;
+    for (const [i, title] of lines.slice(0, Math.max(0, room)).entries()) {
+      await tx.q('INSERT INTO job_scopes (job_id, position, title) VALUES ($1, $2, $3)', [job.id, maxpos + i + 1, title]);
+      added++;
+    }
+  });
+  if (added) await logActivity(req.user.id, 'scope.add', 'job', job.id, `Added ${added} scope item(s) to job #${job.id}`);
+  res.redirect(scopeUrl(job, full ? 'full' : null));
+}));
+
+// Copy another job's scope items (titles + standard photos) into this one.
+router.post('/:id/scope/copy', requireRole('supervisor'), asyncHandler(async (req, res) => {
+  const job = await getJob(req.params.id);
+  if (!job) return res.redirect('/jobs');
+  const from = Number(req.body.from_job_id) || 0;
+  let copied = 0;
+  let full = false;
+  await withTransaction(async (tx) => {
+    await tx.q('SELECT id FROM jobs WHERE id = $1 FOR UPDATE', [job.id]);
+    const { n, maxpos } = await tx.q1(
+      'SELECT COUNT(*)::int AS n, COALESCE(MAX(position), 0)::int AS maxpos FROM job_scopes WHERE job_id = $1', [job.id]);
+    const src = await tx.q('SELECT * FROM job_scopes WHERE job_id = $1 ORDER BY position, id', [from]);
+    full = src.length > MAX_SCOPES - n;
+    for (const [i, s] of src.slice(0, Math.max(0, MAX_SCOPES - n)).entries()) {
+      const row = await tx.q1('INSERT INTO job_scopes (job_id, position, title) VALUES ($1, $2, $3) RETURNING id',
+        [job.id, maxpos + i + 1, s.title]);
+      // Duplicate the standard photo bytes under a new unique filename.
+      await tx.q(`
+        INSERT INTO photos (filename, original_name, mime, data, caption, job_scope_id, uploaded_by, shared)
+        SELECT 'std-' || $1::int || '-' || md5(random()::text) || substring(filename from '\\.[^.]+$'),
+               original_name, mime, data, caption, $1::int, $3, false
+        FROM photos WHERE job_scope_id = $2 ORDER BY created_at DESC LIMIT 1`, [row.id, s.id, req.user.id]);
+      copied++;
+    }
+  });
+  if (copied) await logActivity(req.user.id, 'scope.copy', 'job', job.id, `Copied ${copied} scope item(s) from job #${from}`);
+  res.redirect(scopeUrl(job, full ? 'full' : null));
+}));
+
+router.post('/:id/scope/:sid/update', requireRole('supervisor'), asyncHandler(async (req, res) => {
+  const job = await getJob(req.params.id);
+  const scope = job && await getScope(job, req.params.sid);
+  if (!scope) return res.redirect('/jobs');
+  const title = String(req.body.title || '').trim().slice(0, 300);
+  if (title) await q('UPDATE job_scopes SET title = $1 WHERE id = $2', [title, scope.id]);
+  res.redirect(scopeUrl(job));
+}));
+
+// Move an item up or down (swap with its neighbour).
+router.post('/:id/scope/:sid/move', requireRole('supervisor'), asyncHandler(async (req, res) => {
+  const job = await getJob(req.params.id);
+  const scope = job && await getScope(job, req.params.sid);
+  if (!scope) return res.redirect('/jobs');
+  await withTransaction(async (tx) => {
+    const all = await tx.q('SELECT id FROM job_scopes WHERE job_id = $1 ORDER BY position, id FOR UPDATE', [job.id]);
+    const i = all.findIndex((r) => r.id === scope.id);
+    const j = req.body.dir === 'up' ? i - 1 : i + 1;
+    if (i < 0 || j < 0 || j >= all.length) return;
+    [all[i], all[j]] = [all[j], all[i]];
+    for (const [pos, r] of all.entries()) {
+      await tx.q('UPDATE job_scopes SET position = $1 WHERE id = $2', [pos + 1, r.id]);
+    }
+  });
+  res.redirect(scopeUrl(job));
+}));
+
+router.post('/:id/scope/:sid/delete', requireRole('supervisor'), asyncHandler(async (req, res) => {
+  const job = await getJob(req.params.id);
+  const scope = job && await getScope(job, req.params.sid);
+  if (!scope) return res.redirect('/jobs');
+  await q('DELETE FROM job_scopes WHERE id = $1', [scope.id]); // standard photo cascades
+  await logActivity(req.user.id, 'scope.delete', 'job', job.id, `Removed scope item "${scope.title}" from job #${job.id}`);
+  res.redirect(scopeUrl(job));
+}));
+
+// Upload / replace the standard (reference) photo for one scope item.
+router.post('/:id/scope/:sid/photo', requireRole('supervisor'), upload.single('photo'), asyncHandler(async (req, res) => {
+  assertCsrf(req);
+  const job = await getJob(req.params.id);
+  const scope = job && await getScope(job, req.params.sid);
+  if (!scope) return res.redirect('/jobs');
+  if (!req.file) return res.redirect(scopeUrl(job));
+  const saved = await savePhoto(req.file, { jobScopeId: scope.id, userId: req.user.id, shared: false, caption: 'Standard' });
+  if (!saved) return res.redirect(scopeUrl(job, 'badphoto'));
+  await q('DELETE FROM photos WHERE job_scope_id = $1 AND filename <> $2', [scope.id, saved]);
+  await logActivity(req.user.id, 'scope.photo', 'job', job.id, `Set standard photo for "${scope.title}"`);
+  res.redirect(scopeUrl(job));
+}));
+
+router.post('/:id/scope/:sid/photo/delete', requireRole('supervisor'), asyncHandler(async (req, res) => {
+  const job = await getJob(req.params.id);
+  const scope = job && await getScope(job, req.params.sid);
+  if (!scope) return res.redirect('/jobs');
+  await q('DELETE FROM photos WHERE job_scope_id = $1', [scope.id]);
+  res.redirect(scopeUrl(job));
 }));
 
 module.exports = router;

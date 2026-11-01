@@ -10,9 +10,48 @@ document.querySelectorAll('form').forEach((form) => {
   form.appendChild(i);
 });
 
+// --- Confirm before destructive actions: <form data-confirm="Sure?"> ---
+document.querySelectorAll('form[data-confirm]').forEach((form) => {
+  form.addEventListener('submit', (e) => {
+    if (!window.confirm(form.dataset.confirm)) e.preventDefault();
+  });
+});
+
+// --- Auto-submit: selects / file inputs with class "auto-submit" ---
+// (Inline onchange handlers are blocked by the Content-Security-Policy.)
+document.querySelectorAll('.auto-submit').forEach((el) => {
+  el.addEventListener('change', () => {
+    if (el.type === 'file' && !el.files.length) return;
+    if (el.form) el.form.submit();
+  });
+});
+
+// --- Show how many photos were picked on "📷 Add photo" buttons ---
+document.querySelectorAll('input[type=file].file-count').forEach((input) => {
+  const label = input.closest('label');
+  if (!label) return;
+  const textNode = [...label.childNodes].find((n) => n.nodeType === 3 && n.textContent.trim());
+  const original = textNode ? textNode.textContent : '';
+  input.addEventListener('change', () => {
+    if (textNode) {
+      textNode.textContent = input.files.length ? `📷 ${input.files.length} photo(s) ready` : original;
+    }
+    label.classList.toggle('has-files', input.files.length > 0);
+  });
+});
+
+// --- Open the checklist item named in the URL hash (after saving one) ---
+function openHashTarget() {
+  const el = location.hash && document.getElementById(location.hash.slice(1));
+  if (el && el.tagName === 'DETAILS') el.open = true;
+}
+openHashTarget();
+window.addEventListener('hashchange', openHashTarget);
+
 // --- Prevent double-submit: disable submit buttons once a form is submitted ---
 document.querySelectorAll('form').forEach((form) => {
-  form.addEventListener('submit', () => {
+  form.addEventListener('submit', (e) => {
+    if (e.defaultPrevented) return; // e.g. a cancelled confirm()
     const btn = form.querySelector('button[type="submit"], button:not([type])');
     if (btn) {
       // Let the value still post, just block repeat taps.

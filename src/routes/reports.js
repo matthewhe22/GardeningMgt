@@ -20,7 +20,7 @@ router.get('/', asyncHandler(async (req, res) => {
   const perGardener = await q(`
     SELECT u.name,
       COUNT(*)::int AS visits,
-      COUNT(*) FILTER (WHERE v.status = 'completed')::int AS completed,
+      COUNT(*) FILTER (WHERE v.status IN ('completed','approved'))::int AS completed,
       COALESCE(SUM(v.duration_minutes), 0)::int AS minutes
     FROM visits v JOIN users u ON u.id = v.gardener_id
     WHERE v.scheduled_date BETWEEN $1 AND $2

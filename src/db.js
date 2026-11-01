@@ -98,7 +98,7 @@ CREATE TABLE IF NOT EXISTS visits (
   scheduled_date   DATE NOT NULL,
   time_window      TEXT,
   status           TEXT NOT NULL DEFAULT 'scheduled'
-                   CHECK (status IN ('scheduled','in_progress','completed','skipped','cancelled')),
+                   CHECK (status IN ('scheduled','in_progress','completed','approved','skipped','cancelled')),
   route_order      INTEGER,
   reminder_sent_at TIMESTAMP,
   started_at       TIMESTAMP,
@@ -248,6 +248,34 @@ CREATE INDEX IF NOT EXISTS idx_jobs_property ON jobs (property_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_visits_job_day_scheduled
   ON visits (job_id, scheduled_date) WHERE status = 'scheduled' AND job_id IS NOT NULL;
 
+-- Scope of duties: up to 20 standard items per recurring job, each with an
+-- optional reference ("standard") photo stored in photos.job_scope_id.
+CREATE TABLE IF NOT EXISTS job_scopes (
+  id         SERIAL PRIMARY KEY,
+  job_id     INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+  position   INTEGER NOT NULL DEFAULT 0,
+  title      TEXT NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_job_scopes_job ON job_scopes (job_id, position);
+
+-- Per-visit checklist: one row per scope item, filled in by the gardener
+-- (tick + photos + comment). The title is snapshotted so the report stays
+-- accurate if the job's scope is edited later.
+CREATE TABLE IF NOT EXISTS visit_scope_checks (
+  id         SERIAL PRIMARY KEY,
+  visit_id   INTEGER NOT NULL REFERENCES visits(id) ON DELETE CASCADE,
+  scope_id   INTEGER REFERENCES job_scopes(id) ON DELETE SET NULL,
+  position   INTEGER NOT NULL DEFAULT 0,
+  title      TEXT NOT NULL,
+  done       BOOLEAN NOT NULL DEFAULT false,
+  comment    TEXT,
+  checked_by INTEGER REFERENCES users(id),
+  checked_at TIMESTAMP,
+  UNIQUE (visit_id, scope_id)
+);
+CREATE INDEX IF NOT EXISTS idx_scope_checks_visit ON visit_scope_checks (visit_id, position);
+
 -- Per-year gapless invoice numbers without racing on COUNT(*).
 CREATE SEQUENCE IF NOT EXISTS invoice_seq;
 `;
@@ -269,6 +297,22 @@ function ready() {
       await pool.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS visit_comment_id INTEGER REFERENCES visit_comments(id) ON DELETE SET NULL');
       // Renewal tracking: flag when a contract has been renewed/closed.
       await pool.query("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS renewal_acknowledged BOOLEAN NOT NULL DEFAULT false");
+      // Scope of duties: standard photos and per-item evidence photos.
+      await pool.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS job_scope_id INTEGER REFERENCES job_scopes(id) ON DELETE CASCADE');
+      await pool.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS scope_check_id INTEGER REFERENCES visit_scope_checks(id) ON DELETE SET NULL');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_photos_job_scope ON photos (job_scope_id)');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_photos_scope_check ON photos (scope_check_id)');
+      // Payment approval: new 'approved' visit status + who/when.
+      await pool.query('ALTER TABLE visits ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP');
+      await pool.query('ALTER TABLE visits ADD COLUMN IF NOT EXISTS approved_by INTEGER REFERENCES users(id)');
+      await pool.query(`DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'visits_status_check'
+                       AND pg_get_constraintdef(oid) LIKE '%approved%') THEN
+          ALTER TABLE visits DROP CONSTRAINT IF EXISTS visits_status_check;
+          ALTER TABLE visits ADD CONSTRAINT visits_status_check CHECK
+            (status IN ('scheduled','in_progress','completed','approved','skipped','cancelled'));
+        END IF;
+      END $$`);
       const { c } = (await pool.query('SELECT COUNT(*)::int AS c FROM users')).rows[0];
       if (c === 0) {
         const bcrypt = require('bcryptjs');
