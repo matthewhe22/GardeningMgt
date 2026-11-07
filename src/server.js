@@ -5,6 +5,7 @@ const cookieSession = require('cookie-session');
 
 const { q1, pool, ready, dbPoolerRisk } = require('./db');
 const { currentUser, requireLogin, isStaff } = require('./auth');
+const { canSeeIssue } = require('./access');
 const { sendRemindersForDate, pruneOldRecords } = require('./reminders');
 const { asyncHandler } = require('./asyncHandler');
 const { csrfProtection } = require('./csrf');
@@ -173,14 +174,14 @@ app.use(csrfProtection);
 
 // Photos are stored in the database; stream them out by filename key.
 // Access mirrors the gallery's visibility rules so a gardener can't read
-// another gardener's private visit photos by guessing the filename: staff see
-// everything; everyone else sees shared photos, their own uploads, photos on a
-// visit assigned to them, and any issue photo (issues are team-wide).
-function photoAllowed(u, photo) {
-  return isStaff(u) || photo.shared || photo.uploaded_by === u.id
-    || photo.gardener_id === u.id || photo.issue_id != null
+// another gardener's photos by guessing the filename: staff see everything; a
+// gardener sees their own uploads, photos on a visit assigned to them, and
+// photos on issues they can see (src/access.js).
+async function photoAllowed(u, photo) {
+  return isStaff(u) || photo.uploaded_by === u.id || photo.gardener_id === u.id
     // Scope-of-duties standard (reference) photos are team-wide.
-    || photo.job_scope_id != null || photo.library_scope_id != null;
+    || photo.job_scope_id != null || photo.library_scope_id != null
+    || (photo.issue_id != null && await canSeeIssue(u, photo.issue_id));
 }
 
 app.get('/uploads/:filename', requireLogin, asyncHandler(async (req, res) => {
@@ -189,7 +190,7 @@ app.get('/uploads/:filename', requireLogin, asyncHandler(async (req, res) => {
     FROM photos ph LEFT JOIN visits v ON v.id = ph.visit_id
     WHERE ph.filename = $1`, [req.params.filename]);
   if (!photo) return res.status(404).end();
-  if (!photoAllowed(res.locals.user, photo)) return res.status(404).end();
+  if (!(await photoAllowed(res.locals.user, photo))) return res.status(404).end();
   res.set('Content-Type', photo.mime);
   // Filenames are unique, immutable content keys, so the browser can keep them
   // for a long time and never re-fetch — repeat photo views become instant.
@@ -220,7 +221,7 @@ app.get('/uploads/:filename/thumb', requireLogin, asyncHandler(async (req, res) 
     FROM photos ph LEFT JOIN visits v ON v.id = ph.visit_id
     WHERE ph.filename = $1`, [req.params.filename]);
   if (!photo) return res.status(404).end();
-  if (!photoAllowed(res.locals.user, photo)) return res.status(404).end();
+  if (!(await photoAllowed(res.locals.user, photo))) return res.status(404).end();
   if (!photo.thumb_data || photo.thumb_data.length === 0) {
     return res.redirect(`/uploads/${encodeURIComponent(req.params.filename)}`);
   }

@@ -1,6 +1,7 @@
 const express = require('express');
 const { q, q1 } = require('../db');
 const { isStaff } = require('../auth');
+const { gardenerIssueCond } = require('../access');
 const { logActivity } = require('../activity');
 const { asyncHandler } = require('../asyncHandler');
 const storage = require('../storage');
@@ -31,16 +32,20 @@ router.post('/:id/delete', asyncHandler(async (req, res) => {
   res.redirect('/photos');
 }));
 
-// Team photo gallery. Shared photos are visible to everyone; private ones
-// only to the uploader and staff. Each photo shows its upload timestamp.
+// Photo gallery. Staff see every photo; a gardener only sees photos from
+// their own work — their uploads, their visits, and issues they can see. Each photo shows its upload timestamp.
 // Staff can filter by date range, site, and gardener (uploader).
 router.get('/', asyncHandler(async (req, res) => {
   const staff = isStaff(req.user);
   const page = pageParam(req);
   const where = [];
   const args = [];
-  // Non-staff only ever see shared photos or their own uploads.
-  if (!staff) { args.push(req.user.id); where.push(`(ph.shared OR ph.uploaded_by = $${args.length})`); }
+  if (!staff) {
+    args.push(req.user.id);
+    const n = args.length;
+    where.push(`(ph.uploaded_by = $${n} OR v.gardener_id = $${n}
+      OR (ph.issue_id IS NOT NULL AND ${gardenerIssueCond('i', n)}))`);
+  }
 
   // Filters (validated; blanks are ignored). A site can be attached to a photo
   // via its visit or its issue, so match either.

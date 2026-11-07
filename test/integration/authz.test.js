@@ -11,10 +11,12 @@
 //   - a gardener cannot view or act on another gardener's visit, task,
 //     comment or photo
 //   - a gardener cannot reach staff-only routes (/invoices, /admin/*, /reports)
-//   - the /uploads/:filename route's current sharing rules (mirrors the
-//     photo gallery: staff see everything; everyone else sees shared photos,
-//     their own uploads, photos on a visit assigned to them, and any issue
-//     photo since issues are team-wide)
+//   - a gardener only sees their own jobs: sites, visits, issues and photos
+//     belonging to another gardener never appear in their lists, and
+//     supervisors/admins still see everything
+//   - the /uploads/:filename route mirrors the photo gallery: staff see
+//     everything; a gardener sees their own uploads, photos on a visit
+//     assigned to them, and photos on issues they can see
 
 const test = require('node:test');
 const assert = require('node:assert');
@@ -65,9 +67,10 @@ test('authorization / IDOR gates', { skip: !TEST_DB && reason }, async (t) => {
   const gardenerBId = await ensureUser('authz-gardener-b@example.com', 'Authz Gardener B', 'gardener');
   await ensureUser('authz-staff@example.com', 'Authz Staff', 'supervisor');
 
-  const [{ agent: agentA, csrf: csrfA }, { agent: agentB, csrf: csrfB }] = await Promise.all([
+  const [{ agent: agentA, csrf: csrfA }, { agent: agentB, csrf: csrfB }, { agent: agentStaff }] = await Promise.all([
     loginAgent('authz-gardener-a@example.com'),
     loginAgent('authz-gardener-b@example.com'),
+    loginAgent('authz-staff@example.com'),
   ]);
 
   const property = await q1(
@@ -118,10 +121,9 @@ test('authorization / IDOR gates', { skip: !TEST_DB && reason }, async (t) => {
     assert.strictEqual(row.status, task.status, 'the task status must be unchanged');
   });
 
-  await t.test("gardener B CANNOT view a private photo uploaded to gardener A's visit", async () => {
+  await t.test("gardener B CANNOT view a photo uploaded to gardener A's visit", async () => {
     const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(20)]);
     const uploadRes = await agentA.post(`/visits/${visit.id}/photos?_csrf=${csrfA}`)
-      .field('shared', '') // private: not shared
       .attach('photos', jpeg, 'evidence.jpg');
     assert.strictEqual(uploadRes.status, 302);
     const photo = await q1(
@@ -129,46 +131,89 @@ test('authorization / IDOR gates', { skip: !TEST_DB && reason }, async (t) => {
     assert.ok(photo, 'the photo should have been saved');
 
     const res = await agentB.get(`/uploads/${photo.filename}`);
-    assert.strictEqual(res.status, 404, 'a private photo on someone else\'s visit must not be servable');
+    assert.strictEqual(res.status, 404, 'a photo on someone else\'s visit must not be servable');
+    assert.strictEqual((await agentA.get(`/uploads/${photo.filename}`)).status, 200, 'the uploader still can');
+    assert.strictEqual((await agentStaff.get(`/uploads/${photo.filename}`)).status, 200, 'staff still can');
   });
 
-  await t.test("gardener B CAN view a photo shared on gardener A's visit (current sharing rule)", async () => {
-    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.alloc(20)]);
-    const uploadRes = await agentA.post(`/visits/${visit.id}/photos?_csrf=${csrfA}`)
-      .field('shared', 'on')
-      .attach('photos', png, 'shared.png');
-    assert.strictEqual(uploadRes.status, 302);
+  await t.test("gardener B CANNOT view a photo on gardener A's visit even if flagged shared", async () => {
     const photo = await q1(
-      'SELECT filename FROM photos WHERE visit_id = $1 AND shared ORDER BY id DESC LIMIT 1', [visit.id]);
-    assert.ok(photo);
-
+      'SELECT filename FROM photos WHERE visit_id = $1 ORDER BY id DESC LIMIT 1', [visit.id]);
+    await q('UPDATE photos SET shared = true WHERE filename = $1', [photo.filename]);
     const res = await agentB.get(`/uploads/${photo.filename}`);
-    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.status, 404);
   });
 
-  await t.test("gardener B CANNOT delete gardener A's private photo", async () => {
+  await t.test("gardener B's photo gallery does not list gardener A's photos; staff's does", async () => {
+    const photo = await q1('SELECT id FROM photos WHERE visit_id = $1 ORDER BY id DESC LIMIT 1', [visit.id]);
+    const marker = `/visits/${visit.id}"`;
+    const b = await agentB.get('/photos');
+    assert.strictEqual(b.status, 200);
+    assert.ok(!b.text.includes(marker), `gardener B must not see photo #${photo.id} from A's visit`);
+    const a = await agentA.get('/photos');
+    assert.ok(a.text.includes(marker), 'gardener A sees their own visit photo');
+    const st = await agentStaff.get(`/photos?gardener_id=${gardenerAId}`);
+    assert.ok(st.text.includes(marker), 'staff see every photo');
+  });
+
+  await t.test("gardener B CANNOT delete gardener A's photo", async () => {
     const photo = await q1(
-      "SELECT id FROM photos WHERE visit_id = $1 AND NOT shared ORDER BY id DESC LIMIT 1", [visit.id]);
-    assert.ok(photo, 'precondition: a private photo from gardener A must exist');
+      'SELECT id FROM photos WHERE visit_id = $1 ORDER BY id DESC LIMIT 1', [visit.id]);
+    assert.ok(photo, 'precondition: a photo from gardener A must exist');
     const res = await agentB.post(`/photos/${photo.id}/delete`).type('form').send({ _csrf: csrfB });
     assert.strictEqual(res.status, 403);
     const stillThere = await q1('SELECT id FROM photos WHERE id = $1', [photo.id]);
     assert.ok(stillThere, 'the photo must not have been deleted');
   });
 
-  await t.test('an issue photo is visible to any authenticated user regardless of uploader (current, team-wide rule)', async () => {
-    const issue = await q1(`
-      INSERT INTO issues (title, property_id, priority, reported_by)
-      VALUES ('Authz issue', $1, 'medium', $2) RETURNING id`, [property.id, gardenerAId]);
+  const issueTitle = `Authz issue ${Date.now()}`;
+  const issue = await q1(`
+    INSERT INTO issues (title, property_id, priority, reported_by)
+    VALUES ($1, $2, 'medium', $3) RETURNING id`, [issueTitle, property.id, gardenerAId]);
+
+  await t.test("an issue on gardener A's site is hidden from gardener B, visible to A and staff", async () => {
+    assert.strictEqual((await agentB.get(`/issues/${issue.id}`)).status, 404);
+    assert.ok(!(await agentB.get('/issues')).text.includes(issueTitle), 'not in B\'s issue list');
+    assert.strictEqual((await agentA.get(`/issues/${issue.id}`)).status, 200);
+    assert.ok((await agentA.get('/issues')).text.includes(issueTitle), 'in A\'s issue list');
+    assert.strictEqual((await agentStaff.get(`/issues/${issue.id}`)).status, 200);
+    assert.ok((await agentStaff.get(`/issues?search=${encodeURIComponent(issueTitle)}`)).text.includes(issueTitle));
+  });
+
+  await t.test("gardener B CANNOT comment on or add photos to gardener A's issue", async () => {
+    const c = await agentB.post(`/issues/${issue.id}/comments`).type('form')
+      .send({ body: 'sneaky', _csrf: csrfB });
+    assert.strictEqual(c.status, 404);
+    const n = await q1('SELECT COUNT(*)::int AS n FROM issue_comments WHERE issue_id = $1', [issue.id]);
+    assert.strictEqual(n.n, 0);
+  });
+
+  await t.test("an issue photo is only servable to people who can see the issue", async () => {
     const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe1]), Buffer.alloc(20)]);
     const uploadRes = await agentA.post(`/issues/${issue.id}/photos?_csrf=${csrfA}`)
       .attach('photos', jpeg, 'issue.jpg');
     assert.strictEqual(uploadRes.status, 302);
     const photo = await q1('SELECT filename FROM photos WHERE issue_id = $1', [issue.id]);
     assert.ok(photo);
+    assert.strictEqual((await agentB.get(`/uploads/${photo.filename}`)).status, 404);
+    assert.strictEqual((await agentStaff.get(`/uploads/${photo.filename}`)).status, 200);
+  });
 
-    const res = await agentB.get(`/uploads/${photo.filename}`);
-    assert.strictEqual(res.status, 200, 'issue photos are team-wide by current design');
+  await t.test("gardener B's visits and sites lists do not show gardener A's jobs; staff's do", async () => {
+    const site = await q1(
+      "INSERT INTO properties (name, address) VALUES ($1, 'Authz Addr 2') RETURNING id, name",
+      [`Authz Contract Site ${Date.now()}`]);
+    await q(`INSERT INTO jobs (property_id, gardener_id, frequency, contract_years, start_date, end_date)
+      VALUES ($1, $2, 'weekly', 1, CURRENT_DATE, CURRENT_DATE + 365)`, [site.id, gardenerAId]);
+    const visitLink = `/visits/${visit.id}"`;
+    assert.ok(!(await agentB.get('/visits?all=1')).text.includes(visitLink));
+    assert.ok((await agentA.get('/visits?all=1')).text.includes(visitLink));
+    assert.ok((await agentStaff.get(`/visits?all=1&gardener_id=${gardenerAId}`)).text.includes(visitLink));
+    const q2 = `/jobs?search=${encodeURIComponent(site.name)}`;
+    const row = `<strong>${site.name}</strong>`;
+    assert.ok(!(await agentB.get(q2)).text.includes(row), 'B must not see A\'s site contract');
+    assert.ok((await agentA.get(q2)).text.includes(row), 'A sees their own site contract');
+    assert.ok((await agentStaff.get(q2)).text.includes(`/jobs/site/${site.id}`));
   });
 
   await t.test('a gardener CANNOT reach /invoices (staff-only)', async () => {

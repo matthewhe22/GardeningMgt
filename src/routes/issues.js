@@ -1,6 +1,7 @@
 const express = require('express');
 const { q, q1 } = require('../db');
 const { isStaff, requireRole } = require('../auth');
+const { gardenerIssueCond, gardenerPropertyCond, canSeeIssue } = require('../access');
 const { assertCsrf } = require('../csrf');
 const { logActivity } = require('../activity');
 const { upload, savePhoto } = require('../upload');
@@ -9,11 +10,14 @@ const { pageParam, paginate } = require('../pagination');
 
 const router = express.Router();
 
+// Staff see every issue; a gardener only sees issues on their own work.
 router.get('/', asyncHandler(async (req, res) => {
+  const staff = isStaff(req.user);
   const status = req.query.status || '';
   const search = (req.query.search || '').trim();
   const cond = [];
   const args = [];
+  if (!staff) { args.push(req.user.id); cond.push(gardenerIssueCond('i', args.length)); }
   if (status) { args.push(status); cond.push(`i.status = $${args.length}`); }
   if (search) { args.push(`%${search}%`); cond.push(`(i.title ILIKE $${args.length} OR p.name ILIKE $${args.length})`); }
   const page = pageParam(req);
@@ -29,8 +33,9 @@ router.get('/', asyncHandler(async (req, res) => {
       i.created_at DESC`;
   const [issuesPage, properties, users] = await Promise.all([
     paginate(q, issuesSql, args, page),
-    q('SELECT id, name FROM properties ORDER BY name'),
-    q('SELECT id, name FROM users WHERE active ORDER BY name'),
+    staff ? q('SELECT id, name FROM properties ORDER BY name')
+      : q(`SELECT p.id, p.name FROM properties p WHERE ${gardenerPropertyCond('p.id', 1)} ORDER BY p.name`, [req.user.id]),
+    staff ? q('SELECT id, name FROM users WHERE active ORDER BY name') : [],
   ]);
   const { rows: issues, total, totalPages } = issuesPage;
   // Carried over from a visit page's "Report an issue at this site" link, so
@@ -39,7 +44,7 @@ router.get('/', asyncHandler(async (req, res) => {
   const presetPropertyId = Number(req.query.property_id) || null;
   const presetVisitId = Number(req.query.visit_id) || null;
   res.render('issues/index', {
-    title: 'Issues', issues, properties, users, status, search, staff: isStaff(req.user), page, total, totalPages,
+    title: 'Issues', issues, properties, users, status, search, staff, page, total, totalPages,
     presetPropertyId, presetVisitId,
   });
 }));
@@ -49,9 +54,16 @@ router.get('/', asyncHandler(async (req, res) => {
 // same request instead of navigating to the issue afterwards to add one.
 router.post('/', upload.array('photos', 10), asyncHandler(async (req, res) => {
   assertCsrf(req);
-  const { title, description, property_id, priority, assigned_to, visit_id } = req.body;
+  const { title, description, property_id, priority, visit_id } = req.body;
   if (!(title || '').trim()) return res.redirect('/issues');
-  const visitId = Number(visit_id) || null;
+  const staff = isStaff(req.user);
+  // Only staff assign issues; a gardener can only link one of their own visits.
+  const assigned_to = staff ? req.body.assigned_to : null;
+  let visitId = Number(visit_id) || null;
+  if (visitId && !staff) {
+    const v = await q1('SELECT id FROM visits WHERE id = $1 AND gardener_id = $2', [visitId, req.user.id]);
+    if (!v) visitId = null;
+  }
   const { id } = await q1(`
     INSERT INTO issues (title, description, property_id, visit_id, priority, reported_by, assigned_to)
     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
@@ -76,7 +88,9 @@ router.get('/:id', asyncHandler(async (req, res) => {
     LEFT JOIN users r ON r.id = i.reported_by
     LEFT JOIN users a ON a.id = i.assigned_to
     WHERE i.id = $1`, [req.params.id]);
-  if (!issue) return res.status(404).render('error', { title: 'Not found', message: 'Issue not found.' });
+  if (!issue || !(await canSeeIssue(req.user, issue.id))) {
+    return res.status(404).render('error', { title: 'Not found', message: 'Issue not found.' });
+  }
   const [comments, photos, users] = await Promise.all([
     q(`
     SELECT c.*, u.name AS author_name FROM issue_comments c
@@ -117,7 +131,9 @@ router.post('/:id/comments', asyncHandler(async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) return res.status(404).render('error', { title: 'Not found', message: 'Issue not found.' });
   const issue = await q1('SELECT id FROM issues WHERE id = $1', [id]);
-  if (!issue) return res.status(404).render('error', { title: 'Not found', message: 'Issue not found.' });
+  if (!issue || !(await canSeeIssue(req.user, id))) {
+    return res.status(404).render('error', { title: 'Not found', message: 'Issue not found.' });
+  }
   const body = (req.body.body || '').trim();
   if (body) {
     await q('INSERT INTO issue_comments (issue_id, user_id, body) VALUES ($1, $2, $3)',
@@ -132,7 +148,9 @@ router.post('/:id/photos', upload.array('photos', 10), asyncHandler(async (req, 
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) return res.status(404).render('error', { title: 'Not found', message: 'Issue not found.' });
   const issue = await q1('SELECT id FROM issues WHERE id = $1', [id]);
-  if (!issue) return res.status(404).render('error', { title: 'Not found', message: 'Issue not found.' });
+  if (!issue || !(await canSeeIssue(req.user, id))) {
+    return res.status(404).render('error', { title: 'Not found', message: 'Issue not found.' });
+  }
   let saved = 0;
   let badPhoto = false;
   for (const f of req.files || []) {

@@ -892,11 +892,10 @@ router.post('/:id/photos', upload.array('photos', 10), asyncHandler(async (req, 
   const visit = await getVisit(req.params.id);
   if (!visit || !canSeeVisit(req.user, visit)) return res.redirect('/visits');
   if (visit.status === 'approved') return res.redirect(`/visits/${visit.id}?error=approval`);
-  const shared = req.body.shared === 'on' || req.body.shared === '1';
   let saved = 0;
   let badPhoto = false;
   for (const f of req.files || []) {
-    const filename = await savePhoto(f, { caption: req.body.caption || null, visitId: visit.id, userId: req.user.id, shared });
+    const filename = await savePhoto(f, { caption: req.body.caption || null, visitId: visit.id, userId: req.user.id });
     if (filename) saved++; else badPhoto = true;
   }
   if (saved) {

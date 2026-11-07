@@ -1,6 +1,6 @@
 <%- include('../partials/header') %>
 <h1>Photo gallery</h1>
-<p class="muted">Photos shared by the team. Every photo carries its upload timestamp. Upload photos from a job or issue page.</p>
+<p class="muted"><%= staff ? 'Photos from every job.' : 'Photos from your jobs.' %> Every photo carries its upload timestamp. Upload photos from a job or issue page.</p>
 
 <% if (staff) { %>
 <div class="card">
