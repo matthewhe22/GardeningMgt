@@ -61,6 +61,10 @@ const pool = new Pool({
   max: process.env.DB_POOL_MAX
     ? Number(process.env.DB_POOL_MAX)
     : (process.env.VERCEL ? (usingPooler ? 8 : 2) : 10),
+  // Without this, a request waiting for a connection from an exhausted pool
+  // waits forever — one stuck holder then hangs the whole app. Fail the
+  // request instead so the rest keep working.
+  connectionTimeoutMillis: Number(process.env.DB_CONNECT_TIMEOUT_MS) || 10000,
 });
 
 // Every timestamp column in SCHEMA is a naive TIMESTAMP (no zone), and
@@ -221,7 +225,7 @@ CREATE TABLE IF NOT EXISTS issues (
   title       TEXT NOT NULL,
   description TEXT,
   property_id INTEGER REFERENCES properties(id),
-  visit_id    INTEGER REFERENCES visits(id),
+  visit_id    INTEGER REFERENCES visits(id) ON DELETE SET NULL,
   priority    TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('low','medium','high','urgent')),
   status      TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','in_progress','resolved','closed')),
   reported_by INTEGER REFERENCES users(id),
@@ -317,7 +321,7 @@ CREATE TABLE IF NOT EXISTS settings (
 CREATE TABLE IF NOT EXISTS notifications (
   id         SERIAL PRIMARY KEY,
   user_id    INTEGER NOT NULL REFERENCES users(id),
-  visit_id   INTEGER REFERENCES visits(id),
+  visit_id   INTEGER REFERENCES visits(id) ON DELETE SET NULL,
   type       TEXT NOT NULL DEFAULT 'reminder',
   message    TEXT NOT NULL,
   read_at    TIMESTAMP,
@@ -468,7 +472,7 @@ function ensureCriticalSchema() {
 
 // Bump when SCHEMA or the migrations below change, so existing databases
 // re-run the DDL exactly once instead of on every serverless cold start.
-const SCHEMA_VERSION = '14';
+const SCHEMA_VERSION = '15';
 
 /**
  * Numeric, forward-only comparison of a stored schema_version against this
@@ -554,6 +558,17 @@ async function runMigrations() {
         (status IN ('scheduled','in_progress','completed','approved','skipped','cancelled'));
     END IF;
   END $$`);
+  // A reminder notification or a linked issue must not block deleting a
+  // future visit (a contract's schedule rebuild does that) — keep the row,
+  // just drop the link. Older databases were created without ON DELETE.
+  for (const [table, fk] of [['notifications', 'notifications_visit_id_fkey'], ['issues', 'issues_visit_id_fkey']]) {
+    await pool.query(`DO $$ BEGIN
+      IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '${fk}' AND confdeltype <> 'n') THEN
+        ALTER TABLE ${table} DROP CONSTRAINT ${fk};
+        ALTER TABLE ${table} ADD CONSTRAINT ${fk} FOREIGN KEY (visit_id) REFERENCES visits(id) ON DELETE SET NULL;
+      END IF;
+    END $$`);
+  }
   // Set the first time a visit reaches a terminal state and schedules the
   // next occurrence, so reopening/re-completing never books a duplicate.
   await pool.query('ALTER TABLE visits ADD COLUMN IF NOT EXISTS advanced_at TIMESTAMP');

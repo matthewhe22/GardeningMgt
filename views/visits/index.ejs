@@ -14,6 +14,8 @@
 <% if (locals.flash) { %>
   <p class="alert alert-error">
     <% if (flash === 'gardener') { %>The gardener must be an active gardener.
+    <% } else if (flash === 'bulklocked') { %><%= Number(locals.skipped) || 'Some' %> selected visit(s) were left unchanged because they're completed or approved — open them individually if they really need changing.
+    <% } else if (flash === 'dateclash') { %>Nothing was moved: two of the selected visits belong to the same site contract and can't both be booked on that day.
     <% } else { %>Some details were invalid — please check and try again.<% } %>
   </p>
 <% } %>

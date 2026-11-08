@@ -139,7 +139,7 @@ router.get('/', asyncHandler(async (req, res) => {
     date, upto, showAll, status, from, to, search, gardenerId, today: todayStr,
     canReorder: !!gardenerId && !filtered, page, totalPages,
     total: totalDays, totalLabel: totalDays === 1 ? 'day' : 'days', totalVisits,
-    flash: req.query.error || null,
+    flash: req.query.error || null, skipped: Number(req.query.skipped) || null,
   });
 }));
 
@@ -207,8 +207,9 @@ router.post('/optimize', asyncHandler(async (req, res) => {
 // Not a calendar view; just applies one of two actions to a checked set of
 // visit ids and logs a single summarizing activity entry (not one per visit).
 router.post('/bulk', requireRole('supervisor'), asyncHandler(async (req, res) => {
-  const ids = [].concat(req.body.visit_ids || []).map(Number).filter(Number.isInteger);
+  const ids = [...new Set([].concat(req.body.visit_ids || []).map(Number).filter(Number.isInteger))];
   if (!ids.length) return res.redirect('/visits?error=invalid');
+  let skipped = 0;
 
   if (req.body.bulk_action === 'reassign') {
     // Same active-gardener check as the single-visit create/update routes above.
@@ -218,21 +219,33 @@ router.post('/bulk', requireRole('supervisor'), asyncHandler(async (req, res) =>
       if (!g) return res.redirect('/visits?error=gardener');
       gardener = g;
     }
-    const updated = await q('UPDATE visits SET gardener_id = $1 WHERE id = ANY($2::int[]) RETURNING id',
+    // Completed (awaiting review) and approved (paid) visits are locked, the
+    // same as on the single-visit page — they're skipped, not changed.
+    const updated = await q(`UPDATE visits SET gardener_id = $1
+      WHERE id = ANY($2::int[]) AND status NOT IN ('completed','approved') RETURNING id`,
       [gardener ? gardener.id : null, ids]);
+    skipped = ids.length - updated.length;
     await logActivity(req.user.id, 'visit.bulk_reassign', 'visit', null,
       `Reassigned ${updated.length} visit(s) to ${gardener ? gardener.name : 'Unassigned'}`);
   } else if (req.body.bulk_action === 'reschedule') {
     const date = req.body.scheduled_date;
     if (!isValidDate(date)) return res.redirect('/visits?error=invalid');
-    const updated = await q('UPDATE visits SET scheduled_date = $1, route_order = NULL WHERE id = ANY($2::int[]) RETURNING id',
-      [date, ids]);
+    let updated;
+    try {
+      updated = await q(`UPDATE visits SET scheduled_date = $1, route_order = NULL
+        WHERE id = ANY($2::int[]) AND status NOT IN ('completed','approved') RETURNING id`, [date, ids]);
+    } catch (e) {
+      // Two visits of the same contract can't both be booked on one day.
+      if (e.code === '23505') return res.redirect('/visits?error=dateclash');
+      throw e;
+    }
+    skipped = ids.length - updated.length;
     await logActivity(req.user.id, 'visit.bulk_reschedule', 'visit', null,
       `Moved ${updated.length} visit(s) to ${date}`);
   } else {
     return res.redirect('/visits?error=invalid');
   }
-  res.redirect('/visits');
+  res.redirect(skipped ? `/visits?error=bulklocked&skipped=${skipped}` : '/visits');
 }));
 
 // Manually nudge a visit up/down within its day's visiting sequence.
@@ -327,6 +340,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
     isAdmin: req.user.role === 'admin',
     openItem: Number(req.query.item) || null,
     staff: isStaff(req.user), flash: req.query.error || null, warning: req.query.warning || null,
+    otherRunning: Number(req.query.other) || null,
     longRunning,
   });
 }));
@@ -360,13 +374,13 @@ router.post('/:id/update', requireRole('supervisor'), asyncHandler(async (req, r
   const completing = status === 'completed' && visit.status !== 'completed';
   await q(`
     UPDATE visits SET gardener_id = $1, scheduled_date = $2, time_window = $3, status = $4, notes = $5,
-      duration_minutes = $6,
+      duration_minutes = COALESCE($6, duration_minutes),
       finished_at = CASE WHEN $4 = 'completed' AND finished_at IS NULL THEN now() ELSE finished_at END,
       approved_at = CASE WHEN $4 = 'approved' THEN approved_at END,
       approved_by = CASE WHEN $4 = 'approved' THEN approved_by END
     WHERE id = $7`,
     [gardener, scheduled_date, time_window || null, status, notes || null,
-      duration_minutes ? Math.max(0, Number(duration_minutes) || 0) : visit.duration_minutes, visit.id]);
+      duration_minutes ? Math.max(0, Number(duration_minutes) || 0) : null, visit.id]);
   await logActivity(req.user.id, 'visit.update', 'visit', visit.id,
     `Updated visit #${visit.id} (status: ${visit.status} -> ${status})`);
   // Advance the recurring contract when this occurrence reaches a terminal state.
@@ -484,15 +498,33 @@ router.post('/:id/timer/start', asyncHandler(async (req, res) => {
   // Starting a future visit early would leave its date wrong and double-book
   // the next occurrence; the gardener moves it to today first.
   if (!isStaff(req.user) && visit.scheduled_date > today()) return res.redirect(`/visits/${visit.id}?error=future`);
-  const reopening = visit.status === 'completed';
+  // A skipped/cancelled visit has already booked the next occurrence; staff
+  // must set it back to scheduled first rather than restarting it here.
+  if (['skipped', 'cancelled'].includes(visit.status)) return res.redirect(`/visits/${visit.id}?error=closed`);
+  // One job at a time: two running timers would both count the same minutes.
+  if (!isStaff(req.user) && visit.status !== 'in_progress') {
+    const other = await q1(`SELECT id FROM visits WHERE gardener_id = $1 AND status = 'in_progress' AND id <> $2
+      ORDER BY started_at LIMIT 1`, [req.user.id, visit.id]);
+    if (other) return res.redirect(`/visits/${visit.id}?error=running&other=${other.id}`);
+  }
+  // The status rules are re-checked inside the UPDATE (not just on the read
+  // above), so a Start racing a Stop can't reopen a just-completed job for a
+  // gardener. Starting an already-running job is a no-op that keeps its
+  // original start time; staff reopening a completed job keep it too.
+  const allowed = isStaff(req.user) ? ['scheduled', 'in_progress', 'completed'] : ['scheduled', 'in_progress'];
   const started = await q1(`
-    UPDATE visits SET started_at = CASE WHEN $2 AND started_at IS NOT NULL THEN started_at ELSE now() END,
+    WITH cur AS (SELECT id, status FROM visits WHERE id = $1 FOR UPDATE)
+    UPDATE visits v SET
+      started_at = CASE WHEN cur.status = 'scheduled' OR v.started_at IS NULL THEN now() ELSE v.started_at END,
       finished_at = NULL, status = 'in_progress'
-    WHERE id = $1 AND status <> 'approved' RETURNING id`, [visit.id, reopening]);
-  if (!started) return res.redirect(`/visits/${visit.id}?error=approval`);
-  const gps = await recordGps(visit.id, req.user.id, req.body, 'start');
-  await logActivity(req.user.id, 'visit.timer.start', 'visit', visit.id,
-    `Started job timer on visit #${visit.id}${gps ? ' (GPS recorded)' : ''}`);
+    FROM cur WHERE v.id = cur.id AND cur.status = ANY($2::text[])
+    RETURNING cur.status AS was`, [visit.id, allowed]);
+  if (!started) return res.redirect(`/visits/${visit.id}?error=${visit.status === 'approved' ? 'approval' : 'locked'}`);
+  if (started.was !== 'in_progress') {
+    const gps = await recordGps(visit.id, req.user.id, req.body, 'start');
+    await logActivity(req.user.id, 'visit.timer.start', 'visit', visit.id,
+      `${started.was === 'completed' ? 'Reopened' : 'Started'} job timer on visit #${visit.id}${gps ? ' (GPS recorded)' : ''}`);
+  }
   res.redirect(`/visits/${visit.id}`);
 }));
 

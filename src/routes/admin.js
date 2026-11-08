@@ -346,8 +346,12 @@ router.get('/settings', requireRole(), asyncHandler(async (req, res) => {
 }));
 
 router.post('/settings', requireRole(), asyncHandler(async (req, res) => {
+  // The Settings page has one form per card (OneDrive, invoice, email,
+  // PropertyIQ), each posting only its own fields. Only touch keys that were
+  // actually submitted, so saving one card never clears the others.
   for (const key of ALL_SETTING_KEYS) {
-    const value = (req.body[key] || '').trim();
+    if (!Object.prototype.hasOwnProperty.call(req.body, key)) continue;
+    const value = String(req.body[key] ?? '').trim();
     // Leave the stored secret untouched when the masked placeholder comes back.
     if (MASKED_SETTING_KEYS.has(key) && value === '********') continue;
     await setSetting(key, value || null);

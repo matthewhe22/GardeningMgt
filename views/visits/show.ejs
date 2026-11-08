@@ -36,6 +36,10 @@
     <p class="alert alert-ok">✔ Job report emailed to the admins.</p>
   <% } else if (locals.flash === 'emailfailed') { %>
     <p class="alert alert-error">⚠ The job report email couldn’t be sent — check the email setup on Settings (SMTP), or the Activity log for details.</p>
+  <% } else if (locals.flash === 'running') { %>
+    <p class="alert alert-error">⚠ You already have a job running<% if (locals.otherRunning) { %> (<a href="/visits/<%= otherRunning %>">open it</a>)<% } %>. Finish it before starting this one.</p>
+  <% } else if (locals.flash === 'closed') { %>
+    <p class="alert alert-error">⚠ This visit was skipped or cancelled. The office can set it back to scheduled if it should go ahead.</p>
   <% } else if (locals.flash === 'future') { %>
     <p class="alert alert-error">⚠ This visit is booked for <%= visit.scheduled_date %>. To do it today, first move it to today (Change visit date), then start.</p>
   <% } else if (locals.flash === 'notstarted') { %>

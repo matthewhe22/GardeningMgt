@@ -39,7 +39,7 @@ async function sendRemindersForDateWith(deps, date, opts = {}) {
   const { withTransaction: withTx, sendSms, sendEmail, logActivity: log } = deps;
   const { actorId = null, force = false } = opts;
 
-  return withTx(async (tx) => {
+  const sent = await withTx(async (tx) => {
     // Join the gardener's contact details into the claim so there's no
     // per-visit user lookup (was an N+1) when sending SMS/email. FOR UPDATE
     // OF v ... SKIP LOCKED claims exclusively without setting
@@ -79,11 +79,16 @@ async function sendRemindersForDateWith(deps, date, opts = {}) {
     // both been attempted — mark these visits as reminded.
     const ids = claimed.map((v) => v.id);
     await tx.q('UPDATE visits SET reminder_sent_at = now() WHERE id = ANY($1)', [ids]);
-
-    await log(actorId, actorId ? 'reminder.bulk' : 'reminder.auto', 'visit', null,
-      `Sent ${claimed.length} visit reminder(s) for ${date}`);
     return claimed.length;
   });
+  // Logged after commit: logActivity takes its own pool connection, and asking
+  // for a second connection while holding this transaction's deadlocks a small
+  // pool (two overlapping runs on Vercel's pool of 2 hung the whole app).
+  if (sent) {
+    await log(actorId, actorId ? 'reminder.bulk' : 'reminder.auto', 'visit', null,
+      `Sent ${sent} visit reminder(s) for ${date}`);
+  }
+  return sent;
 }
 
 /**

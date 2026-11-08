@@ -4,6 +4,10 @@
 <p class="alert alert-error">Can't set that status: another live invoice already exists for this visit. Void or update that one first.</p>
 <% } else if (error === 'hasitems') { %>
 <p class="alert alert-error">Can't delete this invoice: it already has line items. Void it instead.</p>
+<% } else if (error === 'locked') { %>
+<p class="alert alert-error">Line items can only be changed while the invoice is a draft.</p>
+<% } else if (error === 'transition') { %>
+<p class="alert alert-error">That status change isn't allowed. A paid invoice can only go back to "sent" or be voided.</p>
 <% } else if (error === 'notdraft') { %>
 <p class="alert alert-error">Only a draft invoice can be deleted. Void it instead.</p>
 <% } %>

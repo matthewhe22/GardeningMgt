@@ -77,7 +77,26 @@ router.post('/:id/delete', asyncHandler(async (req, res) => {
   res.redirect('/invoices?deleted=1');
 }));
 
+// Line items can only change while the invoice is a draft — once it's been
+// sent, paid or voided its amount is a record, not a working copy.
+async function draftOnly(req, res) {
+  const inv = await q1('SELECT status FROM invoices WHERE id = $1', [Number(req.params.id) || 0]);
+  if (!inv) { res.redirect('/invoices'); return false; }
+  if (inv.status !== 'draft') { res.redirect(`/invoices/${Number(req.params.id)}?error=locked`); return false; }
+  return true;
+}
+
+// Allowed status changes. A paid invoice can be corrected back to "sent"
+// (clearing the paid date) or voided, but never silently back to a draft.
+const TRANSITIONS = {
+  draft: ['sent', 'paid', 'void'],
+  sent: ['draft', 'paid', 'void'],
+  paid: ['sent', 'void'],
+  void: ['draft'],
+};
+
 router.post('/:id/items', asyncHandler(async (req, res) => {
+  if (!(await draftOnly(req, res))) return;
   const { description, quantity, unit_price } = req.body;
   if ((description || '').trim()) {
     // Clamp to non-negative so a stray '-5' can't create negative money.
@@ -92,6 +111,7 @@ router.post('/:id/items', asyncHandler(async (req, res) => {
 }));
 
 router.post('/:id/items/:itemId/delete', asyncHandler(async (req, res) => {
+  if (!(await draftOnly(req, res))) return;
   await q('DELETE FROM invoice_items WHERE id = $1 AND invoice_id = $2', [req.params.itemId, req.params.id]);
   await logActivity(req.user.id, 'invoice.item.remove', 'invoice', Number(req.params.id),
     `Removed a line from invoice #${req.params.id}`);
@@ -100,13 +120,21 @@ router.post('/:id/items/:itemId/delete', asyncHandler(async (req, res) => {
 
 router.post('/:id/status', asyncHandler(async (req, res) => {
   const status = req.body.status;
-  if (!['draft', 'sent', 'paid', 'void'].includes(status)) return res.redirect(`/invoices/${req.params.id}`);
+  const id = Number(req.params.id) || 0;
+  if (!Object.prototype.hasOwnProperty.call(TRANSITIONS, status)) return res.redirect(`/invoices/${id}`);
+  const inv = await q1('SELECT status FROM invoices WHERE id = $1', [id]);
+  if (!inv) return res.redirect('/invoices');
+  if (inv.status === status) return res.redirect(`/invoices/${id}`);
+  if (!TRANSITIONS[inv.status].includes(status)) return res.redirect(`/invoices/${id}?error=transition`);
   try {
-    await q(`
+    // Re-check the current status in the UPDATE so a concurrent change can't
+    // slip an illegal transition through; leaving "paid" clears the paid date.
+    const row = await q1(`
       UPDATE invoices SET status = $1,
         issued_at = CASE WHEN $1 = 'sent' AND issued_at IS NULL THEN now() ELSE issued_at END,
-        paid_at   = CASE WHEN $1 = 'paid' THEN now() ELSE paid_at END
-      WHERE id = $2`, [status, req.params.id]);
+        paid_at   = CASE WHEN $1 = 'paid' THEN now() ELSE NULL END
+      WHERE id = $2 AND status = $3 RETURNING id`, [status, id, inv.status]);
+    if (!row) return res.redirect(`/invoices/${id}?error=transition`);
   } catch (e) {
     // Un-voiding this invoice while another live invoice already exists for
     // the same visit (uq_invoices_visit_open) — send back a friendly error

@@ -138,3 +138,12 @@ test('a crash between claim and final commit leaves visits reclaimable, not lost
   assert.ok(retryCalls.txQueries.some((c) => /^\s*UPDATE visits/i.test(c.sql)));
   assert.strictEqual(retryCalls.committed, true);
 });
+
+test('logs activity only after the transaction commits (no second pool connection while holding the tx)', async () => {
+  const { deps, calls } = fakeDeps({ claimedRows: [SAMPLE_ROW(1)] });
+  let committedWhenLogged = null;
+  deps.logActivity = async () => { committedWhenLogged = calls.committed; };
+  await sendRemindersForDateWith(deps, '2026-07-04');
+  assert.strictEqual(committedWhenLogged, true,
+    'logActivity uses its own pool connection; calling it inside the transaction deadlocks a pool of 2');
+});

@@ -186,8 +186,13 @@ async function rebuildSchedule(jobId) {
   return withTransaction(async (tx) => {
     const job = await tx.q1('SELECT * FROM jobs WHERE id = $1 FOR UPDATE', [jobId]);
     const fromDay = businessToday();
+    // Only untouched occurrences are replaced: anything someone has worked
+    // on or annotated (started, photos, comments, invoice, a task, a linked
+    // issue, notes) is kept rather than silently destroyed.
     await tx.q(`DELETE FROM visits v WHERE v.job_id = $1 AND v.status = 'scheduled' AND v.scheduled_date >= $2
-      AND v.started_at IS NULL
+      AND v.started_at IS NULL AND v.notes IS NULL
+      AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.visit_id = v.id)
+      AND NOT EXISTS (SELECT 1 FROM issues i WHERE i.visit_id = v.id)
       AND NOT EXISTS (SELECT 1 FROM photos ph WHERE ph.visit_id = v.id)
       AND NOT EXISTS (SELECT 1 FROM visit_comments c WHERE c.visit_id = v.id)
       AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.visit_id = v.id)`, [jobId, fromDay]);

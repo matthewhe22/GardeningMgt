@@ -54,8 +54,8 @@ async function createInvoiceForVisit(visitId, { userId = null } = {}) {
     [visitId]);
   if (!visit) return { status: 'not_found' };
   // A job that hasn't happened yet has nothing to bill — block invoicing
-  // until the visit is actually completed.
-  if (visit.status !== 'completed') return { status: 'not_completed' };
+  // until the visit is actually completed (or completed and approved).
+  if (!['completed', 'approved'].includes(visit.status)) return { status: 'not_completed' };
   // Don't create a second live invoice for the same job (voided ones don't
   // count). This check-then-insert still has a race window, closed below by
   // the uq_invoices_visit_open unique index + a 23505 catch.
