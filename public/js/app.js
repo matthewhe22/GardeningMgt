@@ -539,7 +539,6 @@ async function uploadLivePhotos(form) {
     check_id: form.dataset.checkId || '',
     task_id: form.dataset.taskId || '',
     caption: form.querySelector('[name=caption]') ? form.querySelector('[name=caption]').value : '',
-    shared: form.querySelector('[name=shared]') && form.querySelector('[name=shared]').checked ? 'on' : '',
   };
   const total = files.length;
   let done = 0;

@@ -953,12 +953,12 @@ async function resolvePhotoTarget(visit, { check_id: checkId, task_id: taskId })
 
 /** savePhoto()/insertPhotoRow() options for a job photo of the given target. */
 function jobPhotoOpts(visit, user, target, body, takenAt) {
-  // Evidence photos (checklist item / task) stay between the gardener and the
-  // office (not the team gallery); general photos follow the share toggle.
+  // Job photos are only visible to the job's gardener, the uploader and staff
+  // (see photoAllowed in server.js); there is no team-sharing option any more.
   if (target.check) return { visitId: visit.id, scopeCheckId: target.check.id, userId: user.id, caption: target.check.title, shared: false, takenAt };
   if (target.task) return { visitId: visit.id, taskId: target.task.id, userId: user.id, caption: target.task.title, shared: false, takenAt };
   return { visitId: visit.id, userId: user.id, caption: String(body.caption || '').slice(0, 500) || null,
-    shared: body.shared === 'on' || body.shared === '1' || body.shared === true, takenAt };
+    shared: false, takenAt };
 }
 
 const targetLabel = (t) => (t.check ? ` for "${t.check.title}"` : t.task ? ` for task "${t.task.title}"` : '');
