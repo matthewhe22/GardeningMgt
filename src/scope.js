@@ -58,7 +58,7 @@ async function loadChecks(visitId) {
     WHERE c.visit_id = $1 ORDER BY c.position, c.id`, [visitId]);
   if (!checks.length) return checks;
   const photos = await q(`
-    SELECT id, filename, mime, created_at, scope_check_id FROM photos
+    SELECT id, filename, mime, created_at, taken_at, scope_check_id FROM photos
     WHERE scope_check_id = ANY($1) ORDER BY created_at`, [checks.map((c) => c.id)]);
   const by = {};
   for (const ph of photos) (by[ph.scope_check_id] ||= []).push(ph);
@@ -73,4 +73,10 @@ async function loadChecks(visitId) {
 const isResolved = (c) => c.scope_id == null // item removed from the job's scope mid-visit
   || c.done || !!(c.comment && c.comment.trim());
 
-module.exports = { MAX_SCOPES, LOCKED, loadJobScopes, syncChecks, loadChecks, isResolved };
+/**
+ * Every item still in the job's scope needs at least one evidence photo
+ * before the job can be completed (ticked done or explained alike).
+ */
+const needsPhoto = (c) => c.scope_id != null && !(c.photos && c.photos.length);
+
+module.exports = { MAX_SCOPES, LOCKED, loadJobScopes, syncChecks, loadChecks, isResolved, needsPhoto };

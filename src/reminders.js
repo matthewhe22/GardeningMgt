@@ -178,6 +178,7 @@ function startReminderScheduler() {
     const sent = await sendRemindersForDate(today);
     await backfillSchedules();
     await pruneOldRecords();
+    try { await require('./storage').sweepPending(); } catch (e) { console.warn('[reminders] sweeping pending uploads failed:', e.message); }
     if (sent) console.log(`[reminders] auto-sent ${sent} reminder(s) for ${today}`);
   }, { timezone: TZ });
 }

@@ -10,7 +10,8 @@
     "migrate:photos": "node scripts/migrate-photos-to-s3.js",
     "backup": "node scripts/backup.js",
     "test": "node --test",
-    "test:integration": "node --test --test-concurrency=1 \"test/integration/**/*.test.js\""
+    "test:integration": "node --test --test-concurrency=1 \"test/integration/**/*.test.js\"",
+    "storage:setup": "node scripts/storage-setup.js"
   },
   "keywords": [],
   "author": "",

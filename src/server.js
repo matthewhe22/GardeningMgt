@@ -71,6 +71,7 @@ app.get('/health', asyncHandler(async (req, res) => {
   }
 }));
 
+const UPLOAD_ORIGINS = storage.directUploads() ? storage.uploadOrigins().map((o) => ` ${o}`).join('') : '';
 // Baseline security headers. The only external origin is the OpenStreetMap
 // tile server, used for the job-location map snapshot (img-src only).
 app.use((req, res, next) => {
@@ -79,6 +80,8 @@ app.use((req, res, next) => {
   res.set('Referrer-Policy', 'same-origin');
   res.set('Content-Security-Policy',
     "default-src 'self'; img-src 'self' data: blob: https://tile.openstreetmap.org; " +
+    // Job photos are PUT straight to the object-storage bucket (presigned URLs).
+    `connect-src 'self'${UPLOAD_ORIGINS}; ` +
     "style-src 'self' 'unsafe-inline'; " +
     "script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'self'");
   if (isProdHttps) res.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
@@ -166,7 +169,10 @@ app.get('/cron/reminders', asyncHandler(async (req, res) => {
   // over a few days without ever risking a request timeout.
   const { geocodeMissingBatch } = require('./geocode');
   const geocoded = await geocodeMissingBatch(Number(process.env.GEOCODE_BATCH || 5));
-  res.json({ ok: true, date: today, sent, rolled, pruned, geocoded });
+  // Unfinished direct photo uploads (dropped connections) left under pending/.
+  let sweptUploads = 0;
+  try { sweptUploads = await storage.sweepPending(); } catch (e) { console.warn('[cron] sweeping pending uploads failed:', e.message); }
+  res.json({ ok: true, date: today, sent, rolled, pruned, geocoded, sweptUploads });
 }));
 
 // CSRF protection on all state-changing requests (after session is set up).
@@ -255,6 +261,13 @@ app.use((err, req, res, next) => {
   // (instead of a dead-end error page the gardener has to navigate back from).
   const uploadErr = err.code === 'LIMIT_FILE_SIZE' || err.code === 'LIMIT_UNEXPECTED_FILE' || err.code === 'LIMIT_FILE_COUNT';
   const onVisit = req.method === 'POST' && /^\/visits\/(\d+)\//.exec(req.path);
+  // The single-photo endpoint is called by fetch() and expects JSON back.
+  if (req.method === 'POST' && /^\/visits\/\d+\/photo$/.test(req.path)) {
+    const msg = err.code === 'LIMIT_FILE_SIZE' ? 'That photo is too large.'
+      : err.code === 'EBADCSRFTOKEN' ? 'Your session expired. Reload the page and try again.'
+        : uploadErr ? 'That file is not a supported photo.' : 'Upload failed. Please try again.';
+    return res.status(err.code === 'LIMIT_FILE_SIZE' ? 413 : err.status || (uploadErr ? 400 : 500)).json({ ok: false, error: msg });
+  }
   if (uploadErr && onVisit) {
     const item = /\/scope\/(\d+)/.exec(req.path);
     return res.redirect(`/visits/${onVisit[1]}?error=upload${item ? `&item=${item[1]}` : ''}`);

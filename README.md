@@ -24,6 +24,7 @@ normal Node.js server.
 | Global scope library (≤20 items + standard photos) → templates (Standard 1, 2…) → apply to all / selected sites | **Scope standards** |
 | Per-site scope adjustment (optional; marks the site “adjusted”) | **Sites** → 📋 scope chip |
 | Gardener checklist: tick / photo / comment per scope item, “View scope standards” | Job page |
+| Live job photos: camera only, only while the job runs, rejected if older than `PHOTO_MAX_AGE_HOURS` (EXIF capture time); every scope item needs a photo before the job can be completed; compressed in the browser to 2560px and uploaded one photo per request (straight to the bucket when object storage is set up); every ad-hoc job task needs a photo too | Job page |
 | Job report emailed to every active admin on completion (photos attached) | Email (needs Resend) |
 | Admin review → **Approve for payment** (status `approved`) | Job page, **Jobs** → Awaiting review |
 | Custom logo (sidebar/top bar) and browser tab favicon, uploaded as an image and re-encoded server-side | **Settings** (admin) |
@@ -68,7 +69,8 @@ Keeping image bytes in Postgres bloats the database and meters egress on every
 view. To offload them to any S3-compatible bucket (Cloudflare R2, AWS S3,
 Supabase Storage, MinIO), set these env vars — when `S3_BUCKET` is present the
 app stores new uploads in the bucket automatically (nothing changes until it
-is set):
+is set). To move the database itself to Sydney, see
+[docs/DB-MOVE-SYDNEY.md](docs/DB-MOVE-SYDNEY.md).
 
 | Variable | Notes |
 |---|---|
@@ -77,9 +79,85 @@ is set):
 | `S3_ENDPOINT` | custom endpoint for R2/Supabase/MinIO (omit for AWS) |
 | `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | credentials |
 | `S3_PREFIX` | optional key prefix (default `photos/`) |
+| `S3_DIRECT_UPLOADS` | set to `0` to keep job photos going through the app instead of straight to the bucket |
+| `S3_UPLOAD_ORIGIN` | override the bucket origin(s) allowed in the page's CSP `connect-src` (comma-separated); normally worked out from the vars above |
 
 To move photos already in the database into the bucket, run once after
-configuring the vars: `npm run migrate:photos`.
+configuring the vars: `npm run migrate:photos`. Each photo is checked in the
+bucket before its database copy is cleared; afterwards run `VACUUM FULL photos;`
+(Supabase SQL editor, quiet time) so the database actually shrinks.
+
+#### Supabase Storage setup (recommended if your database is on Supabase)
+
+Supabase Storage speaks the S3 protocol, so it needs no new account and sits in
+the same region as your database. On a **Pro** plan it includes 100 GB of
+storage and 250 GB of downloads.
+
+1. Supabase → your project → **Storage → Settings → S3 Connection**: note the
+   **Endpoint** (`https://<project-ref>.storage.supabase.co/storage/v1/s3`) and
+   **Region**, then **New access key** and copy the Access Key ID and Secret.
+   These keys bypass row-level security: keep them server-side only (Vercel
+   env vars + your own terminal), never in the browser or the repo.
+2. Vercel → Project → Settings → Environment Variables, then redeploy:
+   `S3_BUCKET=photos`, `S3_ENDPOINT=<the endpoint above>`,
+   `S3_REGION=<the region above, e.g. ap-southeast-2>`, `S3_ACCESS_KEY_ID`,
+   `S3_SECRET_ACCESS_KEY`.
+3. Create the bucket and self-test the real upload path from your machine
+   (same variables exported; the bucket is created **private** if missing):
+   ```bash
+   npm run storage:setup -- https://<your-app-domain>
+   ```
+   Supabase has no bucket CORS or lifecycle settings, so the script skips those.
+   Browser uploads rely on Supabase answering CORS itself; if the preflight line
+   shows ⚠, phones simply upload through the app instead (slower, still works).
+   Unfinished uploads under `photos/pending/` are deleted by the app's daily job.
+4. `npm run migrate:photos`, then `VACUUM FULL photos;` — see above.
+
+#### Cloudflare R2 setup (alternative)
+
+1. Cloudflare dashboard → **R2** → *Create bucket*, e.g. `gardeningmgt-photos`.
+   Set **Location → Specify jurisdiction/hint → Oceania (OC)** — it can't be
+   changed later. Keep public access **off**.
+2. R2 → *Manage API tokens* → create an **Object Read & Write** token limited to
+   that bucket. Note the Access Key ID, Secret Access Key and your account ID.
+3. Vercel → Project → Settings → Environment Variables:
+   `S3_BUCKET=gardeningmgt-photos`,
+   `S3_ENDPOINT=https://<ACCOUNT_ID>.r2.cloudflarestorage.com`, `S3_REGION=auto`,
+   `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`. Redeploy.
+4. Configure CORS + the pending-upload cleanup rule and self-test, from your
+   machine (bucket settings need an **Admin Read & Write** token for this one
+   run — create one temporarily, or use the dashboard settings it prints):
+   ```bash
+   S3_BUCKET=… S3_ENDPOINT=… S3_REGION=auto S3_ACCESS_KEY_ID=… S3_SECRET_ACCESS_KEY=… \
+     npm run storage:setup -- https://<your-app-domain>
+   ```
+   Re-run with `--check-only` any time to verify uploads work end to end.
+5. `npm run migrate:photos` (same variables plus `DATABASE_URL`), then
+   `VACUUM FULL photos;`.
+
+#### Direct uploads from the phone
+
+With a bucket configured, job photos go **straight from the phone to the
+bucket** using short-lived presigned URLs: the app hands out a URL for a
+`pending/` key, the phone uploads to it, and the app then checks the stored
+file (size, real image, EXIF capture time), makes the thumbnail and moves it to
+its final key. Photo bytes no longer pass through the app's request, so the
+host's ~4.5 MB request limit doesn't apply. Two one-time bucket settings:
+
+`npm run storage:setup` applies both of these for you (see above). By hand:
+
+1. **CORS** — allow your app's origin to `PUT` with a `Content-Type` header, e.g.
+   ```json
+   [{ "AllowedOrigins": ["https://your-app.example.com"], "AllowedMethods": ["PUT"],
+      "AllowedHeaders": ["Content-Type"], "MaxAgeSeconds": 3000 }]
+   ```
+2. **Lifecycle rule** — expire objects under `photos/pending/` (your
+   `S3_PREFIX` + `pending/`) after 1 day, to sweep up uploads that were never
+   finished (dropped connection mid-upload).
+
+If CORS isn't set up yet, the phone notices the bucket refusing it and
+automatically falls back to uploading through the app, so nothing breaks in
+the meantime.
 
 ## Backups
 
@@ -132,6 +210,7 @@ Demo accounts (after seeding):
 | `BOOTSTRAP_ADMIN_EMAIL/_PASSWORD` | admin@example.com / admin1234 | First admin on an empty database |
 | `APP_URL` | request origin | Public URL used in email links (job report "Review & approve" button), e.g. `https://gardeningmgt.vercel.app` |
 | `RESEND_API_KEY` / `RESEND_FROM` | unset | Fallback email provider for job reports when SMTP isn't configured in **Settings** |
+| `PHOTO_MAX_AGE_HOURS` | 12 | Oldest capture time (from the photo's EXIF) accepted for a job photo |
 | `BUSINESS_TZ` | Australia/Melbourne | Timezone for the business calendar, reminder scheduling and every timestamp shown to users |
 | `OSRM_URL` | public demo server | Road-distance routing endpoint (OSRM). Falls back to straight-line if unreachable; self-host for production volume — see [docs/OSRM.md](docs/OSRM.md) |
 | `GEOCODER_URL` / `GEOCODER_EMAIL` | Nominatim | Address→coordinates geocoder (used by Sites) |

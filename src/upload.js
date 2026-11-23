@@ -48,7 +48,7 @@ function sniffOk(buf, ext) {
 // on serverless hosts where the local filesystem is not persistent.
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: 10 * 1024 * 1024 }, // = MAX_BYTES
   fileFilter: (req, file, cb) => {
     if (!ALLOWED.has(path.extname(file.originalname).toLowerCase())) {
       const err = new Error('Unsupported image type. Use JPG, PNG, GIF, WEBP or HEIC.');
@@ -60,37 +60,51 @@ const upload = multer({
   },
 });
 
-/** Insert one uploaded file; returns the generated filename key (or null if rejected). */
-async function savePhoto(file, {
+const MAX_BYTES = 10 * 1024 * 1024;
+const MIME_EXT = new Map([...ALLOWED].filter(([e]) => e !== '.jpeg').map(([e, m]) => [m, e]));
+
+function newFilename(ext) {
+  return `${Date.now()}-${crypto.randomBytes(6).toString('hex')}${ext}`;
+}
+
+/**
+ * Record a photo row. `buffer` is the image (for the thumbnail); `inline`
+ * says whether its bytes are stored in Postgres or already in the bucket.
+ * Idempotent on filename (a repeated finalize is a no-op).
+ */
+async function insertPhotoRow({
+  filename, originalName, mime, buffer, inline,
   caption = null, visitId = null, issueId = null, commentId = null,
-  jobScopeId = null, scopeCheckId = null, libraryScopeId = null, userId, shared = true,
+  jobScopeId = null, scopeCheckId = null, libraryScopeId = null, taskId = null, userId, shared = true,
+  takenAt = null,
 }) {
-  const ext = path.extname(file.originalname).toLowerCase();
-  // Content sniff: reject files whose bytes don't match an allowed image type.
-  if (!sniffOk(file.buffer, ext)) return null;
-  const filename = `${Date.now()}-${crypto.randomBytes(6).toString('hex')}${ext}`;
-  const mime = ALLOWED.get(ext) || 'application/octet-stream';
-  // Thumbnail generation reads the original buffer before it's potentially
-  // pushed to object storage below, so this needs the pre-upload bytes.
-  const thumbData = await makeThumbnail(file.buffer);
-  // With object storage on, push the bytes to the bucket and keep an empty
-  // buffer in `data` (the marker the serve path uses); otherwise store inline.
   // The (small) thumbnail always stays in Postgres regardless of storage mode
   // — cheap enough to keep the DB small while still avoiding a second
   // bucket round-trip on every gallery page view.
-  let data = file.buffer;
-  if (storage.enabled()) {
-    await storage.putObject(filename, file.buffer, mime);
-    data = Buffer.alloc(0);
-  }
+  const thumbData = await makeThumbnail(buffer);
   await pool.query(
     `INSERT INTO photos (filename, original_name, mime, data, thumb_data, caption, visit_id, issue_id, visit_comment_id,
-                         job_scope_id, scope_check_id, library_scope_id, uploaded_by, shared)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
-    [filename, file.originalname, mime, data, thumbData, caption, visitId, issueId, commentId,
-      jobScopeId, scopeCheckId, libraryScopeId, userId, shared]
+                         job_scope_id, scope_check_id, library_scope_id, uploaded_by, shared, taken_at, task_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+             ($15::timestamptz AT TIME ZONE 'UTC'), $16)
+     ON CONFLICT (filename) DO NOTHING`,
+    [filename, originalName, mime, inline ? buffer : Buffer.alloc(0), thumbData, caption, visitId, issueId, commentId,
+      jobScopeId, scopeCheckId, libraryScopeId, userId, shared, takenAt ? takenAt.toISOString() : null, taskId]
   );
   return filename;
 }
 
-module.exports = { upload, savePhoto, sniffOk, makeThumbnail };
+/** Insert one uploaded file; returns the generated filename key (or null if rejected). */
+async function savePhoto(file, opts) {
+  const ext = path.extname(file.originalname).toLowerCase();
+  // Content sniff: reject files whose bytes don't match an allowed image type.
+  if (!sniffOk(file.buffer, ext)) return null;
+  const filename = newFilename(ext);
+  const mime = ALLOWED.get(ext) || 'application/octet-stream';
+  // With object storage on, push the bytes to the bucket and keep an empty
+  // buffer in `data` (the marker the serve path uses); otherwise store inline.
+  if (storage.enabled()) await storage.putObject(filename, file.buffer, mime);
+  return insertPhotoRow({ ...opts, filename, originalName: file.originalname, mime, buffer: file.buffer, inline: !storage.enabled() });
+}
+
+module.exports = { upload, savePhoto, insertPhotoRow, newFilename, sniffOk, makeThumbnail, MAX_BYTES, MIME_EXT };

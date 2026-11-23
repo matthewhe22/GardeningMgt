@@ -2,12 +2,15 @@ const express = require('express');
 const { q, q1, pool, withTransaction } = require('../db');
 const { requireRole, isStaff } = require('../auth');
 const { logActivity } = require('../activity');
-const { upload, savePhoto } = require('../upload');
+const { upload, savePhoto, insertPhotoRow, newFilename, sniffOk, MAX_BYTES, MIME_EXT } = require('../upload');
+const storage = require('../storage');
+const uploadTicket = require('../uploadTicket');
 const { nextOccurrenceAfter, isValidDate, isValidTimeWindow } = require('../recurrence');
 const { loadReportData, renderReportHtml, renderReportPdf, archiveToOneDrive } = require('../report');
 const { asyncHandler } = require('../asyncHandler');
 const { assertCsrf } = require('../csrf');
-const { syncChecks, loadChecks, isResolved, LOCKED } = require('../scope');
+const { syncChecks, loadChecks, isResolved, needsPhoto, LOCKED } = require('../scope');
+const { checkCapture, reasonText, MAX_AGE_HOURS } = require('../photoCapture');
 const { emailJobReport, baseUrlFrom } = require('../jobReport');
 const { optimizeRouteRoad } = require('../routeOptimizer');
 const { runInBackground } = require('../background');
@@ -276,6 +279,19 @@ router.post('/', requireRole('supervisor'), asyncHandler(async (req, res) => {
   res.redirect(`/visits/${id}`);
 }));
 
+/**
+ * The job's ad-hoc tasks that still have no photo. Like scope items, each one
+ * needs at least one before the job can be completed. Tasks added after the
+ * job was completed (follow-ups for next time) don't count against it.
+ */
+function tasksMissingPhotos(visitId) {
+  return q(`
+    SELECT t.id, t.title FROM tasks t JOIN visits v ON v.id = t.visit_id
+    WHERE t.visit_id = $1 AND t.created_at <= COALESCE(v.finished_at, now())
+      AND NOT EXISTS (SELECT 1 FROM photos ph WHERE ph.task_id = t.id)
+    ORDER BY t.id`, [visitId]);
+}
+
 // Detail: tasks, photos, comments, invoice, timer, GPS
 router.get('/:id', asyncHandler(async (req, res) => {
   const visit = await getVisit(req.params.id);
@@ -287,9 +303,9 @@ router.get('/:id', asyncHandler(async (req, res) => {
   // the page costs one round-trip's worth of latency instead of eight.
   // Bring the scope-of-duties checklist in line with the job's scope first.
   await syncChecks(visit);
-  const [tasks, photos, comments, commentPhotos, invoice, gardeners, gpsPoints, job, nextVisit, checks, totalPhotosRow] = await Promise.all([
+  const [tasks, photos, comments, commentPhotos, invoice, gardeners, gpsPoints, job, nextVisit, checks, totalPhotosRow, taskPhotos, tasksNoPhoto] = await Promise.all([
     q('SELECT t.*, u.name AS assignee_name FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id WHERE t.visit_id = $1 ORDER BY t.id', [visit.id]),
-    q('SELECT ph.id, ph.filename, ph.caption, ph.original_name, ph.created_at, ph.uploaded_by, u.name AS uploader_name FROM photos ph LEFT JOIN users u ON u.id = ph.uploaded_by WHERE ph.visit_id = $1 AND ph.visit_comment_id IS NULL AND ph.scope_check_id IS NULL ORDER BY ph.created_at DESC', [visit.id]),
+    q('SELECT ph.id, ph.filename, ph.caption, ph.original_name, ph.created_at, ph.taken_at, ph.uploaded_by, u.name AS uploader_name FROM photos ph LEFT JOIN users u ON u.id = ph.uploaded_by WHERE ph.visit_id = $1 AND ph.visit_comment_id IS NULL AND ph.scope_check_id IS NULL AND ph.task_id IS NULL ORDER BY ph.created_at DESC', [visit.id]),
     q('SELECT c.*, u.name AS author_name, u.role AS author_role FROM visit_comments c LEFT JOIN users u ON u.id = c.user_id WHERE c.visit_id = $1 ORDER BY c.created_at', [visit.id]),
     q('SELECT ph.visit_comment_id, ph.filename, ph.created_at FROM photos ph WHERE ph.visit_id = $1 AND ph.visit_comment_id IS NOT NULL ORDER BY ph.created_at', [visit.id]),
     q1('SELECT * FROM invoices WHERE visit_id = $1 ORDER BY id DESC LIMIT 1', [visit.id]),
@@ -311,8 +327,13 @@ router.get('/:id', asyncHandler(async (req, res) => {
       : Promise.resolve(null),
     loadChecks(visit.id),
     q1('SELECT COUNT(*)::int AS c FROM photos WHERE visit_id = $1', [visit.id]),
+    q(`SELECT ph.id, ph.filename, ph.task_id, ph.taken_at, ph.created_at, ph.uploaded_by FROM photos ph
+       JOIN tasks t ON t.id = ph.task_id WHERE t.visit_id = $1 ORDER BY ph.created_at`, [visit.id]),
+    tasksMissingPhotos(visit.id),
   ]);
   const totalPhotos = totalPhotosRow.c;
+  const photosByTask = {};
+  for (const ph of taskPhotos) (photosByTask[ph.task_id] ||= []).push(ph);
   const photosByComment = {};
   for (const ph of commentPhotos) (photosByComment[ph.visit_comment_id] ||= []).push(ph);
   // Passive nudge only (never auto-stops or blocks completion) — a forgotten
@@ -323,11 +344,12 @@ router.get('/:id', asyncHandler(async (req, res) => {
   res.render('visits/show', {
     title: `Visit #${visit.id} — ${visit.property_name}`,
     visit, tasks, photos, comments, photosByComment, invoice, gardeners, gpsPoints, job, nextVisit,
-    checks, totalPhotos, isResolved, locked: LOCKED.includes(visit.status),
+    checks, totalPhotos, isResolved, needsPhoto, locked: LOCKED.includes(visit.status),
     isAdmin: req.user.role === 'admin',
     openItem: Number(req.query.item) || null,
     staff: isStaff(req.user), flash: req.query.error || null, warning: req.query.warning || null,
-    longRunning,
+    longRunning, photoMaxAgeHours: MAX_AGE_HOURS, photosByTask, tasksNoPhoto,
+    photoDirect: storage.directUploads(),
   });
 }));
 
@@ -522,6 +544,11 @@ router.post('/:id/timer/stop', asyncHandler(async (req, res) => {
   await syncChecks(visit);
   const checks = await loadChecks(visit.id);
   if (checks.some((c) => !isResolved(c))) return res.redirect(`/visits/${visit.id}?error=scope#scope`);
+  // ...and every item needs its own evidence photo.
+  const missing = checks.find(needsPhoto);
+  if (missing) return res.redirect(`/visits/${visit.id}?error=scopephotos&item=${missing.id}`);
+  // ...and so does every ad-hoc task on the job.
+  if ((await tasksMissingPhotos(visit.id)).length) return res.redirect(`/visits/${visit.id}?error=taskphotos#tasks`);
 
   // Atomic gate: only the first request that flips status off 'completed' wins.
   const gate = await q1(`
@@ -709,9 +736,11 @@ router.post('/:id/approve', requireRole(), asyncHandler(async (req, res) => {
   if (!visit) return res.redirect('/visits');
   if (req.body.force !== '1') {
     await syncChecks(visit);
-    const [checks, ph] = await Promise.all([loadChecks(visit.id),
-      q1('SELECT COUNT(*)::int AS c FROM photos WHERE visit_id = $1', [visit.id])]);
-    if (checks.some((c) => !isResolved(c)) || ph.c === 0) return res.redirect(`/visits/${visit.id}?error=notready`);
+    const [checks, ph, taskGaps] = await Promise.all([loadChecks(visit.id),
+      q1('SELECT COUNT(*)::int AS c FROM photos WHERE visit_id = $1', [visit.id]), tasksMissingPhotos(visit.id)]);
+    if (checks.some((c) => !isResolved(c) || needsPhoto(c)) || ph.c === 0 || taskGaps.length) {
+      return res.redirect(`/visits/${visit.id}?error=notready`);
+    }
   }
   const row = await q1(`
     UPDATE visits SET status = 'approved', approved_at = now(), approved_by = $2
@@ -785,18 +814,23 @@ router.post('/:id/scope/:cid', upload.array('photos', 10), asyncHandler(async (r
   if (!updated) return res.redirect(`/visits/${visit.id}?error=locked`);
   let n = 0;
   let rejected = 0;
+  let stale = null;
   for (const f of req.files || []) {
+    // No-JS fallback path: only the photo's own EXIF can vouch for it here
+    // (the app's JS uploads through POST /:id/photo with the capture time).
+    const cap = checkCapture(f.buffer, { clientTz: req.body.tz });
+    if (!cap.ok) { rejected++; stale = cap.reason; continue; }
     // Evidence photos stay between the gardener and the office (not the team gallery).
-    if (await savePhoto(f, { visitId: visit.id, scopeCheckId: check.id, userId: req.user.id, caption: check.title, shared: false })) n++;
+    if (await savePhoto(f, { visitId: visit.id, scopeCheckId: check.id, userId: req.user.id, caption: check.title, shared: false, takenAt: cap.takenAt })) n++;
     else rejected++;
   }
   await logActivity(req.user.id, 'visit.scope', 'visit', visit.id,
     `${done ? 'Ticked' : 'Updated'} "${check.title}" on job #${visit.id}${n ? ` with ${n} photo(s)` : ''}`);
-  if (rejected) return res.redirect(`/visits/${visit.id}?error=badphoto&item=${check.id}`);
+  if (rejected) return res.redirect(`/visits/${visit.id}?error=${stale ? `photo${stale}` : 'badphoto'}&item=${check.id}`);
   // Jump straight to the next unfinished item (it renders open), so the
   // gardener just works down the list. (?item= rather than #fragment: the
   // fetch-based form submit drops fragments from redirects.)
-  const next = (await loadChecks(visit.id)).find((c) => !isResolved(c));
+  const next = (await loadChecks(visit.id)).find((c) => !isResolved(c) || needsPhoto(c));
   res.redirect(`/visits/${visit.id}${next ? `?item=${next.id}` : '?item=complete'}`);
 }));
 
@@ -886,23 +920,172 @@ router.post('/:id/comments', upload.array('photos', 10), asyncHandler(async (req
   res.redirect(`/visits/${visit.id}${badPhoto ? '?error=badphoto' : ''}#comments`);
 }));
 
-// Photo upload for a job
+/**
+ * Job photos can only be added while the job is running (started, not yet
+ * completed). Returns the ?error= code when the window is closed, else null.
+ */
+function photoWindowError(visit) {
+  if (visit.status === 'approved') return 'approval';
+  if (LOCKED.includes(visit.status) || visit.finished_at) return 'locked';
+  if (!visit.started_at) return 'notstarted';
+  return null;
+}
+const windowMessage = (code) => (code === 'notstarted'
+  ? 'Start the job before adding photos.' : 'This job is closed. Photos can only be added while it is running.');
+
+/**
+ * What a job photo is evidence for: a scope checklist item, one of the job's
+ * ad-hoc tasks, or the job in general. Returns { check } | { task } | {} or
+ * { error } when the named item doesn't belong to this job.
+ */
+async function resolvePhotoTarget(visit, { check_id: checkId, task_id: taskId }) {
+  if (checkId) {
+    const check = await q1('SELECT id, title FROM visit_scope_checks WHERE id = $1 AND visit_id = $2',
+      [Number(checkId) || 0, visit.id]);
+    return check ? { check } : { error: 'That checklist item no longer exists.' };
+  }
+  if (taskId) {
+    const task = await q1('SELECT id, title FROM tasks WHERE id = $1 AND visit_id = $2', [Number(taskId) || 0, visit.id]);
+    return task ? { task } : { error: 'That task no longer exists.' };
+  }
+  return {};
+}
+
+/** savePhoto()/insertPhotoRow() options for a job photo of the given target. */
+function jobPhotoOpts(visit, user, target, body, takenAt) {
+  // Job photos are only visible to the job's gardener, the uploader and staff
+  // (see photoAllowed in server.js); there is no team-sharing option any more.
+  if (target.check) return { visitId: visit.id, scopeCheckId: target.check.id, userId: user.id, caption: target.check.title, shared: false, takenAt };
+  if (target.task) return { visitId: visit.id, taskId: target.task.id, userId: user.id, caption: target.task.title, shared: false, takenAt };
+  return { visitId: visit.id, userId: user.id, caption: String(body.caption || '').slice(0, 500) || null,
+    shared: false, takenAt };
+}
+
+const targetLabel = (t) => (t.check ? ` for "${t.check.title}"` : t.task ? ` for task "${t.task.title}"` : '');
+
+// Photo upload for a job — the no-JS fallback (the app's JS uses the
+// one-photo endpoints below). Optional task_id attaches them to a task.
 router.post('/:id/photos', upload.array('photos', 10), asyncHandler(async (req, res) => {
   assertCsrf(req);
   const visit = await getVisit(req.params.id);
   if (!visit || !canSeeVisit(req.user, visit)) return res.redirect('/visits');
-  if (visit.status === 'approved') return res.redirect(`/visits/${visit.id}?error=approval`);
+  const closed = photoWindowError(visit);
+  if (closed) return res.redirect(`/visits/${visit.id}?error=${closed}`);
+  const target = await resolvePhotoTarget(visit, { task_id: req.body.task_id });
+  if (target.error) return res.redirect(`/visits/${visit.id}#tasks`);
   let saved = 0;
   let badPhoto = false;
+  let stale = null;
   for (const f of req.files || []) {
-    const filename = await savePhoto(f, { caption: req.body.caption || null, visitId: visit.id, userId: req.user.id });
+    // Only the photo's own EXIF can vouch for its capture time on this path.
+    const cap = checkCapture(f.buffer, { clientTz: req.body.tz });
+    if (!cap.ok) { stale = cap.reason; continue; }
+    const filename = await savePhoto(f, jobPhotoOpts(visit, req.user, target, req.body, cap.takenAt));
     if (filename) saved++; else badPhoto = true;
   }
   if (saved) {
     await logActivity(req.user.id, 'photo.upload', 'visit', visit.id,
-      `Uploaded ${saved} photo(s) to visit #${visit.id}`);
+      `Uploaded ${saved} photo(s)${targetLabel(target)} to visit #${visit.id}`);
   }
-  res.redirect(`/visits/${visit.id}${badPhoto ? '?error=badphoto' : ''}#photos`);
+  const err = stale ? `photo${stale}` : badPhoto ? 'badphoto' : '';
+  res.redirect(`/visits/${visit.id}${err ? `?error=${err}` : ''}${target.task ? '#tasks' : '#photos'}`);
+}));
+
+// One live job photo per request, through the app (used when the bucket isn't
+// set up for direct uploads). One photo per request keeps every body far below
+// the host's ~4.5 MB cap however many photos are taken.
+// Body: photo (file), check_id | task_id (optional), taken_at (epoch ms the
+// browser read from EXIF before compressing), tz (getTimezoneOffset()),
+// caption, shared. Responds with JSON.
+router.post('/:id/photo', upload.single('photo'), asyncHandler(async (req, res) => {
+  assertCsrf(req);
+  const visit = await getVisit(req.params.id);
+  if (!visit || !canSeeVisit(req.user, visit)) return res.status(403).json({ ok: false, error: 'Not your job.' });
+  const closed = photoWindowError(visit);
+  if (closed) return res.status(409).json({ ok: false, error: windowMessage(closed) });
+  if (!req.file) return res.status(400).json({ ok: false, error: 'No photo received.' });
+  const target = await resolvePhotoTarget(visit, req.body);
+  if (target.error) return res.status(404).json({ ok: false, error: target.error });
+  const cap = checkCapture(req.file.buffer, { clientTakenAt: req.body.taken_at, clientTz: req.body.tz });
+  if (!cap.ok) return res.status(422).json({ ok: false, reason: cap.reason, error: reasonText(cap.reason) });
+  const filename = await savePhoto(req.file, jobPhotoOpts(visit, req.user, target, req.body, cap.takenAt));
+  if (!filename) return res.status(415).json({ ok: false, error: 'That file is not a supported photo.' });
+  await logActivity(req.user.id, 'photo.upload', 'visit', visit.id,
+    `Uploaded a photo${targetLabel(target)} to job #${visit.id}`);
+  res.json({ ok: true, filename });
+}));
+
+// --- Direct-to-bucket uploads ---------------------------------------------
+// Step 1 (presign): check the job/target and the browser's capture time up
+// front, then hand back a short-lived presigned PUT URL for a "pending" key
+// plus a signed ticket. Step 2: the browser PUTs the photo straight to the
+// bucket (no bytes through this app, no body-size cap). Step 3 (complete):
+// verify the stored object — size, real image bytes, EXIF capture time — make
+// the thumbnail and promote it to its final key. Anything rejected is deleted.
+// Answers { direct: false } when object storage isn't configured for this,
+// and the browser falls back to POST /:id/photo.
+router.post('/:id/photo/presign', asyncHandler(async (req, res) => {
+  const visit = await getVisit(req.params.id);
+  if (!visit || !canSeeVisit(req.user, visit)) return res.status(403).json({ ok: false, error: 'Not your job.' });
+  if (!storage.directUploads()) return res.json({ ok: true, direct: false });
+  const closed = photoWindowError(visit);
+  if (closed) return res.status(409).json({ ok: false, error: windowMessage(closed) });
+  const body = req.body || {};
+  const target = await resolvePhotoTarget(visit, body);
+  if (target.error) return res.status(404).json({ ok: false, error: target.error });
+  const mime = String(body.content_type || '').toLowerCase();
+  const ext = MIME_EXT.get(mime);
+  if (!ext) return res.status(415).json({ ok: false, error: 'Use a JPG, PNG, WEBP or HEIC photo.' });
+  const size = Number(body.size);
+  if (!(size > 0)) return res.status(400).json({ ok: false, error: 'No photo received.' });
+  if (size > MAX_BYTES) return res.status(413).json({ ok: false, error: 'That photo is too large.' });
+  // Early, advisory check on the browser's reading so a stale photo is turned
+  // away before it's uploaded; the stored file's own EXIF is checked at step 3.
+  if (body.taken_at) {
+    const early = checkCapture(Buffer.alloc(0), { clientTakenAt: body.taken_at });
+    if (!early.ok && early.reason !== 'nodate') {
+      return res.status(422).json({ ok: false, reason: early.reason, error: reasonText(early.reason) });
+    }
+  }
+  const filename = newFilename(ext);
+  const url = await storage.presignPendingPut(filename, mime);
+  const ticket = uploadTicket.issue({
+    f: filename, m: mime, v: visit.id, u: req.user.id,
+    c: target.check ? target.check.id : null, t: target.task ? target.task.id : null,
+  });
+  res.json({ ok: true, direct: true, url, headers: { 'Content-Type': mime }, ticket });
+}));
+
+router.post('/:id/photo/complete', asyncHandler(async (req, res) => {
+  const body = req.body || {};
+  const tk = uploadTicket.verify(body.ticket);
+  const visit = await getVisit(req.params.id);
+  if (!visit || !canSeeVisit(req.user, visit)) return res.status(403).json({ ok: false, error: 'Not your job.' });
+  if (!tk || tk.v !== visit.id || tk.u !== req.user.id || !storage.enabled()) {
+    return res.status(400).json({ ok: false, error: 'Upload expired. Please take the photo again.' });
+  }
+  const reject = async (status, payload) => { await storage.deletePending(tk.f); return res.status(status).json({ ok: false, ...payload }); };
+  // Repeat call for a photo already finalized (e.g. a retried request).
+  if (await q1('SELECT 1 FROM photos WHERE filename = $1', [tk.f])) return res.json({ ok: true, filename: tk.f });
+  const closed = photoWindowError(visit);
+  if (closed) return reject(409, { error: windowMessage(closed) });
+  const target = await resolvePhotoTarget(visit, { check_id: tk.c, task_id: tk.t });
+  if (target.error) return reject(404, { error: target.error });
+  const head = await storage.headPending(tk.f);
+  if (!head) return res.status(404).json({ ok: false, error: 'The photo did not reach storage. Please try again.' });
+  if (head.size > MAX_BYTES) return reject(413, { error: 'That photo is too large.' });
+  const buffer = await storage.getPendingBuffer(tk.f);
+  if (!sniffOk(buffer, MIME_EXT.get(tk.m))) return reject(415, { error: 'That file is not a supported photo.' });
+  const cap = checkCapture(buffer, { clientTakenAt: body.taken_at, clientTz: body.tz });
+  if (!cap.ok) return reject(422, { reason: cap.reason, error: reasonText(cap.reason) });
+  await storage.promotePending(tk.f);
+  await insertPhotoRow({
+    ...jobPhotoOpts(visit, req.user, target, body, cap.takenAt),
+    filename: tk.f, originalName: String(body.name || tk.f).slice(0, 200), mime: tk.m, buffer, inline: false,
+  });
+  await logActivity(req.user.id, 'photo.upload', 'visit', visit.id,
+    `Uploaded a photo${targetLabel(target)} to job #${visit.id}`);
+  res.json({ ok: true, filename: tk.f });
 }));
 
 // Add a task to a visit

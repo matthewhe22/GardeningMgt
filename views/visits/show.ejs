@@ -27,7 +27,7 @@
   <% } else if (locals.flash === 'notcompleted') { %>
     <p class="alert alert-error">⚠ Only a completed job can be approved.</p>
   <% } else if (locals.flash === 'notready') { %>
-    <p class="alert alert-error">⚠ This job isn’t ready to approve: some scope items are unticked without a comment, or there are no photos. Tick “approve anyway” to override.</p>
+    <p class="alert alert-error">⚠ This job isn’t ready to approve: some scope items are unticked without a comment or have no photo, or there are no photos. Tick “approve anyway” to override.</p>
   <% } else if (locals.flash === 'upload') { %>
     <p class="alert alert-error">⚠ That photo couldn’t be uploaded, so nothing was saved. Use a JPG, PNG or HEIC photo under 10 MB and try again.</p>
   <% } else if (locals.flash === 'dateclash') { %>
@@ -39,7 +39,15 @@
   <% } else if (locals.flash === 'future') { %>
     <p class="alert alert-error">⚠ This visit is booked for <%= visit.scheduled_date %>. To do it today, first move it to today (Change visit date), then start.</p>
   <% } else if (locals.flash === 'notstarted') { %>
-    <p class="alert alert-error">⚠ Start the job before ticking off the checklist.</p>
+    <p class="alert alert-error">⚠ Start the job before ticking off the checklist or adding photos.</p>
+  <% } else if (locals.flash === 'locked') { %>
+    <p class="alert alert-error">⚠ This job is completed, so photos and the checklist can no longer be changed.</p>
+  <% } else if (locals.flash === 'photoold') { %>
+    <p class="alert alert-error">⚠ That photo is too old. Job photos must be taken with the camera during the job.</p>
+  <% } else if (locals.flash === 'photonodate') { %>
+    <p class="alert alert-error">⚠ We couldn’t tell when that photo was taken. Take it with the camera in this app.</p>
+  <% } else if (locals.flash === 'photofuture') { %>
+    <p class="alert alert-error">⚠ That photo’s date is in the future. Check the phone’s date and time, then take it again.</p>
   <% } else if (locals.flash === 'invalid') { %>
     <p class="alert alert-error"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg> Some details were invalid — please check and try again.</p>
   <% } else if (locals.flash === 'badphoto') { %>
@@ -72,9 +80,10 @@
   const running = visit.started_at && !visit.finished_at;
   const resolvedCount = checks.filter(isResolved).length;
   const allResolved = resolvedCount === checks.length;
+  const missingPhotos = checks.filter(needsPhoto).length;
   const approved = visit.status === 'approved';
   // Open the first unfinished item while working (or the one named in ?item=).
-  const openItem = Number(locals.openItem) || ((running && !locked) ? (checks.find(c => !isResolved(c)) || {}).id : null);
+  const openItem = Number(locals.openItem) || ((running && !locked) ? (checks.find(c => !isResolved(c) || needsPhoto(c)) || {}).id : null);
 %>
 
 <!-- ===== Admin review & payment approval ===== -->
@@ -92,8 +101,13 @@
     <p><% if (checks.length) { %>Scope: <strong><%= checks.filter(c => c.done).length %>/<%= checks.length %></strong> done<% if (resolvedCount > checks.filter(c => c.done).length) { %>, <%= resolvedCount - checks.filter(c => c.done).length %> explained<% } %> · <% } %>
       <strong><%= totalPhotos %></strong> photo(s) · <%= visit.duration_minutes != null ? visit.duration_minutes + ' min on site' : 'no time recorded' %>.
       Check the items and photos below, then approve.</p>
-    <% const ready = allResolved && totalPhotos > 0; %>
-    <% if (!ready) { %><p class="alert alert-error">⚠ Not everything was filled in: <%= !allResolved ? (checks.length - resolvedCount) + ' scope item(s) unticked without a comment' : '' %><%= !allResolved && !totalPhotos ? ' and ' : '' %><%= !totalPhotos ? 'no photos' : '' %>.</p><% } %>
+    <% const ready = allResolved && !missingPhotos && !tasksNoPhoto.length && totalPhotos > 0;
+       const gaps = [];
+       if (!allResolved) gaps.push((checks.length - resolvedCount) + ' scope item(s) unticked without a comment');
+       if (missingPhotos) gaps.push(missingPhotos + ' scope item(s) without a photo');
+       if (tasksNoPhoto.length) gaps.push(tasksNoPhoto.length + ' task(s) without a photo');
+       if (!totalPhotos) gaps.push('no photos'); %>
+    <% if (!ready) { %><p class="alert alert-error">⚠ Not everything was filled in: <%= gaps.join(', ') %>.</p><% } %>
     <div class="btn-row">
       <% if (isAdmin) { %>
       <form method="post" action="/visits/<%= visit.id %>/approve" class="inline"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
@@ -119,10 +133,13 @@
     <% } %>
     <form method="post" action="/visits/<%= visit.id %>/timer/stop" class="gps-form mobile-sticky-cta"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
       <input type="hidden" name="lat"><input type="hidden" name="lng">
-      <% if (['scope','photos','confirm'].includes(locals.flash)) { %>
-        <p class="alert alert-error"><%= flash === 'scope' ? '⚠ ' + (checks.length - resolvedCount) + ' scope item(s) still need a tick or a comment.' : flash === 'photos' ? '⚠ Add at least one photo first.' : '⚠ Tick the box below first.' %></p>
+      <% if (locals.flash === 'taskphotos') { %>
+        <p class="alert alert-error">⚠ <%= tasksNoPhoto.length %> task(s) still need a photo: <%= tasksNoPhoto.map(t => t.title).join(', ') %>.</p>
       <% } %>
-      <p class="cta-note"><% if (checks.length) { %>Checklist <strong><%= resolvedCount %>/<%= checks.length %></strong> · <% } %><strong><%= totalPhotos %></strong> photo(s) uploaded so far.
+      <% if (['scope','photos','confirm','scopephotos'].includes(locals.flash)) { %>
+        <p class="alert alert-error"><%= flash === 'scope' ? '⚠ ' + (checks.length - resolvedCount) + ' scope item(s) still need a tick or a comment.' : flash === 'scopephotos' ? '⚠ ' + missingPhotos + ' scope item(s) still need a photo. Every item needs at least one.' : flash === 'photos' ? '⚠ Add at least one photo first.' : '⚠ Tick the box below first.' %></p>
+      <% } %>
+      <p class="cta-note"><% if (checks.length) { %>Checklist <strong><%= resolvedCount %>/<%= checks.length %></strong> · <% if (missingPhotos) { %><strong><%= missingPhotos %></strong> item(s) need a photo · <% } %><% } %><% if (tasksNoPhoto.length) { %><a href="#tasks"><strong><%= tasksNoPhoto.length %></strong> task(s) need a photo</a> · <% } %><strong><%= totalPhotos %></strong> photo(s) uploaded so far.
         <% if (!totalPhotos && !checks.length) { %><br><span class="muted"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg> <a href="#photos">Upload your photos</a> before completing.</span><% } %></p>
       <label class="confirm-line"><input type="checkbox" name="confirm_photos" required>
         All work and photos are done</label>
@@ -204,13 +221,13 @@
 <section class="card" id="scope">
   <h2>Scope of duties <span class="muted">(<%= resolvedCount %>/<%= checks.length %>)</span></h2>
   <div class="progress"><span style="width: <%= Math.round(100 * resolvedCount / checks.length) %>%"></span></div>
-  <% if (running && !locked) { %><p class="muted scope-help">Tick <strong>Done</strong> (it saves straight away), add a photo, or write why it wasn’t needed.</p><% } %>
+  <% if (running && !locked) { %><p class="muted scope-help">Take at least one photo for every item, then tick <strong>Done</strong> or write why it wasn’t needed.</p><% } %>
   <% checks.forEach((c, i) => { %>
   <details class="scope-item <%= c.done ? 'is-done' : (isResolved(c) ? 'is-noted' : '') %><%= c.scope_id == null ? ' is-removed' : '' %>" id="check-<%= c.id %>" <%= c.id === openItem ? 'open' : '' %>>
     <summary>
       <span class="scope-mark"><%= c.done ? '✔' : (isResolved(c) ? '💬' : i + 1) %></span>
       <span class="scope-title"><%= c.title %><% if (c.scope_id == null) { %> <span class="muted">(removed from scope)</span><% } %></span>
-      <% if (c.photos.length) { %><span class="scope-count">📷 <%= c.photos.length %></span><% } %>
+      <% if (c.photos.length) { %><span class="scope-count">📷 <%= c.photos.length %></span><% } else if (needsPhoto(c) && running && !locked) { %><span class="scope-count scope-need-photo">📷 needed</span><% } %>
     </summary>
     <div class="scope-body">
       <% if (c.standard_photo) { %>
@@ -221,10 +238,11 @@
         <% if (c.comment) { %><p class="scope-comment">💬 <%= c.comment %></p><% } %>
         <% if (!c.done && !c.comment) { %><p class="muted"><%= visit.started_at ? 'Not done.' : 'Start the job to fill this in.' %></p><% } %>
       <% } else { %>
-      <form method="post" action="/visits/<%= visit.id %>/scope/<%= c.id %>" enctype="multipart/form-data" class="scope-form" data-upload data-scope-form><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+      <form method="post" action="/visits/<%= visit.id %>/scope/<%= c.id %>" enctype="multipart/form-data" class="scope-form" data-upload data-scope-form data-photo-endpoint="/visits/<%= visit.id %>/photo" data-photo-max-age-hours="<%= photoMaxAgeHours %>" data-photo-direct="<%= photoDirect ? 1 : 0 %>" data-check-id="<%= c.id %>"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
         <label class="scope-done"><input type="checkbox" name="done" <%= c.done ? 'checked' : '' %> data-tick-save> Done</label>
-        <label class="btn file-btn photo-pick">📷 Add photo<input type="file" name="photos" accept="image/*" capture="environment" multiple hidden class="file-count"></label>
+        <label class="btn file-btn photo-pick">📷 Take photo<input type="file" name="photos" accept="image/*" capture="environment" multiple hidden class="file-count"></label>
         <div class="photo-previews" data-upload-previews hidden></div>
+        <p class="upload-status muted" data-upload-status hidden></p>
         <textarea name="comment" rows="2" maxlength="2000" placeholder="Comment (needed if not done)"><%= c.comment || '' %></textarea>
         <button class="btn btn-primary btn-block">Save</button>
       </form>
@@ -234,6 +252,7 @@
         <% c.photos.forEach(ph => { %>
           <figure class="photo">
             <a href="/uploads/<%= ph.filename %>" target="_blank"><img src="/uploads/<%= ph.filename %>/thumb" alt="<%= c.title %>" loading="lazy"></a>
+            <% if (ph.taken_at) { %><figcaption class="photo-taken">Taken <%= fmtDateTime(ph.taken_at) %></figcaption><% } %>
             <% if (!locked) { %>
             <form method="post" action="/visits/<%= visit.id %>/scope/<%= c.id %>/photos/<%= ph.id %>/delete" data-confirm="Remove this photo?"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
               <button class="link-btn danger-link">✕ remove</button></form>
@@ -262,6 +281,30 @@
             <span class="status status-<%= t.status %>"><%= t.status.replace('_',' ') %></span>
           </div>
           <% if (t.description) { %><span class="muted"><%= t.description %></span><% } %>
+          <% const tPhotos = photosByTask[t.id] || []; %>
+          <% if (tPhotos.length) { %>
+          <div class="scope-photos task-photos">
+            <% tPhotos.forEach(ph => { %>
+              <figure class="photo">
+                <a href="/uploads/<%= ph.filename %>" target="_blank"><img src="/uploads/<%= ph.filename %>/thumb" alt="<%= t.title %>" loading="lazy"></a>
+                <% if (ph.taken_at) { %><figcaption class="photo-taken">Taken <%= fmtDateTime(ph.taken_at) %></figcaption><% } %>
+                <% if (running && !locked && (staff || ph.uploaded_by === user.id)) { %>
+                <form method="post" action="/photos/<%= ph.id %>/delete" data-confirm="Remove this photo?"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+                  <button class="link-btn danger-link">✕ remove</button></form>
+                <% } %>
+              </figure>
+            <% }) %>
+          </div>
+          <% } %>
+          <% if (running && !locked) { %>
+          <form method="post" action="/visits/<%= visit.id %>/photos" enctype="multipart/form-data" class="task-photo-form" data-upload data-photo-autoupload data-photo-endpoint="/visits/<%= visit.id %>/photo" data-photo-max-age-hours="<%= photoMaxAgeHours %>" data-photo-direct="<%= photoDirect ? 1 : 0 %>" data-task-id="<%= t.id %>"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+            <input type="hidden" name="task_id" value="<%= t.id %>">
+            <label class="btn btn-sm photo-pick<%= tPhotos.length ? '' : ' scope-need-photo' %>"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h3l2-2.5h6L17 7h3a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Z"/><circle cx="12" cy="13" r="3.5"/></svg> <%= tPhotos.length ? 'Add photo' : 'Take photo (needed)' %>
+              <input type="file" name="photos" accept="image/*" capture="environment" multiple hidden></label>
+            <noscript><button class="btn btn-sm">Upload</button></noscript>
+            <p class="upload-status muted" data-upload-status hidden></p>
+          </form>
+          <% } %>
         </td>
         <td class="task-status-cell">
           <form method="post" action="/tasks/<%= t.id %>/status" class="inline"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
@@ -290,7 +333,7 @@
         <figure class="photo">
           <a href="/uploads/<%= ph.filename %>" target="_blank"><img src="/uploads/<%= ph.filename %>/thumb" alt="<%= ph.caption || ph.original_name %>" loading="lazy"></a>
           <figcaption>
-            <span class="photo-stamp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M8 3v4M16 3v4M3.5 10h17"/></svg> <%= fmtDateTime(ph.created_at) %></span><br>
+            <span class="photo-stamp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M8 3v4M16 3v4M3.5 10h17"/></svg> <%= ph.taken_at ? 'Taken ' + fmtDateTime(ph.taken_at) : fmtDateTime(ph.created_at) %></span><br>
             <% if (ph.caption) { %><%= ph.caption %> · <% } %><span class="muted">by <%= ph.uploader_name %></span>
             <% if (staff || ph.uploaded_by === user.id) { %>
               <form method="post" action="/photos/<%= ph.id %>/delete" class="inline" data-confirm="Delete this photo?"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %><button class="link-btn link-btn-danger">Delete</button></form>
@@ -299,16 +342,12 @@
         </figure>
       <% }) %>
     </div>
-<% if (!approved) { %>
-    <form method="post" action="/visits/<%= visit.id %>/photos" enctype="multipart/form-data" class="photo-upload" data-upload data-draft-label="photo caption"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+<% if (running && !locked) { %>
+    <form method="post" action="/visits/<%= visit.id %>/photos" enctype="multipart/form-data" class="photo-upload" data-upload data-draft-label="photo caption" data-photo-endpoint="/visits/<%= visit.id %>/photo" data-photo-max-age-hours="<%= photoMaxAgeHours %>" data-photo-direct="<%= photoDirect ? 1 : 0 %>"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
       <div class="photo-actions">
         <label class="btn btn-primary photo-pick" data-camera>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h3l2-2.5h6L17 7h3a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Z"/><circle cx="12" cy="13" r="3.5"/></svg> Take photo
           <input type="file" name="photos" accept="image/*" capture="environment" multiple hidden>
-        </label>
-        <label class="btn photo-pick" data-library>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="m4 17 5-5 3.5 3.5L17 10l3 3"/></svg> Choose from library
-          <input type="file" name="photos" accept="image/*" multiple hidden>
         </label>
       </div>
       <div class="photo-previews" data-upload-previews hidden></div>
@@ -316,8 +355,11 @@
       <details class="photo-options"><summary class="muted">Caption</summary>
         <label>Caption <input type="text" name="caption" placeholder="Optional note for these photos"></label>
       </details>
+      <p class="muted">Photos must be taken with the camera during the job (no older gallery photos).</p>
       <button class="btn btn-primary btn-block" type="submit" data-upload-submit>Upload photos</button>
     </form>
+    <% } else if (!visit.started_at) { %>
+    <p class="muted">Start the job to take photos.</p>
     <% } %>
   </details>
   <details class="card fold" id="comments" <%= comments.length ? 'open' : '' %>>
