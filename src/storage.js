@@ -32,6 +32,13 @@ function getClient() {
     endpoint: process.env.S3_ENDPOINT || undefined,
     // R2 / MinIO / Supabase need path-style addressing; AWS uses virtual-host.
     forcePathStyle: !!process.env.S3_ENDPOINT,
+    // Only send checksums when an operation requires them. The SDK's default
+    // (WHEN_SUPPORTED) signs a CRC32 of the *empty* body into presigned PUT
+    // URLs, so the real photo the browser then uploads fails the check — and
+    // R2 / other S3-compatible stores don't all accept the trailing checksums
+    // the SDK adds to server-side uploads.
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    responseChecksumValidation: 'WHEN_REQUIRED',
     credentials: (process.env.S3_ACCESS_KEY_ID && process.env.S3_SECRET_ACCESS_KEY)
       ? { accessKeyId: process.env.S3_ACCESS_KEY_ID, secretAccessKey: process.env.S3_SECRET_ACCESS_KEY }
       : undefined,
@@ -81,14 +88,19 @@ async function presignPendingPut(filename, contentType, expiresIn = 600) {
   const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
   return getSignedUrl(getClient(),
     new PutObjectCommand({ Bucket: BUCKET, Key: pendingKey(filename), ContentType: contentType }),
-    { expiresIn });
+    // Sign the Content-Type so the upload must use the type we approved.
+    { expiresIn, signableHeaders: new Set(['content-type']) });
 }
 
 /** Size (bytes) and content type of a pending upload, or null if it isn't there. */
-async function headPending(filename) {
+const headPending = (filename) => headKey(pendingKey(filename));
+/** Same, for a photo at its final key. */
+const headObject = (filename) => headKey(keyFor(filename));
+
+async function headKey(Key) {
   const { HeadObjectCommand } = require('@aws-sdk/client-s3');
   try {
-    const out = await getClient().send(new HeadObjectCommand({ Bucket: BUCKET, Key: pendingKey(filename) }));
+    const out = await getClient().send(new HeadObjectCommand({ Bucket: BUCKET, Key }));
     return { size: Number(out.ContentLength), contentType: out.ContentType || '' };
   } catch (e) {
     if (e && (e.name === 'NotFound' || e.$metadata?.httpStatusCode === 404)) return null;
@@ -140,6 +152,6 @@ const directUploads = () => enabled() && process.env.S3_DIRECT_UPLOADS !== '0';
 
 module.exports = {
   enabled, keyFor, putObject, getObjectStream, getObjectBuffer, deleteObject,
-  pendingKey, presignPendingPut, headPending, getPendingBuffer, promotePending, deletePending,
+  headObject, pendingKey, presignPendingPut, headPending, getPendingBuffer, promotePending, deletePending,
   uploadOrigins, directUploads,
 };

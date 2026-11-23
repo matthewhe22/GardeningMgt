@@ -25,12 +25,23 @@ async function main() {
     if (!rows.length) break;
     for (const r of rows) {
       await storage.putObject(r.filename, r.data, r.mime || 'application/octet-stream');
+      // Only drop the database copy once the bucket confirms the full object.
+      const head = await storage.headObject(r.filename);
+      if (!head || head.size !== r.data.length) {
+        throw new Error(`Photo #${r.id} (${r.filename}) did not verify in the bucket ` +
+          `(expected ${r.data.length} bytes, got ${head ? head.size : 'nothing'}). Nothing was removed for it; re-run to retry.`);
+      }
       await pool.query("UPDATE photos SET data = ''::bytea WHERE id = $1", [r.id]);
       moved++;
       if (moved % 25 === 0) console.log(`  …moved ${moved}`);
     }
   }
   console.log(`Done. Moved ${moved} photo(s) to object storage.`);
+  if (moved) {
+    console.log('The database keeps the freed space until the photos table is rewritten. In a quiet');
+    console.log('moment, run this in the Supabase SQL editor (briefly locks the photos table):');
+    console.log('  VACUUM FULL photos;');
+  }
   await pool.end();
 }
 

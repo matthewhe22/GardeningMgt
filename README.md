@@ -69,7 +69,8 @@ Keeping image bytes in Postgres bloats the database and meters egress on every
 view. To offload them to any S3-compatible bucket (Cloudflare R2, AWS S3,
 Supabase Storage, MinIO), set these env vars — when `S3_BUCKET` is present the
 app stores new uploads in the bucket automatically (nothing changes until it
-is set):
+is set). To move the database itself to Sydney, see
+[docs/DB-MOVE-SYDNEY.md](docs/DB-MOVE-SYDNEY.md).
 
 | Variable | Notes |
 |---|---|
@@ -82,7 +83,31 @@ is set):
 | `S3_UPLOAD_ORIGIN` | override the bucket origin(s) allowed in the page's CSP `connect-src` (comma-separated); normally worked out from the vars above |
 
 To move photos already in the database into the bucket, run once after
-configuring the vars: `npm run migrate:photos`.
+configuring the vars: `npm run migrate:photos`. Each photo is checked in the
+bucket before its database copy is cleared; afterwards run `VACUUM FULL photos;`
+(Supabase SQL editor, quiet time) so the database actually shrinks.
+
+#### Cloudflare R2 setup (recommended)
+
+1. Cloudflare dashboard → **R2** → *Create bucket*, e.g. `gardeningmgt-photos`.
+   Set **Location → Specify jurisdiction/hint → Oceania (OC)** — it can't be
+   changed later. Keep public access **off**.
+2. R2 → *Manage API tokens* → create an **Object Read & Write** token limited to
+   that bucket. Note the Access Key ID, Secret Access Key and your account ID.
+3. Vercel → Project → Settings → Environment Variables:
+   `S3_BUCKET=gardeningmgt-photos`,
+   `S3_ENDPOINT=https://<ACCOUNT_ID>.r2.cloudflarestorage.com`, `S3_REGION=auto`,
+   `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`. Redeploy.
+4. Configure CORS + the pending-upload cleanup rule and self-test, from your
+   machine (bucket settings need an **Admin Read & Write** token for this one
+   run — create one temporarily, or use the dashboard settings it prints):
+   ```bash
+   S3_BUCKET=… S3_ENDPOINT=… S3_REGION=auto S3_ACCESS_KEY_ID=… S3_SECRET_ACCESS_KEY=… \
+     npm run storage:setup -- https://<your-app-domain>
+   ```
+   Re-run with `--check-only` any time to verify uploads work end to end.
+5. `npm run migrate:photos` (same variables plus `DATABASE_URL`), then
+   `VACUUM FULL photos;`.
 
 #### Direct uploads from the phone
 
@@ -92,6 +117,8 @@ bucket** using short-lived presigned URLs: the app hands out a URL for a
 file (size, real image, EXIF capture time), makes the thumbnail and moves it to
 its final key. Photo bytes no longer pass through the app's request, so the
 host's ~4.5 MB request limit doesn't apply. Two one-time bucket settings:
+
+`npm run storage:setup` applies both of these for you (see above). By hand:
 
 1. **CORS** — allow your app's origin to `PUT` with a `Content-Type` header, e.g.
    ```json
