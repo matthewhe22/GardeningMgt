@@ -11,6 +11,7 @@ const { today: businessToday } = require('../time');
 const { assertCsrf } = require('../csrf');
 const { geocodeAddress, geocodeMissingBatch } = require('../geocode');
 const { pageParam, paginate } = require('../pagination');
+const storage = require('../storage');
 
 // Per-click cap on the backfill so the request stays under the serverless
 // time limit (Nominatim wants ~1 req/sec). Click again to continue.
@@ -337,6 +338,9 @@ const { upload: imageUpload } = require('../upload');
 const MASKED_SETTING_KEYS = new Set(['onedrive_client_secret', 'invoice_payment_details', 'smtp_password', 'piq_client_secret']);
 const ALL_SETTING_KEYS = [...ONEDRIVE_SETTING_KEYS, ...INVOICE_SETTING_KEYS, ...EMAIL_SETTING_KEYS, ...PIQ_SETTING_KEYS];
 
+// Every Settings render shows the photo-storage configuration (no secrets).
+router.use('/settings', (req, res, next) => { res.locals.storageInfo = storage.configReport(); next(); });
+
 router.get('/settings', requireRole(), asyncHandler(async (req, res) => {
   const [settings, branding] = await Promise.all([getSettings(ALL_SETTING_KEYS), getBranding()]);
   res.render('admin/settings', {
@@ -379,6 +383,18 @@ router.post('/settings/test-piq', requireRole(), asyncHandler(async (req, res) =
   await logActivity(req.user.id, 'settings.test', 'settings', null,
     `PropertyIQ connection test: ${piqTest.ok ? 'OK' : 'failed'}`);
   res.render('admin/settings', { title: 'Settings', settings, branding, saved: null, brandingError: null, test: null, emailTest: null, piqTest });
+}));
+
+// "Test photo storage": runs every call photo uploads make, from this server,
+// with the settings it is actually running with, and explains any failure.
+router.post('/settings/test-storage', requireRole(), asyncHandler(async (req, res) => {
+  const [settings, branding] = await Promise.all([getSettings(ALL_SETTING_KEYS), getBranding()]);
+  const storageTest = await storage.selfTest();
+  await logActivity(req.user.id, 'settings.test', 'settings', null,
+    `Photo storage test: ${storageTest.ok ? 'OK' : 'failed'}`);
+  res.render('admin/settings', {
+    title: 'Settings', settings, branding, saved: null, brandingError: null, test: null, emailTest: null, piqTest: null, storageTest,
+  });
 }));
 
 // Logo (shown in the sidebar/topbar) and favicon (browser tab icon) — each

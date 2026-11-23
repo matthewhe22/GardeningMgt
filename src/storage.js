@@ -17,8 +17,23 @@
 // The AWS SDK is required lazily so it never loads on cold start unless storage
 // is actually used.
 
-const BUCKET = process.env.S3_BUCKET || '';
-const PREFIX = process.env.S3_PREFIX || 'photos/';
+// Values pasted into a hosting dashboard often pick up a stray space, a
+// trailing line break or surrounding quotes. In the secret, any of those makes
+// every request fail with an unhelpful 403 — so every S3_* value is cleaned on
+// read. configReport() says which ones needed it.
+function clean(v) {
+  let s = String(v == null ? '' : v).trim();
+  const quoted = s.match(/^(['"])([\s\S]*)\1$/);
+  if (quoted) s = quoted[2].trim();
+  return s;
+}
+const env = (name) => {
+  const v = clean(process.env[name]);
+  return name === 'S3_ENDPOINT' ? v.replace(/\/+$/, '') : v;
+};
+
+const BUCKET = env('S3_BUCKET');
+const PREFIX = env('S3_PREFIX') || 'photos/';
 let client = null;
 
 const enabled = () => !!BUCKET;
@@ -28,10 +43,10 @@ function getClient() {
   if (client) return client;
   const { S3Client } = require('@aws-sdk/client-s3');
   client = new S3Client({
-    region: process.env.S3_REGION || 'us-east-1',
-    endpoint: process.env.S3_ENDPOINT || undefined,
+    region: env('S3_REGION') || 'us-east-1',
+    endpoint: env('S3_ENDPOINT') || undefined,
     // R2 / MinIO / Supabase need path-style addressing; AWS uses virtual-host.
-    forcePathStyle: !!process.env.S3_ENDPOINT,
+    forcePathStyle: !!env('S3_ENDPOINT'),
     // Only send checksums when an operation requires them. The SDK's default
     // (WHEN_SUPPORTED) signs a CRC32 of the *empty* body into presigned PUT
     // URLs, so the real photo the browser then uploads fails the check — and
@@ -39,8 +54,8 @@ function getClient() {
     // the SDK adds to server-side uploads.
     requestChecksumCalculation: 'WHEN_REQUIRED',
     responseChecksumValidation: 'WHEN_REQUIRED',
-    credentials: (process.env.S3_ACCESS_KEY_ID && process.env.S3_SECRET_ACCESS_KEY)
-      ? { accessKeyId: process.env.S3_ACCESS_KEY_ID, secretAccessKey: process.env.S3_SECRET_ACCESS_KEY }
+    credentials: (env('S3_ACCESS_KEY_ID') && env('S3_SECRET_ACCESS_KEY'))
+      ? { accessKeyId: env('S3_ACCESS_KEY_ID'), secretAccessKey: env('S3_SECRET_ACCESS_KEY') }
       : undefined,
   });
   return client;
@@ -177,18 +192,137 @@ async function ensureBucket() {
  */
 function uploadOrigins() {
   if (!enabled()) return [];
-  if (process.env.S3_UPLOAD_ORIGIN) return process.env.S3_UPLOAD_ORIGIN.split(',').map((x) => x.trim()).filter(Boolean);
-  if (process.env.S3_ENDPOINT) {
-    try { return [new URL(process.env.S3_ENDPOINT).origin]; } catch (_) { return []; }
+  if (env('S3_UPLOAD_ORIGIN')) return env('S3_UPLOAD_ORIGIN').split(',').map(clean).filter(Boolean);
+  if (env('S3_ENDPOINT')) {
+    try { return [new URL(env('S3_ENDPOINT')).origin]; } catch (_) { return []; }
   }
-  const region = process.env.S3_REGION || 'us-east-1';
+  const region = env('S3_REGION') || 'us-east-1';
   return [`https://${BUCKET}.s3.${region}.amazonaws.com`, `https://${BUCKET}.s3.amazonaws.com`];
 }
 
 /** Direct browser uploads are on unless S3_DIRECT_UPLOADS=0 (e.g. no bucket CORS yet). */
-const directUploads = () => enabled() && process.env.S3_DIRECT_UPLOADS !== '0';
+const directUploads = () => enabled() && env('S3_DIRECT_UPLOADS') !== '0';
+
+// --- Diagnostics (admin "Test photo storage" button, setup script) ---------
+
+const SETTING_NAMES = ['S3_BUCKET', 'S3_ENDPOINT', 'S3_REGION', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY',
+  'S3_PREFIX', 'S3_DIRECT_UPLOADS'];
+const mask = (v) => (v.length <= 8 ? '•'.repeat(v.length) : `${v.slice(0, 4)}…${v.slice(-4)}`);
+
+/**
+ * What the app is using, without revealing secrets, plus plain-language
+ * warnings about settings that look wrong. Safe to show to an admin.
+ */
+function configReport() {
+  const settings = SETTING_NAMES.map((name) => {
+    const raw = process.env[name];
+    const value = env(name);
+    const shown = !value ? ''
+      : name === 'S3_SECRET_ACCESS_KEY' ? `set (${value.length} characters)`
+        : name === 'S3_ACCESS_KEY_ID' ? mask(value) : value;
+    return { name, set: !!value, shown, cleaned: raw != null && raw !== value && raw.trim() !== '' };
+  });
+  const warnings = [];
+  const endpoint = env('S3_ENDPOINT');
+  const region = env('S3_REGION');
+  let host = '';
+  try { host = endpoint ? new URL(endpoint).hostname : ''; } catch (_) {
+    warnings.push('S3_ENDPOINT is not a valid web address (it should start with https://).');
+  }
+  if (enabled()) {
+    if (!env('S3_ACCESS_KEY_ID') || !env('S3_SECRET_ACCESS_KEY')) warnings.push('S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY must both be set.');
+    if (/(^|\.)supabase\.co$/.test(host)) {
+      if (!/\/storage\/v1\/s3$/.test(endpoint)) warnings.push('For Supabase, S3_ENDPOINT should end in /storage/v1/s3.');
+      if (!region || region === 'auto' || region === 'us-east-1') {
+        warnings.push(`For Supabase, S3_REGION must be your project's region (e.g. ap-southeast-2), not "${region || 'unset'}".`);
+      }
+    }
+  }
+  for (const s of settings) {
+    if (s.cleaned) warnings.push(`${s.name} had extra spaces, a line break or quotes around it — the app now ignores them, but tidy the value in your hosting settings.`);
+  }
+  return { enabled: enabled(), direct: directUploads(), bucket: BUCKET, prefix: PREFIX, settings, warnings };
+}
+
+/** Turn a storage error into a sentence an admin can act on. */
+function explainStorageError(e) {
+  const name = (e && (e.name || e.Code || e.code)) || '';
+  const status = e && e.$metadata && e.$metadata.httpStatusCode;
+  const msg = String((e && e.message) || '');
+  if (/SignatureDoesNotMatch/i.test(name + msg)) {
+    return 'The secret key (S3_SECRET_ACCESS_KEY) does not match the access key ID. Copy it again exactly, or create a new access key and update both values.';
+  }
+  if (/InvalidAccessKeyId|InvalidKey|access key/i.test(name + msg)) {
+    return 'Storage does not recognise the access key ID (S3_ACCESS_KEY_ID). It may have been deleted — create a new access key and update both values.';
+  }
+  if (/AuthorizationHeaderMalformed|InvalidRegion|region/i.test(name + msg) && status !== 403) {
+    return `The region (S3_REGION) looks wrong: ${msg.slice(0, 160)}`;
+  }
+  if (/NoSuchBucket/i.test(name) || status === 404) {
+    return `The bucket "${BUCKET}" does not exist. Create it (private), or fix S3_BUCKET.`;
+  }
+  if (status === 403 || /AccessDenied|Forbidden/i.test(name)) {
+    return 'Storage refused the key (HTTP 403). Almost always the secret key does not match the access key ID (a typo, or a different key) — create a new access key and update S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY together.';
+  }
+  if (/ENOTFOUND|EAI_AGAIN/.test(name + msg)) return 'Cannot find the storage server — check S3_ENDPOINT.';
+  if (/ECONNREFUSED|ETIMEDOUT|timeout|aborted/i.test(name + msg)) return 'Could not connect to the storage server in time — check S3_ENDPOINT, then try again.';
+  return `${name || 'Error'}${status ? ` (HTTP ${status})` : ''}: ${msg.slice(0, 200)}`;
+}
+
+// A valid 1×1 JPEG, used as the test photo.
+const TEST_JPEG = Buffer.from(
+  '/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=', 'base64');
+
+/**
+ * Exercise every call photo uploads make, from this server, with the settings
+ * it is actually running with: bucket, server-side upload, a presigned upload
+ * (what a phone does, minus the browser), head, promote, read back, delete.
+ * Stops at the first failure. Leaves nothing behind.
+ * @returns {{ ok: boolean, steps: {label: string, ok: boolean, detail?: string}[] }}
+ */
+async function selfTest() {
+  const steps = [];
+  if (!enabled()) return { ok: false, steps: [{ label: 'Photo storage is not configured (S3_BUCKET is empty) — photos are kept in the database.', ok: false }] };
+  const name = `selftest-${Date.now()}.jpg`;
+  const run = async (label, fn) => {
+    try {
+      const detail = await fn();
+      steps.push({ label, ok: true, detail: detail || undefined });
+      return true;
+    } catch (e) {
+      steps.push({ label, ok: false, detail: explainStorageError(e) });
+      return false;
+    }
+  };
+  const { HeadBucketCommand, PutObjectCommand } = require('@aws-sdk/client-s3');
+  const ok = await run('Reach the bucket', () => getClient().send(new HeadBucketCommand({ Bucket: BUCKET })).then(() => null))
+    && await run('Upload from the server (used when phones upload through the app)', () => getClient().send(new PutObjectCommand({
+      Bucket: BUCKET, Key: pendingKey(name), Body: TEST_JPEG, ContentType: 'image/jpeg' })).then(() => deletePending(name)))
+    && await run('Upload with a signed link (what phones do for direct uploads)', async () => {
+      const url = await presignPendingPut(name, 'image/jpeg', 120);
+      const res = await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'image/jpeg' }, body: TEST_JPEG });
+      if (!res.ok) {
+        const body = (await res.text()).slice(0, 400);
+        const code = (body.match(/<Code>([^<]+)<\/Code>/) || [])[1];
+        throw Object.assign(new Error(body.replace(/\s+/g, ' ')), { name: code || `HTTP${res.status}`, $metadata: { httpStatusCode: res.status } });
+      }
+    })
+    && await run('Check the uploaded photo', async () => {
+      const head = await headPending(name);
+      if (!head || head.size !== TEST_JPEG.length) throw new Error(`unexpected size ${head ? head.size : 'none'}`);
+    })
+    && await run('Move it into place', () => promotePending(name))
+    && await run('Read it back', async () => {
+      const back = await getObjectBuffer(name);
+      if (!back.equals(TEST_JPEG)) throw new Error('read back different bytes');
+    })
+    && await run('Delete the test photo', () => deleteObject(name));
+  if (!ok) { await deletePending(name); try { await deleteObject(name); } catch (_) { /* best-effort */ } }
+  return { ok, steps };
+}
 
 module.exports = {
+  clean, configReport, explainStorageError, selfTest, getClient,
   enabled, keyFor, putObject, getObjectStream, getObjectBuffer, deleteObject,
   headObject, pendingKey, presignPendingPut, headPending, getPendingBuffer, promotePending, deletePending,
   sweepPending, ensureBucket, uploadOrigins, directUploads,

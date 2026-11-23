@@ -157,6 +157,38 @@
   </form>
 </div>
 
+<div class="card" id="photo-storage">
+  <h2>Photo storage</h2>
+  <% const si = locals.storageInfo; %>
+  <% if (si && si.enabled) { %>
+    <p class="muted">Photos are stored in the bucket <strong><%= si.bucket %></strong>
+      (folder <code><%= si.prefix %></code>). Phones upload <%= si.direct ? 'straight to the bucket' : 'through the app (direct uploads are switched off)' %>.
+      These values come from the hosting environment variables; change them there and redeploy.</p>
+    <table class="table storage-config">
+      <% si.settings.forEach(s => { %>
+        <tr><td><code><%= s.name %></code></td><td><%= s.set ? s.shown : '—' %><% if (s.cleaned) { %> <span class="muted">(extra spaces/quotes ignored)</span><% } %></td></tr>
+      <% }) %>
+    </table>
+  <% } else { %>
+    <p class="muted">No bucket is configured (<code>S3_BUCKET</code> is empty), so photos are stored inside the database.</p>
+  <% } %>
+  <% if (si && si.warnings.length) { %>
+    <% si.warnings.forEach(w => { %><p class="alert alert-error"><%= w %></p><% }) %>
+  <% } %>
+  <% if (locals.storageTest) { %>
+    <p class="alert <%= storageTest.ok ? 'alert-ok' : 'alert-error' %>">
+      <% if (storageTest.ok) { %><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 5 5L19 7"/></svg> Photo storage works: every upload step passed.<% } else { %><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg> Photo storage test failed — see the step marked ✘ below.<% } %></p>
+    <ul class="storage-steps">
+      <% storageTest.steps.forEach(st => { %>
+        <li class="<%= st.ok ? 'ok' : 'fail' %>"><%= st.ok ? '✔' : '✘' %> <%= st.label %><% if (!st.ok && st.detail) { %><br><strong><%= st.detail %></strong><% } %></li>
+      <% }) %>
+    </ul>
+  <% } %>
+  <form method="post" action="/admin/settings/test-storage" style="margin-top:8px"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+    <button class="btn">Test photo storage</button>
+  </form>
+</div>
+
 <div class="card">
   <h2>How to set this up in Azure</h2>
   <ol class="muted" style="line-height:1.9">

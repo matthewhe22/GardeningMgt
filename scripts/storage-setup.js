@@ -39,7 +39,7 @@ const ok = (msg) => console.log(`  ✔ ${msg}`);
 const note = (msg) => console.log(`  – ${msg}`);
 const warn = (msg) => console.log(`  ⚠ ${msg}`);
 // Supabase Storage doesn't implement bucket CORS / lifecycle rules.
-const noBucketRules = /(^|\.)supabase\.co$/.test((() => { try { return new URL(process.env.S3_ENDPOINT || '').hostname; } catch (_) { return ''; } })());
+const noBucketRules = /(^|\.)supabase\.co$/.test((() => { try { return new URL(storage.clean(process.env.S3_ENDPOINT) || '').hostname; } catch (_) { return ''; } })());
 const notImplemented = (e) => e && (e.name === 'NotImplemented' || e.$metadata?.httpStatusCode === 501);
 const bad = (msg) => { failures++; console.log(`  ✘ ${msg}`); };
 const denied = (e) => e && (e.name === 'AccessDenied' || e.$metadata?.httpStatusCode === 403);
@@ -47,18 +47,8 @@ const missing = (e) => e && (/NoSuchCORSConfiguration|NoSuchLifecycleConfigurati
   || e.$metadata?.httpStatusCode === 404);
 
 async function client() {
-  // Reuse the app's configured client (same endpoint, region, checksum settings).
-  const { S3Client } = require('@aws-sdk/client-s3');
-  return new S3Client({
-    region: process.env.S3_REGION || 'us-east-1',
-    endpoint: process.env.S3_ENDPOINT || undefined,
-    forcePathStyle: !!process.env.S3_ENDPOINT,
-    requestChecksumCalculation: 'WHEN_REQUIRED',
-    responseChecksumValidation: 'WHEN_REQUIRED',
-    credentials: (process.env.S3_ACCESS_KEY_ID && process.env.S3_SECRET_ACCESS_KEY)
-      ? { accessKeyId: process.env.S3_ACCESS_KEY_ID, secretAccessKey: process.env.S3_SECRET_ACCESS_KEY }
-      : undefined,
-  });
+  // The app's own client: same cleaned settings, endpoint, region and checksum behaviour.
+  return storage.getClient();
 }
 
 async function setupCors(s3, Bucket) {
@@ -129,7 +119,7 @@ async function selfTest() {
       console.log(`    access-control-allow-origin: ${allow || '(none)'}`);
       try {
         const { GetBucketCorsCommand } = require('@aws-sdk/client-s3');
-        const rules = (await (await client()).send(new GetBucketCorsCommand({ Bucket: process.env.S3_BUCKET }))).CORSRules;
+        const rules = (await (await client()).send(new GetBucketCorsCommand({ Bucket: storage.configReport().bucket }))).CORSRules;
         console.log(`    CORS rules stored on the bucket: ${JSON.stringify(rules)}`);
       } catch (e) { console.log(`    could not read the bucket's CORS rules back: ${e.name || e.message}`); }
     }
@@ -155,9 +145,10 @@ async function main() {
     console.error('S3_BUCKET is not set — configure S3_BUCKET, S3_ENDPOINT, S3_REGION, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY.');
     process.exit(1);
   }
-  const Bucket = process.env.S3_BUCKET;
-  console.log(`Bucket "${Bucket}" at ${process.env.S3_ENDPOINT || 'AWS S3'} (region ${process.env.S3_REGION || 'us-east-1'})`);
+  const Bucket = storage.configReport().bucket;
+  console.log(`Bucket "${Bucket}" at ${storage.clean(process.env.S3_ENDPOINT) || 'AWS S3'} (region ${storage.clean(process.env.S3_REGION) || 'us-east-1'})`);
   if (!origins.length) console.log('  ! No app origin given (pass it, or set APP_URL) — skipping CORS setup and the preflight check.');
+  for (const w of storage.configReport().warnings) warn(w);
   const s3 = await client();
   if (!checkOnly) {
     try {
