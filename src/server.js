@@ -254,6 +254,13 @@ app.use((err, req, res, next) => {
   // (instead of a dead-end error page the gardener has to navigate back from).
   const uploadErr = err.code === 'LIMIT_FILE_SIZE' || err.code === 'LIMIT_UNEXPECTED_FILE' || err.code === 'LIMIT_FILE_COUNT';
   const onVisit = req.method === 'POST' && /^\/visits\/(\d+)\//.exec(req.path);
+  // The single-photo endpoint is called by fetch() and expects JSON back.
+  if (req.method === 'POST' && /^\/visits\/\d+\/photo$/.test(req.path)) {
+    const msg = err.code === 'LIMIT_FILE_SIZE' ? 'That photo is too large.'
+      : err.code === 'EBADCSRFTOKEN' ? 'Your session expired. Reload the page and try again.'
+        : uploadErr ? 'That file is not a supported photo.' : 'Upload failed. Please try again.';
+    return res.status(err.code === 'LIMIT_FILE_SIZE' ? 413 : err.status || (uploadErr ? 400 : 500)).json({ ok: false, error: msg });
+  }
   if (uploadErr && onVisit) {
     const item = /\/scope\/(\d+)/.exec(req.path);
     return res.redirect(`/visits/${onVisit[1]}?error=upload${item ? `&item=${item[1]}` : ''}`);

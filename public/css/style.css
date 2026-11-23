@@ -1707,6 +1707,8 @@ details > summary .inline-h { font-size: 1.05rem; }
 .scope-item.is-done .scope-title { color: var(--muted); }
 .scope-title { flex: 1; line-height: 1.3; }
 .scope-count { font-size: 0.8rem; color: var(--muted); white-space: nowrap; }
+.scope-count.scope-need-photo { color: var(--danger); font-weight: 600; }
+.upload-status.is-error { color: var(--danger); font-weight: 600; }
 .scope-body { padding: 12px; }
 .scope-form { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
 .scope-form textarea, .scope-form .btn-block { grid-column: 1 / -1; margin: 0; }

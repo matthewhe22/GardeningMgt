@@ -64,6 +64,7 @@ const upload = multer({
 async function savePhoto(file, {
   caption = null, visitId = null, issueId = null, commentId = null,
   jobScopeId = null, scopeCheckId = null, libraryScopeId = null, userId, shared = true,
+  takenAt = null,
 }) {
   const ext = path.extname(file.originalname).toLowerCase();
   // Content sniff: reject files whose bytes don't match an allowed image type.
@@ -85,10 +86,11 @@ async function savePhoto(file, {
   }
   await pool.query(
     `INSERT INTO photos (filename, original_name, mime, data, thumb_data, caption, visit_id, issue_id, visit_comment_id,
-                         job_scope_id, scope_check_id, library_scope_id, uploaded_by, shared)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+                         job_scope_id, scope_check_id, library_scope_id, uploaded_by, shared, taken_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+             ($15::timestamptz AT TIME ZONE 'UTC'))`,
     [filename, file.originalname, mime, data, thumbData, caption, visitId, issueId, commentId,
-      jobScopeId, scopeCheckId, libraryScopeId, userId, shared]
+      jobScopeId, scopeCheckId, libraryScopeId, userId, shared, takenAt ? takenAt.toISOString() : null]
   );
   return filename;
 }

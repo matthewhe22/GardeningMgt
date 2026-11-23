@@ -118,8 +118,16 @@ test('authorization / IDOR gates', { skip: !TEST_DB && reason }, async (t) => {
     assert.strictEqual(row.status, task.status, 'the task status must be unchanged');
   });
 
+  // Job photos are only accepted while the job runs, and must carry a fresh
+  // capture time — so start the visit and use real camera-style JPEGs.
+  await q("UPDATE visits SET status = 'in_progress', started_at = now() WHERE id = $1", [visit.id]);
+  const sharp = require('sharp');
+  const stamp = new Date().toISOString().slice(0, 19).replace('T', ' ').replace(/-/g, ':');
+  const freshJpeg = () => sharp({ create: { width: 16, height: 16, channels: 3, background: '#3a6' } })
+    .jpeg().withExif({ IFD2: { DateTimeOriginal: stamp, OffsetTimeOriginal: '+00:00' } }).toBuffer();
+
   await t.test("gardener B CANNOT view a private photo uploaded to gardener A's visit", async () => {
-    const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(20)]);
+    const jpeg = await freshJpeg();
     const uploadRes = await agentA.post(`/visits/${visit.id}/photos?_csrf=${csrfA}`)
       .field('shared', '') // private: not shared
       .attach('photos', jpeg, 'evidence.jpg');
@@ -133,10 +141,10 @@ test('authorization / IDOR gates', { skip: !TEST_DB && reason }, async (t) => {
   });
 
   await t.test("gardener B CAN view a photo shared on gardener A's visit (current sharing rule)", async () => {
-    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.alloc(20)]);
+    const jpeg = await freshJpeg();
     const uploadRes = await agentA.post(`/visits/${visit.id}/photos?_csrf=${csrfA}`)
       .field('shared', 'on')
-      .attach('photos', png, 'shared.png');
+      .attach('photos', jpeg, 'shared.jpg');
     assert.strictEqual(uploadRes.status, 302);
     const photo = await q1(
       'SELECT filename FROM photos WHERE visit_id = $1 AND shared ORDER BY id DESC LIMIT 1', [visit.id]);

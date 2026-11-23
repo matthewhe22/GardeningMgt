@@ -332,6 +332,166 @@ function shrinkPhotos(fd) {
   }).catch(() => fd);
 }
 
+// --- Live job photos: validate, compress at high resolution, upload one by one ---
+// Forms marked data-photo-endpoint (job evidence photos) don't post their
+// photos in the form body. Each photo is instead:
+//   1. dated from its own EXIF capture time (read BEFORE compressing, since a
+//      canvas re-encode drops EXIF) and rejected on the spot if it's too old;
+//   2. re-encoded to a high-resolution JPEG (long edge 2560px, q≈0.85) with the
+//      original EXIF block put back (orientation reset) so the server can
+//      verify the capture time itself;
+//   3. uploaded on its own request with progress — the next photo is being
+//      compressed while the current one uploads.
+// One photo per request keeps every body well under the host's ~4.5 MB cap no
+// matter how many photos are taken, and a failure costs one photo, not all.
+const LIVE_MAX_EDGE = 2560;
+const LIVE_QUALITY = 0.85;
+const LIVE_KEEP_ORIGINAL_UNDER = 1.5 * 1024 * 1024; // small camera JPEGs go as-is
+const LIVE_MAX_BYTES = 3.8 * 1024 * 1024;           // per-request safety margin under 4.5 MB
+
+function decodeImage(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('decode')); };
+    img.src = url;
+  });
+}
+
+function encodeJpeg(img, maxEdge, quality) {
+  const scale = Math.min(1, maxEdge / Math.max(img.naturalWidth, img.naturalHeight));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(img.naturalWidth * scale);
+  canvas.height = Math.round(img.naturalHeight * scale);
+  canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+  return new Promise((resolve) => canvas.toBlob((b) => {
+    canvas.width = 0; canvas.height = 0; // release the bitmap memory promptly (iOS)
+    resolve(b);
+  }, 'image/jpeg', quality));
+}
+
+// Returns { file, takenAt } or throws an Error whose message is shown to the gardener.
+async function prepareLivePhoto(file, maxAgeHours) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const Exif = window.GmgtExif;
+  const info = Exif ? Exif.readCapture(bytes) : null;
+  const takenAt = (info && Exif.captureTime(info, new Date().getTimezoneOffset())) || file.lastModified || null;
+  const now = Date.now();
+  if (takenAt && maxAgeHours && takenAt < now - maxAgeHours * 3600 * 1000) {
+    throw new Error(`"${file.name}" was taken ${new Date(takenAt).toLocaleString()}. ` +
+      `Job photos must be taken with the camera during the job.`);
+  }
+  const isJpeg = /^image\/jpe?g$/.test(file.type);
+  let img = null;
+  try { img = await decodeImage(file); } catch (_) { img = null; }
+  const small = isJpeg && file.size <= LIVE_KEEP_ORIGINAL_UNDER &&
+    (!img || Math.max(img.naturalWidth, img.naturalHeight) <= LIVE_MAX_EDGE);
+  if (small || !img) {
+    // Already small, or a format this browser can't draw (e.g. HEIC on Android):
+    // send unchanged if it fits in one request.
+    if (file.size > LIVE_MAX_BYTES) {
+      throw new Error(`"${file.name}" is too large to upload. Set the camera to JPG ("Most Compatible") and retake it.`);
+    }
+    return { file, takenAt };
+  }
+  const app1 = Exif && isJpeg ? Exif.extractApp1(bytes) : null;
+  let blob = null;
+  for (const [edge, q] of [[LIVE_MAX_EDGE, LIVE_QUALITY], [LIVE_MAX_EDGE, 0.75], [2048, 0.75]]) {
+    blob = await encodeJpeg(img, edge, q);
+    if (blob && blob.size + (app1 ? app1.length : 0) <= LIVE_MAX_BYTES) break;
+  }
+  if (!blob) throw new Error(`"${file.name}" could not be processed. Retake it and try again.`);
+  let out = blob;
+  if (app1) {
+    const merged = Exif.injectApp1(new Uint8Array(await blob.arrayBuffer()), app1);
+    out = new Blob([merged], { type: 'image/jpeg' });
+  }
+  const name = file.name.replace(/\.[^.]+$/, '') + '.jpg';
+  return { file: new File([out], name, { type: 'image/jpeg', lastModified: file.lastModified }), takenAt };
+}
+
+function uploadLivePhoto(endpoint, prepared, extra, onProgress) {
+  return new Promise((resolve, reject) => {
+    const fd = new FormData();
+    fd.append('_csrf', CSRF);
+    for (const [k, v] of Object.entries(extra)) if (v != null && v !== '') fd.append(k, v);
+    if (prepared.takenAt) fd.append('taken_at', String(prepared.takenAt));
+    fd.append('tz', String(new Date().getTimezoneOffset()));
+    fd.append('photo', prepared.file, prepared.file.name);
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${endpoint}?_csrf=${encodeURIComponent(CSRF)}`);
+    xhr.setRequestHeader('X-CSRF-Token', CSRF);
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
+    xhr.onload = () => {
+      let body = null;
+      try { body = JSON.parse(xhr.responseText); } catch (_) { body = null; }
+      if (xhr.status >= 200 && xhr.status < 300 && body && body.ok) return resolve(body);
+      reject(new Error((body && body.error) || (xhr.status === 413
+        ? 'That photo is too large to upload.' : 'Upload failed. Please try again.')));
+    };
+    xhr.onerror = () => reject(new Error('No connection — photos not uploaded. Try again when you have signal.'));
+    xhr.ontimeout = xhr.onerror;
+    xhr.timeout = 120000;
+    xhr.send(fd);
+  });
+}
+
+// Upload every selected photo of a data-photo-endpoint form. Resolves true when
+// all went up; on failure shows why, keeps the photos not yet uploaded
+// selected, and resolves false.
+async function uploadLivePhotos(form) {
+  const inputs = [...form.querySelectorAll('input[type=file]')];
+  const files = [];
+  inputs.forEach((inp) => { for (const f of inp.files || []) if (f.size) files.push(f); });
+  if (!files.length) return true;
+  const status = form.querySelector('[data-upload-status]');
+  const say = (msg, isError) => {
+    if (!status) return;
+    status.hidden = false;
+    status.classList.toggle('is-error', !!isError);
+    status.textContent = msg;
+  };
+  const maxAge = Number(form.dataset.photoMaxAgeHours) || 0;
+  const extra = {
+    check_id: form.dataset.checkId || '',
+    caption: form.querySelector('[name=caption]') ? form.querySelector('[name=caption]').value : '',
+    shared: form.querySelector('[name=shared]') && form.querySelector('[name=shared]').checked ? 'on' : '',
+  };
+  const total = files.length;
+  let done = 0;
+  let next = prepareLivePhoto(files[0], maxAge);
+  try {
+    for (let i = 0; i < total; i++) {
+      say(`Preparing photo ${i + 1} of ${total}…`);
+      const prepared = await next;
+      // Compress the following photo while this one uploads.
+      next = i + 1 < total ? prepareLivePhoto(files[i + 1], maxAge) : null;
+      if (next) next.catch(() => {}); // surfaced when awaited
+      await uploadLivePhoto(form.dataset.photoEndpoint, prepared, extra, (p) => {
+        say(`Uploading photo ${i + 1} of ${total}… ${Math.round(p * 100)}%`);
+      });
+      done++;
+    }
+    say(total === 1 ? 'Photo uploaded.' : `${total} photos uploaded.`);
+    inputs.forEach((inp) => { inp.value = ''; });
+    return true;
+  } catch (err) {
+    // Keep only the photos that didn't make it, so a retry doesn't duplicate.
+    const remaining = files.slice(done);
+    try {
+      const dt = new DataTransfer();
+      remaining.forEach((f) => dt.items.add(f));
+      inputs.forEach((inp, idx) => { inp.files = idx === 0 ? dt.files : new DataTransfer().files; });
+      inputs.forEach((inp) => inp.dispatchEvent(new Event('change')));
+    } catch (_) {
+      inputs.forEach((inp) => { inp.value = ''; });
+    }
+    say((done ? `${done} of ${total} uploaded. ` : '') + err.message, true);
+    return false;
+  }
+}
+
 // Intercept every POST form submit: save a draft, send it via fetch, and
 // react to the outcome ourselves instead of letting the browser navigate.
 document.querySelectorAll('form').forEach((form) => {
@@ -370,10 +530,9 @@ document.querySelectorAll('form').forEach((form) => {
       // body-parser only understands urlencoded bodies). URLSearchParams
       // bodies are sent as urlencoded automatically.
       const isMultipart = (form.enctype || '').toLowerCase().includes('multipart');
-      const bodyReady = isMultipart ? shrinkPhotos(new FormData(form))
-        : Promise.resolve(new URLSearchParams(new FormData(form)));
-
-      bodyReady.then((body) => fetch(form.action, { method: 'POST', body, credentials: 'same-origin' }))
+      const live = !!form.dataset.photoEndpoint;
+      const hadPhotos = live && [...form.querySelectorAll('input[type=file]')].some((i) => i.files && i.files.length);
+      const sendForm = (bodyReady) => bodyReady.then((body) => fetch(form.action, { method: 'POST', body, credentials: 'same-origin' }))
         .then((res) => {
           clearDraft(form);
           if (res.redirected) {
@@ -419,12 +578,24 @@ document.querySelectorAll('form').forEach((form) => {
           reEnableSubmit(form);
           showNetError(form);
         });
+
+      // Live job photos go up one per request first (see uploadLivePhotos).
+      const photosUp = live ? uploadLivePhotos(form) : Promise.resolve(true);
+
+      photosUp.then((ok) => {
+        if (!ok) { reEnableSubmit(form); return; }
+        // A photos-only form has nothing left to post once its photos are up.
+        if (live && hadPhotos && !form.dataset.checkId) { clearDraft(form); window.location.reload(); return; }
+        const bodyReady = isMultipart ? shrinkPhotos(new FormData(form))
+          : Promise.resolve(new URLSearchParams(new FormData(form)));
+        return sendForm(bodyReady);
+      });
     });
   });
 });
 
 // --- Photo capture preview: show thumbnails of what was taken/selected ---
-// Field gardeners tap "Take photo" / "Choose from library"; this shows the
+// Field gardeners tap "Take photo"; this shows the
 // chosen photos right away so they can confirm before uploading. The upload
 // still works without JS — these are progressive enhancements only.
 document.querySelectorAll('form[data-upload]').forEach((form) => {
@@ -438,6 +609,7 @@ document.querySelectorAll('form[data-upload]').forEach((form) => {
     inputs.forEach((inp) => { for (const f of inp.files || []) files.push(f); });
 
     if (status) {
+      status.classList.remove('is-error');
       status.hidden = files.length === 0;
       // Count is the only interpolated value (a number, not user text) — safe for innerHTML.
       status.innerHTML = files.length

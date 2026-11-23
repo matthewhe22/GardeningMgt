@@ -24,6 +24,7 @@ normal Node.js server.
 | Global scope library (≤20 items + standard photos) → templates (Standard 1, 2…) → apply to all / selected sites | **Scope standards** |
 | Per-site scope adjustment (optional; marks the site “adjusted”) | **Sites** → 📋 scope chip |
 | Gardener checklist: tick / photo / comment per scope item, “View scope standards” | Job page |
+| Live job photos: camera only, only while the job runs, rejected if older than `PHOTO_MAX_AGE_HOURS` (EXIF capture time); every scope item needs a photo before the job can be completed; compressed in the browser to 2560px and uploaded one photo per request | Job page |
 | Job report emailed to every active admin on completion (photos attached) | Email (needs Resend) |
 | Admin review → **Approve for payment** (status `approved`) | Job page, **Jobs** → Awaiting review |
 | Custom logo (sidebar/top bar) and browser tab favicon, uploaded as an image and re-encoded server-side | **Settings** (admin) |
@@ -132,6 +133,7 @@ Demo accounts (after seeding):
 | `BOOTSTRAP_ADMIN_EMAIL/_PASSWORD` | admin@example.com / admin1234 | First admin on an empty database |
 | `APP_URL` | request origin | Public URL used in email links (job report "Review & approve" button), e.g. `https://gardeningmgt.vercel.app` |
 | `RESEND_API_KEY` / `RESEND_FROM` | unset | Fallback email provider for job reports when SMTP isn't configured in **Settings** |
+| `PHOTO_MAX_AGE_HOURS` | 12 | Oldest capture time (from the photo's EXIF) accepted for a job photo |
 | `BUSINESS_TZ` | Australia/Melbourne | Timezone for the business calendar, reminder scheduling and every timestamp shown to users |
 | `OSRM_URL` | public demo server | Road-distance routing endpoint (OSRM). Falls back to straight-line if unreachable; self-host for production volume — see [docs/OSRM.md](docs/OSRM.md) |
 | `GEOCODER_URL` / `GEOCODER_EMAIL` | Nominatim | Address→coordinates geocoder (used by Sites) |
