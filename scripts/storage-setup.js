@@ -97,12 +97,30 @@ async function selfTest() {
   const url = await storage.presignPendingPut(name, 'image/jpeg', 120);
   const origin = origins[0];
   if (origin) {
-    // The browser's CORS preflight for the phone's PUT.
-    const pre = await fetch(url, { method: 'OPTIONS', headers: {
-      Origin: origin, 'Access-Control-Request-Method': 'PUT', 'Access-Control-Request-Headers': 'content-type' } });
-    const allow = pre.headers.get('access-control-allow-origin');
+    // The browser's CORS preflight for the phone's PUT. A rule just saved can
+    // take up to a minute to start applying on R2, so retry before failing.
+    const attempts = checkOnly ? 1 : 7;
+    let pre; let allow; let detail = '';
+    for (let i = 0; i < attempts; i++) {
+      pre = await fetch(url, { method: 'OPTIONS', headers: {
+        Origin: origin, 'Access-Control-Request-Method': 'PUT', 'Access-Control-Request-Headers': 'content-type' } });
+      allow = pre.headers.get('access-control-allow-origin');
+      if (pre.ok && (allow === origin || allow === '*')) break;
+      detail = (await pre.text()).replace(/\s+/g, ' ').slice(0, 300);
+      if (i === 0 && attempts > 1) console.log('  … preflight not accepted yet; waiting for the CORS rule to take effect (up to ~1 min)');
+      if (i < attempts - 1) await new Promise((r) => setTimeout(r, 10000));
+    }
     if (pre.ok && (allow === origin || allow === '*')) ok(`CORS preflight from ${origin} accepted`);
-    else bad(`CORS preflight from ${origin} refused (HTTP ${pre.status}) — phones will fall back to uploading through the app`);
+    else {
+      bad(`CORS preflight from ${origin} refused (HTTP ${pre.status}) — phones will fall back to uploading through the app`);
+      console.log(`    response body: ${detail || '(empty)'}`);
+      console.log(`    access-control-allow-origin: ${allow || '(none)'}`);
+      try {
+        const { GetBucketCorsCommand } = require('@aws-sdk/client-s3');
+        const rules = (await (await client()).send(new GetBucketCorsCommand({ Bucket: process.env.S3_BUCKET }))).CORSRules;
+        console.log(`    CORS rules stored on the bucket: ${JSON.stringify(rules)}`);
+      } catch (e) { console.log(`    could not read the bucket's CORS rules back: ${e.name || e.message}`); }
+    }
   }
   const put = await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'image/jpeg', ...(origin ? { Origin: origin } : {}) }, body: TINY_JPEG });
   if (!put.ok) {
