@@ -350,8 +350,12 @@ router.get('/settings', requireRole(), asyncHandler(async (req, res) => {
 }));
 
 router.post('/settings', requireRole(), asyncHandler(async (req, res) => {
+  // The page has a separate form per section, all posting here: only save
+  // the fields this form actually sent, so saving one section never clears
+  // another (absent ≠ emptied).
   for (const key of ALL_SETTING_KEYS) {
-    const value = (req.body[key] || '').trim();
+    if (!Object.prototype.hasOwnProperty.call(req.body, key)) continue;
+    const value = String(req.body[key] || '').trim();
     // Leave the stored secret untouched when the masked placeholder comes back.
     if (MASKED_SETTING_KEYS.has(key) && value === '********') continue;
     await setSetting(key, value || null);

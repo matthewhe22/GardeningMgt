@@ -11,6 +11,9 @@
   <% if (status) { %><a class="chip" href="/visits">✕ Clear</a><% } %>
 </div>
 <% } %>
+<% if (locals.approvedId) { %>
+  <p class="alert alert-ok">✔ Job #<%= approvedId %> approved for payment. <a href="/visits/<%= approvedId %>">View it</a></p>
+<% } %>
 <% if (locals.flash) { %>
   <p class="alert alert-error">
     <% if (flash === 'gardener') { %>The gardener must be an active gardener.

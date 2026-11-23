@@ -75,7 +75,10 @@ router.get('/', asyncHandler(async (req, res) => {
     args.push(date); where.push(`v.scheduled_date = $${args.length}`);
   } else if (upto) {
     args.push(upto); where.push(`v.scheduled_date <= $${args.length}`);
-  } else if (!showAll) {
+  } else if (!showAll && !status) {
+    // Default view: today onwards. A status filter (e.g. the "Awaiting review"
+    // queue) shows every matching visit, whatever its date — the review
+    // backlog is mostly jobs from earlier days.
     args.push(todayStr); where.push(`v.scheduled_date >= $${args.length}`);
   }
   const page = pageParam(req);
@@ -142,7 +145,7 @@ router.get('/', asyncHandler(async (req, res) => {
     date, upto, showAll, status, from, to, search, gardenerId, today: todayStr,
     canReorder: !!gardenerId && !filtered, page, totalPages,
     total: totalDays, totalLabel: totalDays === 1 ? 'day' : 'days', totalVisits,
-    flash: req.query.error || null,
+    flash: req.query.error || null, approvedId: Number(req.query.approved) || null,
   });
 }));
 
@@ -506,12 +509,19 @@ router.post('/:id/timer/start', asyncHandler(async (req, res) => {
   // Starting a future visit early would leave its date wrong and double-book
   // the next occurrence; the gardener moves it to today first.
   if (!isStaff(req.user) && visit.scheduled_date > today()) return res.redirect(`/visits/${visit.id}?error=future`);
+  // A cancelled or skipped visit is a staff decision: a gardener can't bring it
+  // back (completing it would invoice the client for work that was called off).
+  if (!isStaff(req.user) && !['scheduled', 'in_progress'].includes(visit.status)) {
+    return res.redirect(`/visits/${visit.id}?error=notactive`);
+  }
   const reopening = visit.status === 'completed';
+  // Same rule inside the UPDATE, so a status change racing this request can't slip through.
   const started = await q1(`
     UPDATE visits SET started_at = CASE WHEN $2 AND started_at IS NOT NULL THEN started_at ELSE now() END,
       finished_at = NULL, status = 'in_progress'
-    WHERE id = $1 AND status <> 'approved' RETURNING id`, [visit.id, reopening]);
-  if (!started) return res.redirect(`/visits/${visit.id}?error=approval`);
+    WHERE id = $1 AND status <> 'approved' AND ($3 OR status IN ('scheduled', 'in_progress'))
+    RETURNING id`, [visit.id, reopening, isStaff(req.user)]);
+  if (!started) return res.redirect(`/visits/${visit.id}?error=${isStaff(req.user) ? 'approval' : 'notactive'}`);
   const gps = await recordGps(visit.id, req.user.id, req.body, 'start');
   await logActivity(req.user.id, 'visit.timer.start', 'visit', visit.id,
     `Started job timer on visit #${visit.id}${gps ? ' (GPS recorded)' : ''}`);
@@ -753,7 +763,7 @@ router.post('/:id/approve', requireRole(), asyncHandler(async (req, res) => {
       [visit.gardener_id, visit.id, 'approved',
         `Job #${visit.id} at ${visit.property_name} (${visit.scheduled_date}) was approved for payment.`]);
   }
-  res.redirect(req.body.next === 'review' ? '/visits?status=completed' : `/visits/${visit.id}`);
+  res.redirect(req.body.next === 'review' ? `/visits?status=completed&approved=${visit.id}` : `/visits/${visit.id}`);
 }));
 
 // Staff re-send the job report email to all admins (e.g. after fixing email setup).

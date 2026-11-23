@@ -38,6 +38,8 @@
     <p class="alert alert-error">⚠ The job report email couldn’t be sent — check the email setup on Settings (SMTP), or the Activity log for details.</p>
   <% } else if (locals.flash === 'future') { %>
     <p class="alert alert-error">⚠ This visit is booked for <%= visit.scheduled_date %>. To do it today, first move it to today (Change visit date), then start.</p>
+  <% } else if (locals.flash === 'notactive') { %>
+    <p class="alert alert-error">⚠ This visit was <%= visit.status === 'cancelled' ? 'cancelled' : visit.status === 'skipped' ? 'skipped' : 'closed' %> by the office, so it can't be started. Ask a supervisor if it should go ahead.</p>
   <% } else if (locals.flash === 'notstarted') { %>
     <p class="alert alert-error">⚠ Start the job before ticking off the checklist or adding photos.</p>
   <% } else if (locals.flash === 'locked') { %>
@@ -197,6 +199,8 @@
       </form>
     </details>
     <% } %>
+  <% } else if (!staff && ['cancelled', 'skipped'].includes(visit.status)) { %>
+    <p class="muted">This visit was <%= visit.status %> by the office — there's nothing to start.</p>
   <% } else { %>
     <form method="post" action="/visits/<%= visit.id %>/timer/start" class="gps-form mobile-sticky-cta"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
       <input type="hidden" name="lat"><input type="hidden" name="lng">

@@ -61,6 +61,19 @@ const pool = new Pool({
   max: process.env.DB_POOL_MAX
     ? Number(process.env.DB_POOL_MAX)
     : (process.env.VERCEL ? (usingPooler ? 8 : 2) : 10),
+  // Fail a request after 10s rather than hang to the function's time limit
+  // when no connection can be made.
+  connectionTimeoutMillis: 10000,
+});
+
+// An idle pooled connection can be closed from the other side at any time
+// (pooler restart, Supabase maintenance, failover, idle timeout). pg reports
+// that as an 'error' event on the pool; with no listener Node treats it as
+// unhandled and exits the process — killing every in-flight request and any
+// background work (invoices, report emails) on that instance. The pool has
+// already discarded the dead client, so logging is all that's needed.
+pool.on('error', (err) => {
+  console.error('[db] idle connection error (connection discarded):', err.message);
 });
 
 // Every timestamp column in SCHEMA is a naive TIMESTAMP (no zone), and
@@ -468,7 +481,7 @@ function ensureCriticalSchema() {
 
 // Bump when SCHEMA or the migrations below change, so existing databases
 // re-run the DDL exactly once instead of on every serverless cold start.
-const SCHEMA_VERSION = '16';
+const SCHEMA_VERSION = '17';
 
 /**
  * Numeric, forward-only comparison of a stored schema_version against this
@@ -540,6 +553,11 @@ async function runMigrations() {
   await pool.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS taken_at TIMESTAMP');
   // Evidence photos on a job's ad-hoc tasks (required before completing the job).
   await pool.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS task_id INTEGER REFERENCES tasks(id) ON DELETE SET NULL');
+  // Foreign keys that are looked up or joined on hot paths: the invoice list
+  // sums each invoice's items, and deleting future visits checks these.
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items (invoice_id)');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_notifications_visit ON notifications (visit_id)');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_issues_visit ON issues (visit_id)');
   await pool.query('CREATE INDEX IF NOT EXISTS idx_photos_task ON photos (task_id)');
   await pool.query('ALTER TABLE job_scopes ADD COLUMN IF NOT EXISTS library_id INTEGER REFERENCES scope_library(id) ON DELETE SET NULL');
   // One row per library item per job, so concurrent template applies can't
