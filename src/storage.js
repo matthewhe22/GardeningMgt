@@ -103,11 +103,12 @@ async function getPendingBuffer(filename) {
 }
 
 /** Move a verified pending upload to its final key (copy inside the bucket, then delete). */
-async function promotePending(filename, contentType) {
+async function promotePending(filename) {
   const { CopyObjectCommand } = require('@aws-sdk/client-s3');
+  // The copy keeps the Content-Type the presigned PUT was bound to. (No
+  // MetadataDirective: Supabase Storage only partly supports it.)
   await getClient().send(new CopyObjectCommand({
     Bucket: BUCKET, Key: keyFor(filename), CopySource: `${BUCKET}/${pendingKey(filename)}`,
-    ContentType: contentType, MetadataDirective: 'REPLACE',
   }));
   await deletePending(filename);
 }

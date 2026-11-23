@@ -1078,7 +1078,7 @@ router.post('/:id/photo/complete', asyncHandler(async (req, res) => {
   if (!sniffOk(buffer, MIME_EXT.get(tk.m))) return reject(415, { error: 'That file is not a supported photo.' });
   const cap = checkCapture(buffer, { clientTakenAt: body.taken_at, clientTz: body.tz });
   if (!cap.ok) return reject(422, { reason: cap.reason, error: reasonText(cap.reason) });
-  await storage.promotePending(tk.f, tk.m);
+  await storage.promotePending(tk.f);
   await insertPhotoRow({
     ...jobPhotoOpts(visit, req.user, target, body, cap.takenAt),
     filename: tk.f, originalName: String(body.name || tk.f).slice(0, 200), mime: tk.m, buffer, inline: false,
