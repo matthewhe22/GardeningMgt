@@ -143,11 +143,29 @@ router.post('/:id/update', requireRole('supervisor'), asyncHandler(async (req, r
   // Only an admin can change the fee — a supervisor submitting this form
   // (the field isn't even rendered for them) leaves it untouched.
   const fee = req.user.role === 'admin' ? parseFee(gardening_fee) : job.gardening_fee;
+  const newFreq = FREQUENCIES.includes(frequency) ? frequency : job.frequency;
+  const nowActive = active === 'on';
+  const rebuild = newFreq !== job.frequency || nowActive !== job.active;
+  let n = 0;
   try {
-    await q(`
-      UPDATE jobs SET gardener_id = $1, frequency = $2, time_window = $3, active = $4, gardening_fee = $5 WHERE id = $6`,
-      [gardener, FREQUENCIES.includes(frequency) ? frequency : job.frequency,
-        time_window || null, active === 'on', fee, job.id]);
+    // One transaction: the contract change and its schedule either both
+    // happen or neither does (it used to save "inactive" and then fail while
+    // removing the visits, leaving them booked).
+    n = await withTransaction(async (tx) => {
+      await tx.q(`
+        UPDATE jobs SET gardener_id = $1, frequency = $2, time_window = $3, active = $4, gardening_fee = $5 WHERE id = $6`,
+        [gardener, newFreq, time_window || null, nowActive, fee, job.id]);
+      // Future scheduled visits follow the new default gardener unless they were
+      // individually reassigned (a "replacement" differs from the old default).
+      if (gardener !== job.gardener_id) {
+        await tx.q(`
+          UPDATE visits SET gardener_id = $1
+          WHERE job_id = $2 AND status = 'scheduled' AND scheduled_date >= $4
+            AND (gardener_id IS NOT DISTINCT FROM $3)`,
+          [gardener, job.id, job.gardener_id, businessToday()]);
+      }
+      return rebuild ? rebuildScheduleTx(tx, job.id) : 0;
+    });
   } catch (e) {
     // Reactivating this job while another active job already exists for the
     // same property (uq_jobs_property_active) — same conflict as creating a
@@ -155,19 +173,7 @@ router.post('/:id/update', requireRole('supervisor'), asyncHandler(async (req, r
     if (e.code === '23505') return res.redirect('/jobs?error=duplicate');
     throw e;
   }
-  // Future scheduled visits follow the new default gardener unless they were
-  // individually reassigned (a "replacement" differs from the old default).
-  if (gardener !== job.gardener_id) {
-    await q(`
-      UPDATE visits SET gardener_id = $1
-      WHERE job_id = $2 AND status = 'scheduled' AND scheduled_date >= CURRENT_DATE
-        AND (gardener_id IS NOT DISTINCT FROM $3)`,
-      [gardener, job.id, job.gardener_id]);
-  }
-  const newFreq = FREQUENCIES.includes(frequency) ? frequency : job.frequency;
-  const nowActive = active === 'on';
-  if (newFreq !== job.frequency || nowActive !== job.active) {
-    const n = await rebuildSchedule(job.id);
+  if (rebuild) {
     await logActivity(req.user.id, 'job.reschedule', 'job', job.id,
       nowActive ? `Rebuilt schedule for contract #${job.id} (${newFreq}): ${n} upcoming visit(s)`
         : `Contract #${job.id} deactivated: future scheduled visits removed`);
@@ -182,29 +188,40 @@ router.post('/:id/update', requireRole('supervisor'), asyncHandler(async (req, r
  * PREGENERATE occurrences from today on the contract's anchor dates.
  * Returns how many visits are now booked.
  */
-async function rebuildSchedule(jobId) {
-  return withTransaction(async (tx) => {
-    const job = await tx.q1('SELECT * FROM jobs WHERE id = $1 FOR UPDATE', [jobId]);
-    const fromDay = businessToday();
-    await tx.q(`DELETE FROM visits v WHERE v.job_id = $1 AND v.status = 'scheduled' AND v.scheduled_date >= $2
-      AND v.started_at IS NULL
-      AND NOT EXISTS (SELECT 1 FROM photos ph WHERE ph.visit_id = v.id)
-      AND NOT EXISTS (SELECT 1 FROM visit_comments c WHERE c.visit_id = v.id)
-      AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.visit_id = v.id)`, [jobId, fromDay]);
-    if (!job.active) return 0;
-    const dates = occurrencesBetween(job.start_date, job.frequency, job.end_date)
-      .filter((d) => d >= fromDay).slice(0, PREGENERATE);
-    let n = 0;
-    for (const d of dates) {
-      const r = await tx.q1(`
-        INSERT INTO visits (job_id, property_id, gardener_id, scheduled_date, time_window, created_by)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        ON CONFLICT (job_id, scheduled_date) WHERE status = 'scheduled' AND job_id IS NOT NULL DO NOTHING
-        RETURNING id`, [job.id, job.property_id, job.gardener_id, d, job.time_window, job.created_by]);
-      if (r) n++;
-    }
-    return n;
-  });
+async function rebuildScheduleTx(tx, jobId) {
+  const job = await tx.q1('SELECT * FROM jobs WHERE id = $1 FOR UPDATE', [jobId]);
+  const fromDay = businessToday();
+  // Untouched future visits are replaced. Anything with work or records
+  // attached — photos, comments, invoices, follow-up tasks, issues — is kept.
+  const untouched = `SELECT v.id FROM visits v WHERE v.job_id = $1 AND v.status = 'scheduled' AND v.scheduled_date >= $2
+    AND v.started_at IS NULL
+    AND NOT EXISTS (SELECT 1 FROM photos ph WHERE ph.visit_id = v.id)
+    AND NOT EXISTS (SELECT 1 FROM visit_comments c WHERE c.visit_id = v.id)
+    AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.visit_id = v.id)
+    AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.visit_id = v.id)
+    AND NOT EXISTS (SELECT 1 FROM issues s WHERE s.visit_id = v.id)`;
+  // Reminder notifications about those visits go with them (they reference
+  // the visit, which used to make this delete fail).
+  await tx.q(`DELETE FROM notifications WHERE visit_id IN (${untouched})`, [jobId, fromDay]);
+  await tx.q(`DELETE FROM visits WHERE id IN (${untouched})`, [jobId, fromDay]);
+  if (!job.active) return 0;
+  return topUpScheduleTx(tx, job, fromDay);
+}
+
+/** Book the contract's next PREGENERATE occurrences from `fromDay` that aren't booked yet. */
+async function topUpScheduleTx(tx, job, fromDay) {
+  const dates = occurrencesBetween(job.start_date, job.frequency, job.end_date)
+    .filter((d) => d >= fromDay).slice(0, PREGENERATE);
+  let n = 0;
+  for (const d of dates) {
+    const r = await tx.q1(`
+      INSERT INTO visits (job_id, property_id, gardener_id, scheduled_date, time_window, created_by)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      ON CONFLICT (job_id, scheduled_date) WHERE status = 'scheduled' AND job_id IS NOT NULL DO NOTHING
+      RETURNING id`, [job.id, job.property_id, job.gardener_id, d, job.time_window, job.created_by]);
+    if (r) n++;
+  }
+  return n;
 }
 
 // Renew a contract for another term (extends end_date, regenerates schedule head).
@@ -213,8 +230,22 @@ router.post('/:id/renew', requireRole('supervisor'), asyncHandler(async (req, re
   if (!job) return res.redirect('/jobs');
   const years = Number(req.body.contract_years) === 2 ? 2 : 1;
   const newEnd = contractEnd(job.end_date, years);
-  await q('UPDATE jobs SET end_date = $1, active = true, renewal_acknowledged = true WHERE id = $2', [newEnd, job.id]);
-  await logActivity(req.user.id, 'job.renew', 'job', job.id, `Renewed contract #${job.id} to ${newEnd}`);
+  let booked = 0;
+  try {
+    booked = await withTransaction(async (tx) => {
+      const renewed = await tx.q1(`UPDATE jobs SET end_date = $1, active = true, renewal_acknowledged = true
+        WHERE id = $2 RETURNING *`, [newEnd, job.id]);
+      // Book the upcoming visits now (they used to appear only after the next
+      // daily run), without touching any already booked.
+      return topUpScheduleTx(tx, renewed, businessToday());
+    });
+  } catch (e) {
+    // The site already has another active contract (uq_jobs_property_active).
+    if (e.code === '23505') return res.redirect('/jobs?error=duplicate');
+    throw e;
+  }
+  await logActivity(req.user.id, 'job.renew', 'job', job.id,
+    `Renewed contract #${job.id} to ${newEnd}${booked ? ` (${booked} visit(s) booked)` : ''}`);
   res.redirect('/jobs');
 }));
 

@@ -81,11 +81,15 @@ router.post('/:id/update', requireRole('supervisor'), asyncHandler(async (req, r
 
 router.post('/:id/status', asyncHandler(async (req, res) => {
   const task = await q1(`
-    SELECT t.*, v.gardener_id FROM tasks t LEFT JOIN visits v ON v.id = t.visit_id WHERE t.id = $1`,
+    SELECT t.*, v.gardener_id, v.status AS visit_status FROM tasks t LEFT JOIN visits v ON v.id = t.visit_id WHERE t.id = $1`,
     [req.params.id]);
   if (!task) return res.redirect('/tasks');
   const mine = task.assignee_id === req.user.id || task.gardener_id === req.user.id;
   if (!isStaff(req.user) && !mine) return res.redirect('/tasks');
+  // An approved (paid) job is locked for everyone; a completed one for the gardener.
+  if (task.visit_status === 'approved' || (task.visit_status === 'completed' && !isStaff(req.user))) {
+    return safeRedirectBack(req, res, '/tasks');
+  }
   const status = req.body.status;
   if (!['pending', 'in_progress', 'done', 'blocked'].includes(status)) return res.redirect('/tasks');
   await q(`UPDATE tasks SET status = $1, completed_at = CASE WHEN $1 = 'done' THEN now() ELSE NULL END WHERE id = $2`,

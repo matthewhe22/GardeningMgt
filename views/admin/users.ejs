@@ -4,6 +4,7 @@
 <% if (locals.created) { %><p class="alert alert-ok">User created.</p><% } %>
 <% if (locals.updated) { %><p class="alert alert-ok">User details updated.</p><% } %>
 <% if (locals.reset) { %><p class="alert alert-ok">Password reset.</p><% } %>
+<% if (locals.unassigned) { %><p class="alert alert-ok">Gardener disabled. <%= unassigned.visits %> upcoming visit(s) and <%= unassigned.contracts %> contract(s) are now unassigned — reassign them from Visits and Contracts.</p><% } %>
 <% if (locals.error) { %>
 <p class="alert alert-error">
   <% if (error === 'dupemail') { %>That email address is already in use by another account.

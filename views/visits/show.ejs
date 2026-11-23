@@ -38,6 +38,19 @@
     <p class="alert alert-error">⚠ The job report email couldn’t be sent — check the email setup on Settings (SMTP), or the Activity log for details.</p>
   <% } else if (locals.flash === 'future') { %>
     <p class="alert alert-error">⚠ This visit is booked for <%= visit.scheduled_date %>. To do it today, first move it to today (Change visit date), then start.</p>
+  <% } else if (locals.flash === 'staffgaps') { %>
+    <% const sg = [];
+       const sgUnresolved = checks.filter(c => !isResolved(c)).length;
+       const sgNoPhoto = checks.filter(needsPhoto).length;
+       if (!totalPhotos) sg.push('no photos');
+       if (sgUnresolved) sg.push(sgUnresolved + ' checklist item(s) not ticked or explained');
+       if (sgNoPhoto) sg.push(sgNoPhoto + ' checklist item(s) without a photo');
+       if (tasksNoPhoto.length) sg.push(tasksNoPhoto.length + ' task(s) without a photo'); %>
+    <p class="alert alert-error">⚠ This job can't be marked completed yet: <%= sg.join(', ') || 'something is missing' %>. To complete it anyway, tick “Complete even if something is missing” in Manage job (this is recorded in the activity log).</p>
+  <% } else if (locals.flash === 'stale') { %>
+    <p class="alert alert-error">⚠ This job changed since you opened the page (e.g. the gardener completed it), so nothing was saved. Check the job below and try again.</p>
+  <% } else if (locals.flash === 'invoiced') { %>
+    <p class="alert alert-error">⚠ This job's invoice has already been sent or paid, so the job can't be cancelled or skipped. Void the invoice first.</p>
   <% } else if (locals.flash === 'notactive') { %>
     <p class="alert alert-error">⚠ This visit was <%= visit.status === 'cancelled' ? 'cancelled' : visit.status === 'skipped' ? 'skipped' : 'closed' %> by the office, so it can't be started. Ask a supervisor if it should go ahead.</p>
   <% } else if (locals.flash === 'notstarted') { %>
@@ -312,7 +325,7 @@
         </td>
         <td class="task-status-cell">
           <form method="post" action="/tasks/<%= t.id %>/status" class="inline"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
-            <select name="status" data-autosubmit aria-label="Change task status">
+            <select name="status" data-autosubmit aria-label="Change task status" <%= (approved || (locked && !staff)) ? 'disabled' : '' %>>
               <% ['pending','in_progress','done','blocked'].forEach(s => { %>
                 <option value="<%= s %>" <%= t.status === s ? 'selected' : '' %>><%= s.replace('_',' ') %></option>
               <% }) %>
@@ -322,7 +335,7 @@
       </tr>
       <% }) %>
     </table>
-<% if (!approved) { %>
+<% if (!approved && !(locked && !staff)) { %>
     <form method="post" action="/visits/<%= visit.id %>/tasks" class="add-row" data-draft-label="task"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
       <input type="text" name="title" placeholder="New task…" required>
       <button class="btn">Add</button>
@@ -408,7 +421,7 @@
       <% } %>
       <% if (!tasks.length) { %>
       <div class="more-row"><span class="more-label">Add a task</span>
-      <% if (!approved) { %>
+      <% if (!approved && !(locked && !staff)) { %>
     <form method="post" action="/visits/<%= visit.id %>/tasks" class="add-row" data-draft-label="task"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
       <input type="text" name="title" placeholder="New task…" required>
       <button class="btn">Add</button>
@@ -454,6 +467,7 @@
   <p class="muted">This job is approved for payment and locked.<% if (isAdmin) { %> Use <a href="#review">Withdraw approval</a> to change it.<% } %></p>
   <% } else { %>
   <form method="post" action="/visits/<%= visit.id %>/update" class="form-grid"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+    <input type="hidden" name="status_was" value="<%= visit.status %>">
     <label>Gardener
       <select name="gardener_id">
         <option value="">Unassigned</option>
@@ -477,6 +491,9 @@
     </label>
     <label>Duration (min) <input type="number" name="duration_minutes" value="<%= visit.duration_minutes || '' %>"></label>
     <label class="span2">Notes <input type="text" name="notes" value="<%= visit.notes || '' %>"></label>
+    <% if (visit.status !== 'completed') { %>
+    <label class="confirm-line span2"><input type="checkbox" name="force_complete" value="1"> Complete even if photos or checklist items are missing (recorded in the activity log)</label>
+    <% } %>
     <button class="btn btn-primary">Save changes</button>
   </form>
   <% } %>

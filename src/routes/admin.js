@@ -230,6 +230,7 @@ router.get('/users', requireRole(), asyncHandler(async (req, res) => {
     title: 'Users', users,
     error: req.query.error || null,
     created: req.query.created || null, updated: req.query.updated || null, reset: req.query.reset || null,
+    unassigned: req.query.unassigned != null ? { visits: Number(req.query.unassigned) || 0, contracts: Number(req.query.contracts) || 0 } : null,
   });
 }));
 
@@ -318,8 +319,22 @@ router.post('/users/:id/toggle', requireRole(), asyncHandler(async (req, res) =>
     if (existing && existing.role === 'admin' && existing.active && await activeAdminCountExcluding(id) === 0) {
       return res.redirect('/admin/users?error=lastadmin');
     }
-    await q('UPDATE users SET active = NOT active WHERE id = $1', [id]);
+    const toggled = await q1('UPDATE users SET active = NOT active WHERE id = $1 RETURNING active, role, name', [id]);
     await logActivity(req.user.id, 'user.toggle', 'user', id, `Toggled active state of user #${id}`);
+    // A disabled gardener's upcoming visits and contracts become unassigned,
+    // so the work shows up as needing a gardener (rather than staying with
+    // someone who will never see it, and getting reminders sent to them).
+    if (toggled && !toggled.active && toggled.role === 'gardener') {
+      const { today: businessToday } = require('../time');
+      const visits = await q(`UPDATE visits SET gardener_id = NULL WHERE gardener_id = $1 AND status = 'scheduled'
+        AND scheduled_date >= $2 RETURNING id`, [id, businessToday()]);
+      const jobs = await q('UPDATE jobs SET gardener_id = NULL WHERE gardener_id = $1 AND active RETURNING id', [id]);
+      if (visits.length || jobs.length) {
+        await logActivity(req.user.id, 'user.toggle', 'user', id,
+          `Disabled ${toggled.name}: unassigned ${visits.length} upcoming visit(s) and ${jobs.length} contract(s)`);
+        return res.redirect(`/admin/users?unassigned=${visits.length}&contracts=${jobs.length}`);
+      }
+    }
   }
   res.redirect('/admin/users');
 }));

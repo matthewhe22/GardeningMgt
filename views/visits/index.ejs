@@ -17,6 +17,8 @@
 <% if (locals.flash) { %>
   <p class="alert alert-error">
     <% if (flash === 'gardener') { %>The gardener must be an active gardener.
+    <% } else if (flash === 'dateclash') { %>Nothing was moved: two visits of the same contract can't be on the same day.
+    <% } else if (flash === 'bulkskipped') { %><%= locals.bulkSkipped || 'Some' %> visit(s) were left as they are: only visits not yet started can be moved or reassigned in bulk.
     <% } else { %>Some details were invalid — please check and try again.<% } %>
   </p>
 <% } %>
