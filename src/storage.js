@@ -66,4 +66,79 @@ async function deleteObject(filename) {
   await getClient().send(new DeleteObjectCommand({ Bucket: BUCKET, Key: keyFor(filename) }));
 }
 
-module.exports = { enabled, keyFor, putObject, getObjectStream, getObjectBuffer, deleteObject };
+// --- Direct browser uploads ------------------------------------------------
+// The browser PUTs a photo straight to the bucket with a short-lived presigned
+// URL, under a separate "pending/" prefix. The server then verifies it and
+// promotes it to its final key (a server-side copy, no bytes through the app).
+// Anything never finalized (dropped connection, rejected photo the browser
+// didn't wait for) stays under pending/ — add a bucket lifecycle rule that
+// expires that prefix after a day to sweep those up.
+const pendingKey = (filename) => `${PREFIX}pending/${filename}`;
+
+/** Presigned PUT URL for a pending upload, bound to its content type. */
+async function presignPendingPut(filename, contentType, expiresIn = 600) {
+  const { PutObjectCommand } = require('@aws-sdk/client-s3');
+  const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
+  return getSignedUrl(getClient(),
+    new PutObjectCommand({ Bucket: BUCKET, Key: pendingKey(filename), ContentType: contentType }),
+    { expiresIn });
+}
+
+/** Size (bytes) and content type of a pending upload, or null if it isn't there. */
+async function headPending(filename) {
+  const { HeadObjectCommand } = require('@aws-sdk/client-s3');
+  try {
+    const out = await getClient().send(new HeadObjectCommand({ Bucket: BUCKET, Key: pendingKey(filename) }));
+    return { size: Number(out.ContentLength), contentType: out.ContentType || '' };
+  } catch (e) {
+    if (e && (e.name === 'NotFound' || e.$metadata?.httpStatusCode === 404)) return null;
+    throw e;
+  }
+}
+
+async function getPendingBuffer(filename) {
+  const { GetObjectCommand } = require('@aws-sdk/client-s3');
+  const out = await getClient().send(new GetObjectCommand({ Bucket: BUCKET, Key: pendingKey(filename) }));
+  return Buffer.from(await out.Body.transformToByteArray());
+}
+
+/** Move a verified pending upload to its final key (copy inside the bucket, then delete). */
+async function promotePending(filename, contentType) {
+  const { CopyObjectCommand } = require('@aws-sdk/client-s3');
+  await getClient().send(new CopyObjectCommand({
+    Bucket: BUCKET, Key: keyFor(filename), CopySource: `${BUCKET}/${pendingKey(filename)}`,
+    ContentType: contentType, MetadataDirective: 'REPLACE',
+  }));
+  await deletePending(filename);
+}
+
+async function deletePending(filename) {
+  const { DeleteObjectCommand } = require('@aws-sdk/client-s3');
+  try {
+    await getClient().send(new DeleteObjectCommand({ Bucket: BUCKET, Key: pendingKey(filename) }));
+  } catch (_) { /* best-effort: the lifecycle rule sweeps leftovers */ }
+}
+
+/**
+ * Origins the browser PUTs to, for the page's CSP connect-src. Path-style
+ * custom endpoints (R2/MinIO/Supabase) use the endpoint's origin; AWS uses the
+ * bucket's virtual-host names. S3_UPLOAD_ORIGIN overrides (comma-separated).
+ */
+function uploadOrigins() {
+  if (!enabled()) return [];
+  if (process.env.S3_UPLOAD_ORIGIN) return process.env.S3_UPLOAD_ORIGIN.split(',').map((x) => x.trim()).filter(Boolean);
+  if (process.env.S3_ENDPOINT) {
+    try { return [new URL(process.env.S3_ENDPOINT).origin]; } catch (_) { return []; }
+  }
+  const region = process.env.S3_REGION || 'us-east-1';
+  return [`https://${BUCKET}.s3.${region}.amazonaws.com`, `https://${BUCKET}.s3.amazonaws.com`];
+}
+
+/** Direct browser uploads are on unless S3_DIRECT_UPLOADS=0 (e.g. no bucket CORS yet). */
+const directUploads = () => enabled() && process.env.S3_DIRECT_UPLOADS !== '0';
+
+module.exports = {
+  enabled, keyFor, putObject, getObjectStream, getObjectBuffer, deleteObject,
+  pendingKey, presignPendingPut, headPending, getPendingBuffer, promotePending, deletePending,
+  uploadOrigins, directUploads,
+};

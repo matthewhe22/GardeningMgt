@@ -24,7 +24,7 @@ normal Node.js server.
 | Global scope library (≤20 items + standard photos) → templates (Standard 1, 2…) → apply to all / selected sites | **Scope standards** |
 | Per-site scope adjustment (optional; marks the site “adjusted”) | **Sites** → 📋 scope chip |
 | Gardener checklist: tick / photo / comment per scope item, “View scope standards” | Job page |
-| Live job photos: camera only, only while the job runs, rejected if older than `PHOTO_MAX_AGE_HOURS` (EXIF capture time); every scope item needs a photo before the job can be completed; compressed in the browser to 2560px and uploaded one photo per request | Job page |
+| Live job photos: camera only, only while the job runs, rejected if older than `PHOTO_MAX_AGE_HOURS` (EXIF capture time); every scope item needs a photo before the job can be completed; compressed in the browser to 2560px and uploaded one photo per request (straight to the bucket when object storage is set up); every ad-hoc job task needs a photo too | Job page |
 | Job report emailed to every active admin on completion (photos attached) | Email (needs Resend) |
 | Admin review → **Approve for payment** (status `approved`) | Job page, **Jobs** → Awaiting review |
 | Custom logo (sidebar/top bar) and browser tab favicon, uploaded as an image and re-encoded server-side | **Settings** (admin) |
@@ -78,9 +78,33 @@ is set):
 | `S3_ENDPOINT` | custom endpoint for R2/Supabase/MinIO (omit for AWS) |
 | `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | credentials |
 | `S3_PREFIX` | optional key prefix (default `photos/`) |
+| `S3_DIRECT_UPLOADS` | set to `0` to keep job photos going through the app instead of straight to the bucket |
+| `S3_UPLOAD_ORIGIN` | override the bucket origin(s) allowed in the page's CSP `connect-src` (comma-separated); normally worked out from the vars above |
 
 To move photos already in the database into the bucket, run once after
 configuring the vars: `npm run migrate:photos`.
+
+#### Direct uploads from the phone
+
+With a bucket configured, job photos go **straight from the phone to the
+bucket** using short-lived presigned URLs: the app hands out a URL for a
+`pending/` key, the phone uploads to it, and the app then checks the stored
+file (size, real image, EXIF capture time), makes the thumbnail and moves it to
+its final key. Photo bytes no longer pass through the app's request, so the
+host's ~4.5 MB request limit doesn't apply. Two one-time bucket settings:
+
+1. **CORS** — allow your app's origin to `PUT` with a `Content-Type` header, e.g.
+   ```json
+   [{ "AllowedOrigins": ["https://your-app.example.com"], "AllowedMethods": ["PUT"],
+      "AllowedHeaders": ["Content-Type"], "MaxAgeSeconds": 3000 }]
+   ```
+2. **Lifecycle rule** — expire objects under `photos/pending/` (your
+   `S3_PREFIX` + `pending/`) after 1 day, to sweep up uploads that were never
+   finished (dropped connection mid-upload).
+
+If CORS isn't set up yet, the phone notices the bucket refusing it and
+automatically falls back to uploading through the app, so nothing breaks in
+the meantime.
 
 ## Backups
 

@@ -122,6 +122,16 @@ document.querySelectorAll('input[type=file].file-count').forEach((input) => {
   }
 })();
 
+// --- Task photo buttons upload as soon as the photo is taken ---
+document.querySelectorAll('form[data-photo-autoupload] input[type=file]').forEach((input) => {
+  input.addEventListener('change', (e) => {
+    // Only a real camera pick — not the refresh fired after a failed upload,
+    // which would otherwise retry in a loop.
+    if (!e.isTrusted || !input.files || !input.files.length || !input.form) return;
+    if (input.form.requestSubmit) input.form.requestSubmit(); else input.form.submit();
+  });
+});
+
 // --- Ticking "Done" saves the item straight away (unless photos are waiting) ---
 document.querySelectorAll('input[data-tick-save]').forEach((box) => {
   box.addEventListener('change', () => {
@@ -372,7 +382,7 @@ function encodeJpeg(img, maxEdge, quality) {
 }
 
 // Returns { file, takenAt } or throws an Error whose message is shown to the gardener.
-async function prepareLivePhoto(file, maxAgeHours) {
+async function prepareLivePhoto(file, maxAgeHours, maxBytes = LIVE_MAX_BYTES) {
   const bytes = new Uint8Array(await file.arrayBuffer());
   const Exif = window.GmgtExif;
   const info = Exif ? Exif.readCapture(bytes) : null;
@@ -390,7 +400,7 @@ async function prepareLivePhoto(file, maxAgeHours) {
   if (small || !img) {
     // Already small, or a format this browser can't draw (e.g. HEIC on Android):
     // send unchanged if it fits in one request.
-    if (file.size > LIVE_MAX_BYTES) {
+    if (file.size > maxBytes) {
       throw new Error(`"${file.name}" is too large to upload. Set the camera to JPG ("Most Compatible") and retake it.`);
     }
     return { file, takenAt };
@@ -411,7 +421,7 @@ async function prepareLivePhoto(file, maxAgeHours) {
   return { file: new File([out], name, { type: 'image/jpeg', lastModified: file.lastModified }), takenAt };
 }
 
-function uploadLivePhoto(endpoint, prepared, extra, onProgress) {
+function uploadViaApp(endpoint, prepared, extra, onProgress) {
   return new Promise((resolve, reject) => {
     const fd = new FormData();
     fd.append('_csrf', CSRF);
@@ -437,6 +447,78 @@ function uploadLivePhoto(endpoint, prepared, extra, onProgress) {
   });
 }
 
+const OFFLINE_MSG = 'No connection — photos not uploaded. Try again when you have signal.';
+
+// JSON POST to the app; resolves the parsed body or throws with its message.
+async function postJson(url, data) {
+  let res;
+  try {
+    res = await fetch(url, {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF },
+      body: JSON.stringify(data),
+    });
+  } catch (_) { throw new Error(OFFLINE_MSG); }
+  let body = null;
+  try { body = await res.json(); } catch (_) { body = null; }
+  if (!res.ok || !body || !body.ok) throw new Error((body && body.error) || 'Upload failed. Please try again.');
+  return body;
+}
+
+// PUT the photo straight to the storage bucket with its presigned URL.
+function putToBucket(url, headers, blob, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', url);
+    for (const [k, v] of Object.entries(headers || {})) xhr.setRequestHeader(k, v);
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
+    xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve()
+      : reject(Object.assign(new Error('Upload failed. Please try again.'), { status: xhr.status })));
+    // status 0: offline, or the bucket refused the browser (CORS not set up).
+    xhr.onerror = () => reject(Object.assign(new Error(OFFLINE_MSG), { status: 0 }));
+    xhr.ontimeout = xhr.onerror;
+    xhr.timeout = 120000;
+    xhr.send(blob);
+  });
+}
+
+function photoMime(file) {
+  if (file.type) return file.type;
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
+  return { heic: 'image/heic', heif: 'image/heif', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' }[ext] || '';
+}
+
+// Direct-to-bucket upload (presign -> PUT -> complete), falling back to the
+// one-photo-per-request app endpoint when the server has no bucket for it or
+// this browser can't reach the bucket. Remembered for the rest of the page.
+let directUploads = null; // null = not tried yet, false = use the app path
+async function uploadLivePhoto(endpoint, prepared, extra, onProgress) {
+  if (directUploads !== false) {
+    const meta = {
+      ...extra, content_type: photoMime(prepared.file), size: prepared.file.size,
+      taken_at: prepared.takenAt || '', tz: new Date().getTimezoneOffset(), name: prepared.file.name,
+    };
+    const pre = await postJson(`${endpoint}/presign`, meta);
+    if (pre.direct) {
+      try {
+        await putToBucket(pre.url, pre.headers, prepared.file, onProgress);
+      } catch (err) {
+        if (err.status !== 0 || navigator.onLine === false) throw err;
+        // Online but the bucket is unreachable from here (usually its CORS
+        // rules don't allow this site yet) — send through the app instead.
+        console.warn('Direct photo upload unavailable, using the app upload instead.');
+        directUploads = false;
+        return uploadViaApp(endpoint, prepared, extra, onProgress);
+      }
+      directUploads = true;
+      onProgress(1);
+      return postJson(`${endpoint}/complete`, { ...meta, ticket: pre.ticket });
+    }
+    directUploads = false;
+  }
+  return uploadViaApp(endpoint, prepared, extra, onProgress);
+}
+
 // Upload every selected photo of a data-photo-endpoint form. Resolves true when
 // all went up; on failure shows why, keeps the photos not yet uploaded
 // selected, and resolves false.
@@ -455,18 +537,22 @@ async function uploadLivePhotos(form) {
   const maxAge = Number(form.dataset.photoMaxAgeHours) || 0;
   const extra = {
     check_id: form.dataset.checkId || '',
+    task_id: form.dataset.taskId || '',
     caption: form.querySelector('[name=caption]') ? form.querySelector('[name=caption]').value : '',
     shared: form.querySelector('[name=shared]') && form.querySelector('[name=shared]').checked ? 'on' : '',
   };
   const total = files.length;
   let done = 0;
-  let next = prepareLivePhoto(files[0], maxAge);
+  // Straight to the bucket there's no request-size cap, so a photo the browser
+  // can't shrink (e.g. HEIC on Android) can still go up as-is.
+  const maxBytes = form.dataset.photoDirect === '1' && directUploads !== false ? 10 * 1024 * 1024 : LIVE_MAX_BYTES;
+  let next = prepareLivePhoto(files[0], maxAge, maxBytes);
   try {
     for (let i = 0; i < total; i++) {
       say(`Preparing photo ${i + 1} of ${total}…`);
       const prepared = await next;
       // Compress the following photo while this one uploads.
-      next = i + 1 < total ? prepareLivePhoto(files[i + 1], maxAge) : null;
+      next = i + 1 < total ? prepareLivePhoto(files[i + 1], maxAge, maxBytes) : null;
       if (next) next.catch(() => {}); // surfaced when awaited
       await uploadLivePhoto(form.dataset.photoEndpoint, prepared, extra, (p) => {
         say(`Uploading photo ${i + 1} of ${total}… ${Math.round(p * 100)}%`);

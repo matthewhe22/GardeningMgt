@@ -70,6 +70,7 @@ app.get('/health', asyncHandler(async (req, res) => {
   }
 }));
 
+const UPLOAD_ORIGINS = storage.directUploads() ? storage.uploadOrigins().map((o) => ` ${o}`).join('') : '';
 // Baseline security headers. The only external origin is the OpenStreetMap
 // tile server, used for the job-location map snapshot (img-src only).
 app.use((req, res, next) => {
@@ -78,6 +79,8 @@ app.use((req, res, next) => {
   res.set('Referrer-Policy', 'same-origin');
   res.set('Content-Security-Policy',
     "default-src 'self'; img-src 'self' data: blob: https://tile.openstreetmap.org; " +
+    // Job photos are PUT straight to the object-storage bucket (presigned URLs).
+    `connect-src 'self'${UPLOAD_ORIGINS}; ` +
     "style-src 'self' 'unsafe-inline'; " +
     "script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'self'");
   if (isProdHttps) res.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');

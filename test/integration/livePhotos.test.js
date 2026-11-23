@@ -59,6 +59,9 @@ test('live job photos', { skip: !TEST_DB && reason }, async (t) => {
   };
   const photoCount = async () => (await q1('SELECT COUNT(*)::int AS c FROM photos WHERE visit_id = $1', [visit.id])).c;
 
+  const task = await q1("INSERT INTO tasks (visit_id, assignee_id, title, created_by) VALUES ($1, $2, 'Fix tap', $2) RETURNING id",
+    [visit.id, gid]);
+
   // Render once so the checklist rows exist.
   await agent.get(`/visits/${visit.id}`);
   const checks = await q('SELECT id FROM visit_scope_checks WHERE visit_id = $1 ORDER BY position', [visit.id]);
@@ -137,9 +140,27 @@ test('live job photos', { skip: !TEST_DB && reason }, async (t) => {
     assert.doesNotMatch(res.text, /Choose from library/);
   });
 
-  await t.test('after a photo for item 2, the job completes', async () => {
+  await t.test('cannot complete while the ad-hoc task has no photo', async () => {
     const up = await send(await photo(new Date()), { check_id: String(checks[1].id) });
     assert.strictEqual(up.status, 200);
+    const res = await agent.post(`/visits/${visit.id}/timer/stop`).type('form').send({ _csrf: csrf, confirm_photos: 'on' });
+    assert.match(res.headers.location, /error=taskphotos/);
+    const page = await agent.get(`/visits/${visit.id}?error=taskphotos`);
+    assert.match(page.text, /1 task\(s\) still need a photo: Fix tap/);
+    assert.match(page.text, /data-task-id="\d+"/);
+  });
+
+  await t.test('a task id from another job is refused', async () => {
+    const other = await q1("INSERT INTO tasks (title, created_by) VALUES ('Elsewhere', $1) RETURNING id", [gid]);
+    const res = await send(await photo(new Date()), { task_id: String(other.id) });
+    assert.strictEqual(res.status, 404);
+  });
+
+  await t.test('after a task photo, the job completes', async () => {
+    const up = await send(await photo(new Date()), { task_id: String(task.id) });
+    assert.strictEqual(up.status, 200);
+    const row = await q1('SELECT task_id, shared, caption FROM photos WHERE filename = $1', [up.body.filename]);
+    assert.deepStrictEqual(row, { task_id: task.id, shared: false, caption: 'Fix tap' });
     const res = await agent.post(`/visits/${visit.id}/timer/stop`).type('form').send({ _csrf: csrf, confirm_photos: 'on' });
     assert.strictEqual(res.status, 302);
     assert.strictEqual(res.headers.location, `/visits/${visit.id}`);
@@ -154,5 +175,18 @@ test('live job photos', { skip: !TEST_DB && reason }, async (t) => {
     const legacy = await agent.post(`/visits/${visit.id}/photos?_csrf=${csrf}`).attach('photos', await photo(new Date()), 'x.jpg');
     assert.match(legacy.headers.location, /error=locked/);
     assert.strictEqual(await photoCount(), before);
+  });
+
+  await t.test('the gardener cannot delete evidence photos once the job is submitted', async () => {
+    const ph = await q1('SELECT id FROM photos WHERE task_id = $1', [task.id]);
+    const res = await agent.post(`/photos/${ph.id}/delete`).type('form').send({ _csrf: csrf });
+    assert.match(res.headers.location, /error=locked/);
+    assert.ok(await q1('SELECT 1 FROM photos WHERE id = $1', [ph.id]));
+  });
+
+  await t.test('without a bucket, presign tells the browser to use the app upload', async () => {
+    const res = await agent.post(`/visits/${visit.id}/photo/presign`).set('X-CSRF-Token', csrf).send({});
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.body.direct, false);
   });
 });

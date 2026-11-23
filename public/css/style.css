@@ -1719,6 +1719,11 @@ details > summary .inline-h { font-size: 1.05rem; }
 .scope-photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 8px; margin-top: 12px; }
 .scope-photos img { aspect-ratio: 1; object-fit: cover; }
 .scope-photos form { text-align: center; }
+.task-photo-form { margin-top: 8px; }
+/* Capture time under a small evidence thumbnail (the overlay chip is too wide there). */
+.photo figcaption.photo-taken { font-size: 0.68rem; line-height: 1.25; margin-top: 4px; color: var(--muted); }
+.task-photo-form .upload-status { margin: 6px 0 0; }
+.btn.scope-need-photo { border-color: var(--danger); }
 
 .scope-admin { list-style: none; padding: 0; margin: 0 0 16px; counter-reset: sc; }
 .scope-admin-item { display: grid; grid-template-columns: 1fr 160px; gap: 14px; padding: 12px 0;
