@@ -44,11 +44,11 @@ test('direct-to-bucket photo uploads', { skip: !(TEST_DB && TEST_S3) && reason }
   const sharp = require('sharp');
 
   const runId = Date.now();
-  async function gardener(tag) {
+  async function gardener(tag, role = 'gardener') {
     const email = `du-${tag}-${runId}@example.com`;
     const { id } = await q1(
-      "INSERT INTO users (name, email, password_hash, role) VALUES ($1, $2, $3, 'gardener') RETURNING id",
-      [`DU ${tag}`, email, bcrypt.hashSync('testpass123', 10)]);
+      'INSERT INTO users (name, email, password_hash, role) VALUES ($1, $2, $3, $4) RETURNING id',
+      [`DU ${tag}`, email, bcrypt.hashSync('testpass123', 10), role]);
     const agent = request.agent(app);
     const lp = await agent.get('/login');
     await agent.post('/login').type('form').send({ email, password: 'testpass123', _csrf: extractCsrf(lp.text) });
@@ -179,6 +179,56 @@ test('direct-to-bucket photo uploads', { skip: !(TEST_DB && TEST_S3) && reason }
     const res = await g.agent.post(`/visits/${visit.id}/photo/presign`).send({ content_type: 'image/jpeg', size: 20 });
     assert.strictEqual(res.status, 403);
   });
+
+  const admin = await gardener('admin', 'admin');
+
+  await t.test('admin Settings shows the photo-storage configuration without the secret', async () => {
+    const res = await admin.agent.get('/admin/settings');
+    assert.strictEqual(res.status, 200);
+    assert.match(res.text, /id="photo-storage"/);
+    assert.match(res.text, new RegExp(`<strong>${bucket}</strong>`));
+    assert.match(res.text, /set \(4 characters\)/, 'secret shown only as its length');
+    assert.doesNotMatch(res.text, /S3_SECRET_ACCESS_KEY<\/code><\/td><td>test</);
+  });
+
+  await t.test('admin "Test photo storage" runs every step from the server and passes', async () => {
+    const before = (await s3list()).length;
+    const res = await admin.agent.post('/admin/settings/test-storage').type('form').send({ _csrf: admin.csrf });
+    assert.strictEqual(res.status, 200);
+    assert.match(res.text, /Photo storage works: every upload step passed/);
+    const steps = (res.text.match(/<li class="ok">/g) || []).length;
+    assert.strictEqual(steps, 7, 'all seven steps reported as passed');
+    assert.doesNotMatch(res.text, /<li class="fail">/);
+    assert.strictEqual((await s3list()).length, before, 'the test leaves nothing behind in the bucket');
+    const log = await q1("SELECT details FROM activity_log WHERE action = 'settings.test' ORDER BY id DESC LIMIT 1");
+    assert.strictEqual(log.details, 'Photo storage test: OK');
+  });
+
+  await t.test('a gardener cannot run the storage test', async () => {
+    const res = await g.agent.post('/admin/settings/test-storage').type('form').send({ _csrf: g.csrf });
+    assert.strictEqual(res.status, 403);
+  });
+
+  async function s3list() {
+    const { ListObjectsV2Command } = require('@aws-sdk/client-s3');
+    return (await s3.send(new ListObjectsV2Command({ Bucket: bucket }))).Contents || [];
+  }
+});
+
+test('storage self-test explains a missing bucket', { skip: !TEST_S3 && 'set TEST_S3_ENDPOINT' }, () => {
+  const { spawnSync } = require('node:child_process');
+  const path = require('node:path');
+  const out = spawnSync(process.execPath, ['-e', `require(${JSON.stringify(path.join(__dirname, '..', '..', 'src', 'storage.js'))})
+    .selfTest().then((r) => process.stdout.write(JSON.stringify(r)));`], {
+    env: { ...process.env, S3_BUCKET: `gm-missing-${Date.now()}`, S3_ENDPOINT: TEST_S3, S3_REGION: 'us-east-1',
+      S3_ACCESS_KEY_ID: 'test', S3_SECRET_ACCESS_KEY: 'test' },
+    encoding: 'utf8',
+  });
+  assert.strictEqual(out.status, 0, out.stderr);
+  const r = JSON.parse(out.stdout);
+  assert.strictEqual(r.ok, false);
+  assert.strictEqual(r.steps.length, 1, 'stops at the first failing step');
+  assert.match(r.steps[0].detail, /does not exist/);
 });
 
 test('storage housekeeping: ensureBucket and sweeping stale pending uploads', { skip: !TEST_S3 && 'set TEST_S3_ENDPOINT' }, async () => {
