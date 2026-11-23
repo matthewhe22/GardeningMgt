@@ -1,15 +1,18 @@
 #!/usr/bin/env node
-// Configure and verify the photo bucket (Cloudflare R2, AWS S3 or any
-// S3-compatible store) for direct phone uploads, then run an end-to-end
-// self-test of the exact calls the app makes.
+// Configure and verify the photo bucket (Supabase Storage, Cloudflare R2, AWS
+// S3 or any S3-compatible store) for direct phone uploads, then run an
+// end-to-end self-test of the exact calls the app makes.
 //
 //   npm run storage:setup -- https://your-app.example.com [more origins…]
 //   npm run storage:setup -- --check-only https://your-app.example.com
 //
 // Origins default to APP_URL. Uses the same S3_* env vars as the app.
 //
+// 0. Creates the (private) bucket if it doesn't exist yet.
 // 1. CORS: lets those origins PUT photos straight to the bucket.
 // 2. Lifecycle: deletes unfinished uploads under <S3_PREFIX>pending/ after 1 day.
+//    Supabase Storage has neither (it answers browser CORS itself, and the
+//    app's daily job clears old pending/ uploads), so both are skipped there.
 // 3. Self-test: presigned PUT (as a phone would, incl. the CORS preflight),
 //    head, promote (copy + delete), read back, delete.
 //
@@ -33,6 +36,11 @@ const origins = args.filter((a) => !a.startsWith('--'))
 
 let failures = 0;
 const ok = (msg) => console.log(`  ✔ ${msg}`);
+const note = (msg) => console.log(`  – ${msg}`);
+const warn = (msg) => console.log(`  ⚠ ${msg}`);
+// Supabase Storage doesn't implement bucket CORS / lifecycle rules.
+const noBucketRules = /(^|\.)supabase\.co$/.test((() => { try { return new URL(process.env.S3_ENDPOINT || '').hostname; } catch (_) { return ''; } })());
+const notImplemented = (e) => e && (e.name === 'NotImplemented' || e.$metadata?.httpStatusCode === 501);
 const bad = (msg) => { failures++; console.log(`  ✘ ${msg}`); };
 const denied = (e) => e && (e.name === 'AccessDenied' || e.$metadata?.httpStatusCode === 403);
 const missing = (e) => e && (/NoSuchCORSConfiguration|NoSuchLifecycleConfiguration|NotFound/.test(e.name || e.Code || '')
@@ -54,6 +62,7 @@ async function client() {
 }
 
 async function setupCors(s3, Bucket) {
+  if (noBucketRules) return note('CORS: not configurable on Supabase Storage (it answers browser uploads itself) — checked below');
   const { GetBucketCorsCommand, PutBucketCorsCommand } = require('@aws-sdk/client-s3');
   const rule = { ID: CORS_ID, AllowedOrigins: origins, AllowedMethods: ['PUT'], AllowedHeaders: ['content-type'], MaxAgeSeconds: 3600 };
   try {
@@ -63,6 +72,7 @@ async function setupCors(s3, Bucket) {
     await s3.send(new PutBucketCorsCommand({ Bucket, CORSConfiguration: { CORSRules: [...rules, rule] } }));
     ok(`CORS: ${origins.join(', ')} may PUT photos`);
   } catch (e) {
+    if (notImplemented(e)) return note('CORS: this provider has no bucket CORS settings — checked below');
     if (!denied(e)) return bad(`CORS: ${e.name || e.message}`);
     bad('CORS: this token may not change bucket settings. Set it in the dashboard instead');
     console.log('    (R2: bucket → Settings → CORS policy), with:');
@@ -72,6 +82,7 @@ async function setupCors(s3, Bucket) {
 }
 
 async function setupLifecycle(s3, Bucket) {
+  if (noBucketRules) return note(`Lifecycle: not available on Supabase Storage — the app's daily job deletes unfinished uploads under ${storage.pendingKey('')}`);
   const { GetBucketLifecycleConfigurationCommand, PutBucketLifecycleConfigurationCommand } = require('@aws-sdk/client-s3');
   const Prefix = storage.pendingKey('');
   const rule = { ID: LIFECYCLE_ID, Status: 'Enabled', Filter: { Prefix }, Expiration: { Days: 1 } };
@@ -82,6 +93,7 @@ async function setupLifecycle(s3, Bucket) {
     await s3.send(new PutBucketLifecycleConfigurationCommand({ Bucket, LifecycleConfiguration: { Rules: [...rules, rule] } }));
     ok(`Lifecycle: unfinished uploads under ${Prefix} are deleted after 1 day`);
   } catch (e) {
+    if (notImplemented(e)) return note(`Lifecycle: this provider has no lifecycle rules — the app's daily job deletes unfinished uploads under ${Prefix}`);
     if (!denied(e)) return bad(`Lifecycle: ${e.name || e.message}`);
     bad('Lifecycle: this token may not change bucket settings. In the dashboard');
     console.log(`    (R2: bucket → Settings → Object lifecycle rules) add: prefix "${Prefix}", delete after 1 day.`);
@@ -112,7 +124,7 @@ async function selfTest() {
     }
     if (pre.ok && (allow === origin || allow === '*')) ok(`CORS preflight from ${origin} accepted`);
     else {
-      bad(`CORS preflight from ${origin} refused (HTTP ${pre.status}) — phones will fall back to uploading through the app`);
+      warn(`CORS preflight from ${origin} refused (HTTP ${pre.status}) — phones will fall back to uploading through the app (slower, but works)`);
       console.log(`    response body: ${detail || '(empty)'}`);
       console.log(`    access-control-allow-origin: ${allow || '(none)'}`);
       try {
@@ -148,11 +160,16 @@ async function main() {
   if (!origins.length) console.log('  ! No app origin given (pass it, or set APP_URL) — skipping CORS setup and the preflight check.');
   const s3 = await client();
   if (!checkOnly) {
+    try {
+      if (await storage.ensureBucket()) ok(`Created private bucket "${Bucket}"`); else ok(`Bucket "${Bucket}" exists`);
+    } catch (e) {
+      bad(`Bucket: ${e.name || e.message}${denied(e) ? ' (this key may not create buckets — create it in the dashboard)' : ''}`);
+    }
     if (origins.length) await setupCors(s3, Bucket);
     await setupLifecycle(s3, Bucket);
   }
   try { await selfTest(); } catch (e) { bad(`Self-test: ${e.name || ''} ${e.message}`); }
-  console.log(failures ? `\n${failures} problem(s) — see above.` : '\nAll good: phones can upload straight to the bucket.');
+  console.log(failures ? `\n${failures} problem(s) — see above.` : '\nAll good: the bucket works for photo uploads.');
   process.exit(failures ? 1 : 0);
 }
 

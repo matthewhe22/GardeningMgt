@@ -133,6 +133,44 @@ async function deletePending(filename) {
 }
 
 /**
+ * Delete unfinished uploads under pending/ older than `olderThanMs` (default
+ * one day). Providers without bucket lifecycle rules (Supabase Storage) rely
+ * on this — it runs from the daily cron job — and it's harmless elsewhere.
+ * Returns how many objects were removed.
+ */
+async function sweepPending({ olderThanMs = 24 * 3600 * 1000, now = Date.now() } = {}) {
+  if (!enabled()) return 0;
+  const { ListObjectsV2Command } = require('@aws-sdk/client-s3');
+  const Prefix = pendingKey('');
+  let removed = 0;
+  let ContinuationToken;
+  do {
+    const out = await getClient().send(new ListObjectsV2Command({ Bucket: BUCKET, Prefix, ContinuationToken }));
+    for (const obj of out.Contents || []) {
+      if (!obj.LastModified || now - obj.LastModified.getTime() < olderThanMs) continue;
+      await deletePending(obj.Key.slice(Prefix.length));
+      removed++;
+    }
+    ContinuationToken = out.IsTruncated ? out.NextContinuationToken : undefined;
+  } while (ContinuationToken);
+  return removed;
+}
+
+/** Create the bucket if it doesn't exist yet (private). Returns true if it was created. */
+async function ensureBucket() {
+  const { HeadBucketCommand, CreateBucketCommand } = require('@aws-sdk/client-s3');
+  try {
+    await getClient().send(new HeadBucketCommand({ Bucket: BUCKET }));
+    return false;
+  } catch (e) {
+    const code = e && (e.$metadata?.httpStatusCode);
+    if (code !== 404 && e.name !== 'NotFound' && e.name !== 'NoSuchBucket') throw e;
+  }
+  await getClient().send(new CreateBucketCommand({ Bucket: BUCKET }));
+  return true;
+}
+
+/**
  * Origins the browser PUTs to, for the page's CSP connect-src. Path-style
  * custom endpoints (R2/MinIO/Supabase) use the endpoint's origin; AWS uses the
  * bucket's virtual-host names. S3_UPLOAD_ORIGIN overrides (comma-separated).
@@ -153,5 +191,5 @@ const directUploads = () => enabled() && process.env.S3_DIRECT_UPLOADS !== '0';
 module.exports = {
   enabled, keyFor, putObject, getObjectStream, getObjectBuffer, deleteObject,
   headObject, pendingKey, presignPendingPut, headPending, getPendingBuffer, promotePending, deletePending,
-  uploadOrigins, directUploads,
+  sweepPending, ensureBucket, uploadOrigins, directUploads,
 };

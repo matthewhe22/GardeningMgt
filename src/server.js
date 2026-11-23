@@ -169,7 +169,10 @@ app.get('/cron/reminders', asyncHandler(async (req, res) => {
   // over a few days without ever risking a request timeout.
   const { geocodeMissingBatch } = require('./geocode');
   const geocoded = await geocodeMissingBatch(Number(process.env.GEOCODE_BATCH || 5));
-  res.json({ ok: true, date: today, sent, rolled, pruned, geocoded });
+  // Unfinished direct photo uploads (dropped connections) left under pending/.
+  let sweptUploads = 0;
+  try { sweptUploads = await storage.sweepPending(); } catch (e) { console.warn('[cron] sweeping pending uploads failed:', e.message); }
+  res.json({ ok: true, date: today, sent, rolled, pruned, geocoded, sweptUploads });
 }));
 
 // CSRF protection on all state-changing requests (after session is set up).

@@ -87,7 +87,33 @@ configuring the vars: `npm run migrate:photos`. Each photo is checked in the
 bucket before its database copy is cleared; afterwards run `VACUUM FULL photos;`
 (Supabase SQL editor, quiet time) so the database actually shrinks.
 
-#### Cloudflare R2 setup (recommended)
+#### Supabase Storage setup (recommended if your database is on Supabase)
+
+Supabase Storage speaks the S3 protocol, so it needs no new account and sits in
+the same region as your database. On a **Pro** plan it includes 100 GB of
+storage and 250 GB of downloads.
+
+1. Supabase → your project → **Storage → Settings → S3 Connection**: note the
+   **Endpoint** (`https://<project-ref>.storage.supabase.co/storage/v1/s3`) and
+   **Region**, then **New access key** and copy the Access Key ID and Secret.
+   These keys bypass row-level security: keep them server-side only (Vercel
+   env vars + your own terminal), never in the browser or the repo.
+2. Vercel → Project → Settings → Environment Variables, then redeploy:
+   `S3_BUCKET=photos`, `S3_ENDPOINT=<the endpoint above>`,
+   `S3_REGION=<the region above, e.g. ap-southeast-2>`, `S3_ACCESS_KEY_ID`,
+   `S3_SECRET_ACCESS_KEY`.
+3. Create the bucket and self-test the real upload path from your machine
+   (same variables exported; the bucket is created **private** if missing):
+   ```bash
+   npm run storage:setup -- https://<your-app-domain>
+   ```
+   Supabase has no bucket CORS or lifecycle settings, so the script skips those.
+   Browser uploads rely on Supabase answering CORS itself; if the preflight line
+   shows ⚠, phones simply upload through the app instead (slower, still works).
+   Unfinished uploads under `photos/pending/` are deleted by the app's daily job.
+4. `npm run migrate:photos`, then `VACUUM FULL photos;` — see above.
+
+#### Cloudflare R2 setup (alternative)
 
 1. Cloudflare dashboard → **R2** → *Create bucket*, e.g. `gardeningmgt-photos`.
    Set **Location → Specify jurisdiction/hint → Oceania (OC)** — it can't be

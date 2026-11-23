@@ -180,3 +180,34 @@ test('direct-to-bucket photo uploads', { skip: !(TEST_DB && TEST_S3) && reason }
     assert.strictEqual(res.status, 403);
   });
 });
+
+test('storage housekeeping: ensureBucket and sweeping stale pending uploads', { skip: !TEST_S3 && 'set TEST_S3_ENDPOINT' }, async () => {
+  const bucket = `gm-sweep-${Date.now()}`;
+  Object.assign(process.env, {
+    S3_BUCKET: bucket, S3_ENDPOINT: TEST_S3, S3_REGION: 'us-east-1', S3_ACCESS_KEY_ID: 'test', S3_SECRET_ACCESS_KEY: 'test',
+  });
+  // storage.js reads its env at load: use a fresh copy.
+  delete require.cache[require.resolve('../../src/storage')];
+  const storage = require('../../src/storage');
+
+  assert.strictEqual(await storage.ensureBucket(), true, 'creates a missing bucket');
+  assert.strictEqual(await storage.ensureBucket(), false, 'leaves an existing bucket alone');
+
+  const put = (key) => storage.putObject(key, Buffer.from('x'), 'image/jpeg');
+  await put('keep.jpg');                       // a finished photo — never swept
+  await storage.putObject('pending/a.jpg', Buffer.from('x'), 'image/jpeg').catch(() => {});
+  // putObject writes under photos/; pending uploads live under photos/pending/.
+  const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
+  const s3 = new S3Client({ region: 'us-east-1', endpoint: TEST_S3, forcePathStyle: true,
+    credentials: { accessKeyId: 'test', secretAccessKey: 'test' } });
+  for (const n of ['p1.jpg', 'p2.jpg', 'p3.jpg']) {
+    await s3.send(new PutObjectCommand({ Bucket: bucket, Key: storage.pendingKey(n), Body: Buffer.from('x') }));
+  }
+  assert.ok(await storage.headPending('p1.jpg'));
+
+  assert.strictEqual(await storage.sweepPending(), 0, 'fresh pending uploads are left alone');
+  const removed = await storage.sweepPending({ olderThanMs: 0 });
+  assert.strictEqual(removed, 4, 'all pending uploads removed once they are "old" (3 + the stray one)');
+  assert.strictEqual(await storage.headPending('p1.jpg'), null);
+  assert.ok(await storage.headObject('keep.jpg'), 'finished photos are never touched');
+});
