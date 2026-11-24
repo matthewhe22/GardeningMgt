@@ -180,6 +180,8 @@ function startReminderScheduler() {
     await backfillSchedules();
     await pruneOldRecords();
     try { await require('./storage').sweepPending(); } catch (e) { console.warn('[reminders] sweeping pending uploads failed:', e.message); }
+    try { await require('./storage').sweepOrphans(q); } catch (e) { console.warn('[reminders] sweeping orphaned photos failed:', e.message); }
+    try { await require('./photoBackup').backupPhotos(q, { maxMs: 10 * 60000 }); } catch (e) { console.warn('[reminders] photo backup failed:', e.message); }
     if (sent) console.log(`[reminders] auto-sent ${sent} reminder(s) for ${today}`);
   }, { timezone: TZ });
 }

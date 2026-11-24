@@ -481,7 +481,7 @@ function ensureCriticalSchema() {
 
 // Bump when SCHEMA or the migrations below change, so existing databases
 // re-run the DDL exactly once instead of on every serverless cold start.
-const SCHEMA_VERSION = '18';
+const SCHEMA_VERSION = '19';
 
 /**
  * Numeric, forward-only comparison of a stored schema_version against this
@@ -562,6 +562,11 @@ async function runMigrations() {
   // duration_minutes and only the time since resumed_at is added on
   // re-completion (it used to count the whole gap since the first start).
   await pool.query('ALTER TABLE visits ADD COLUMN IF NOT EXISTS resumed_at TIMESTAMP');
+  // Where a job photo's capture time came from: 'exif' (the camera's own
+  // record) or 'client' (the phone's clock, when the file carried none).
+  await pool.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS taken_source TEXT');
+  // Set once the original has been copied to the off-site backup bucket.
+  await pool.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS backed_up_at TIMESTAMP');
   await pool.query('CREATE INDEX IF NOT EXISTS idx_photos_task ON photos (task_id)');
   await pool.query('ALTER TABLE job_scopes ADD COLUMN IF NOT EXISTS library_id INTEGER REFERENCES scope_library(id) ON DELETE SET NULL');
   // One row per library item per job, so concurrent template applies can't

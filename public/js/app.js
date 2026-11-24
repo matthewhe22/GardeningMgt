@@ -483,7 +483,10 @@ function putToBucket(url, headers, blob, onProgress) {
 }
 
 function photoMime(file) {
-  if (file.type) return file.type;
+  // Some browsers report JPEGs as "image/jpg" or "image/pjpeg".
+  const t = (file.type || '').toLowerCase();
+  if (t === 'image/jpg' || t === 'image/pjpeg') return 'image/jpeg';
+  if (t) return t;
   const ext = (file.name.split('.').pop() || '').toLowerCase();
   return { heic: 'image/heic', heif: 'image/heif', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' }[ext] || '';
 }
@@ -503,7 +506,10 @@ async function uploadLivePhoto(endpoint, prepared, extra, onProgress) {
       try {
         await putToBucket(pre.url, pre.headers, prepared.file, onProgress);
       } catch (err) {
-        if (err.status !== 0 || navigator.onLine === false) throw err;
+        // A refused connection means the bucket doesn't accept this browser
+        // (CORS) — but only if no direct upload has worked on this page yet;
+        // after one has, it's just a dropped connection: report it, retry later.
+        if (err.status !== 0 || navigator.onLine === false || directUploads === true) throw err;
         // Online but the bucket is unreachable from here (usually its CORS
         // rules don't allow this site yet) — send through the app instead.
         console.warn('Direct photo upload unavailable, using the app upload instead.');

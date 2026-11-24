@@ -76,7 +76,7 @@ async function insertPhotoRow({
   filename, originalName, mime, buffer, inline,
   caption = null, visitId = null, issueId = null, commentId = null,
   jobScopeId = null, scopeCheckId = null, libraryScopeId = null, taskId = null, userId, shared = true,
-  takenAt = null,
+  takenAt = null, takenSource = null,
 }) {
   // The (small) thumbnail always stays in Postgres regardless of storage mode
   // — cheap enough to keep the DB small while still avoiding a second
@@ -84,12 +84,12 @@ async function insertPhotoRow({
   const thumbData = await makeThumbnail(buffer);
   await pool.query(
     `INSERT INTO photos (filename, original_name, mime, data, thumb_data, caption, visit_id, issue_id, visit_comment_id,
-                         job_scope_id, scope_check_id, library_scope_id, uploaded_by, shared, taken_at, task_id)
+                         job_scope_id, scope_check_id, library_scope_id, uploaded_by, shared, taken_at, task_id, taken_source)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-             ($15::timestamptz AT TIME ZONE 'UTC'), $16)
+             ($15::timestamptz AT TIME ZONE 'UTC'), $16, $17)
      ON CONFLICT (filename) DO NOTHING`,
     [filename, originalName, mime, inline ? buffer : Buffer.alloc(0), thumbData, caption, visitId, issueId, commentId,
-      jobScopeId, scopeCheckId, libraryScopeId, userId, shared, takenAt ? takenAt.toISOString() : null, taskId]
+      jobScopeId, scopeCheckId, libraryScopeId, userId, shared, takenAt ? takenAt.toISOString() : null, taskId, takenSource]
   );
   return filename;
 }

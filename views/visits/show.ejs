@@ -269,7 +269,7 @@
         <% c.photos.forEach(ph => { %>
           <figure class="photo">
             <a href="/uploads/<%= ph.filename %>" target="_blank"><img src="/uploads/<%= ph.filename %>/thumb" alt="<%= c.title %>" loading="lazy"></a>
-            <% if (ph.taken_at) { %><figcaption class="photo-taken">Taken <%= fmtDateTime(ph.taken_at) %></figcaption><% } %>
+            <% if (ph.taken_at) { %><figcaption class="photo-taken">Taken <%= fmtDateTime(ph.taken_at) %><% if (staff && ph.taken_source === 'client') { %><br><span class="photo-unverified" title="The photo file carried no camera time, so the phone's clock was used">time from phone</span><% } %></figcaption><% } %>
             <% if (!locked) { %>
             <form method="post" action="/visits/<%= visit.id %>/scope/<%= c.id %>/photos/<%= ph.id %>/delete" data-confirm="Remove this photo?"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
               <button class="link-btn danger-link">✕ remove</button></form>
@@ -304,7 +304,7 @@
             <% tPhotos.forEach(ph => { %>
               <figure class="photo">
                 <a href="/uploads/<%= ph.filename %>" target="_blank"><img src="/uploads/<%= ph.filename %>/thumb" alt="<%= t.title %>" loading="lazy"></a>
-                <% if (ph.taken_at) { %><figcaption class="photo-taken">Taken <%= fmtDateTime(ph.taken_at) %></figcaption><% } %>
+                <% if (ph.taken_at) { %><figcaption class="photo-taken">Taken <%= fmtDateTime(ph.taken_at) %><% if (staff && ph.taken_source === 'client') { %><br><span class="photo-unverified" title="The photo file carried no camera time, so the phone's clock was used">time from phone</span><% } %></figcaption><% } %>
                 <% if (running && !locked && (staff || ph.uploaded_by === user.id)) { %>
                 <form method="post" action="/photos/<%= ph.id %>/delete" data-confirm="Remove this photo?"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
                   <button class="link-btn danger-link">✕ remove</button></form>
@@ -351,6 +351,7 @@
           <a href="/uploads/<%= ph.filename %>" target="_blank"><img src="/uploads/<%= ph.filename %>/thumb" alt="<%= ph.caption || ph.original_name %>" loading="lazy"></a>
           <figcaption>
             <span class="photo-stamp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M8 3v4M16 3v4M3.5 10h17"/></svg> <%= ph.taken_at ? 'Taken ' + fmtDateTime(ph.taken_at) : fmtDateTime(ph.created_at) %></span><br>
+            <% if (staff && ph.taken_source === 'client') { %><span class="photo-unverified" title="The photo file carried no camera time, so the phone's clock was used">time from phone</span><br><% } %>
             <% if (ph.caption) { %><%= ph.caption %> · <% } %><span class="muted">by <%= ph.uploader_name %></span>
             <% if (staff || ph.uploaded_by === user.id) { %>
               <form method="post" action="/photos/<%= ph.id %>/delete" class="inline" data-confirm="Delete this photo?"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %><button class="link-btn link-btn-danger">Delete</button></form>

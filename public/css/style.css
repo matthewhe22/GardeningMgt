@@ -1802,3 +1802,6 @@ details.fold[open] > summary { margin-bottom: 10px; }
 .storage-steps li.fail { color: var(--danger); }
 /* Long URLs in setup instructions must wrap, not push the page sideways on phones. */
 .card p code, .card li code { overflow-wrap: anywhere; }
+
+/* Job photo whose capture time came from the phone's clock, not the camera. */
+.photo-unverified { font-size: 0.68rem; color: var(--warning, #9a6700); font-weight: 600; }
