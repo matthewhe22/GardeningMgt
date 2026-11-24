@@ -41,9 +41,20 @@ async function revokeSessions(userId) {
   await q1('UPDATE users SET session_version = session_version + 1 WHERE id = $1 RETURNING session_version', [userId]);
 }
 
+/** A same-site path that's safe to send the browser back to after sign-in, or null. */
+function safeNext(value) {
+  const s = String(value || '');
+  return /^\/(?![\/\\])[^\s]*$/.test(s) && !s.startsWith('/login') && s.length <= 500 ? s : null;
+}
+
 function requireLogin(req, res, next) {
   // res.locals.user is set for every request in server.js
-  if (!res.locals.user) return res.redirect('/login');
+  if (!res.locals.user) {
+    // A page opened from a link (e.g. a photo in an emailed report): come back
+    // to it after signing in.
+    const back = req.method === 'GET' ? safeNext(req.originalUrl) : null;
+    return res.redirect(back && back !== '/' ? `/login?next=${encodeURIComponent(back)}` : '/login');
+  }
   req.user = res.locals.user;
   next();
 }
@@ -59,4 +70,4 @@ function requireRole(...roles) {
 
 const isStaff = (user) => user.role === 'admin' || user.role === 'supervisor';
 
-module.exports = { currentUser, newSession, revokeSessions, SESSION_MAX_AGE_MS, requireLogin, requireRole, isStaff };
+module.exports = { safeNext, currentUser, newSession, revokeSessions, SESSION_MAX_AGE_MS, requireLogin, requireRole, isStaff };

@@ -8,6 +8,7 @@
     </div>
     <% if (error) { %><p class="alert alert-error"><%= error %></p><% } %>
     <form method="post" action="/login"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+      <% if (locals.next) { %><input type="hidden" name="next" value="<%= next %>"><% } %>
       <label>Email <input type="email" name="email" required autofocus autocomplete="username"></label>
       <label>Password <input type="password" name="password" required autocomplete="current-password"></label>
       <button class="btn btn-primary">Sign in</button>

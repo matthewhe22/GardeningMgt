@@ -727,7 +727,8 @@ router.get('/:id/report', asyncHandler(async (req, res) => {
     .replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'job';
   // ?download=1 returns a PDF file; otherwise the report opens as HTML in the tab.
   if (req.query.download === '1') {
-    const pdf = await renderReportPdf(data);
+    // Staff copy: each photo links to its full-size original in the app.
+    const pdf = await renderReportPdf(data, { photoLinkBase: baseUrlFrom(req) });
     res.set('Content-Type', 'application/pdf');
     res.set('Content-Disposition',
       `attachment; filename="completion-report-${slug}-${visit.scheduled_date}.pdf"`);

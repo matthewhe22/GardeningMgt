@@ -86,7 +86,7 @@ test('CSRF double-submit protection', { skip: !TEST_DB && reason }, async (t) =>
     // to /login instead of rendering.
     const check = await agent.get('/profile');
     assert.strictEqual(check.status, 302);
-    assert.strictEqual(check.headers.location, '/login');
+    assert.strictEqual(check.headers.location, '/login?next=%2Fprofile');
   });
 
   await t.test('a state-changing GET-adjacent route (POST /visits/:id/status) is also CSRF-gated', async () => {
