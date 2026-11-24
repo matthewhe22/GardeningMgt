@@ -2,7 +2,7 @@ const express = require('express');
 const { q, q1 } = require('../db');
 const { requireRole } = require('../auth');
 const { asyncHandler } = require('../asyncHandler');
-const { today: businessToday } = require('../time');
+const { today: businessToday, localDateSql, fmtDateTime } = require('../time');
 const { isValidDate } = require('../recurrence');
 
 const router = express.Router();
@@ -62,14 +62,14 @@ router.get('/', asyncHandler(async (req, res) => {
     GROUP BY u.id, u.name ORDER BY completed DESC`, [from, to]),
     q(`
     SELECT status, COUNT(*)::int AS count FROM issues
-    WHERE created_at::date BETWEEN $1 AND $2 GROUP BY status`, [from, to]),
+    WHERE ${localDateSql('created_at')} BETWEEN $1 AND $2 GROUP BY status`, [from, to]),
     q(`
     SELECT inv.status, COUNT(*)::int AS count,
       COALESCE(SUM((SELECT SUM(quantity * unit_price) FROM invoice_items WHERE invoice_id = inv.id)), 0) AS total
     FROM invoices inv JOIN visits v ON v.id = inv.visit_id
     WHERE v.scheduled_date BETWEEN $1 AND $2
     GROUP BY inv.status`, [from, to]),
-    q1('SELECT COUNT(*)::int AS c FROM photos WHERE created_at::date BETWEEN $1 AND $2', [from, to]),
+    q1(`SELECT COUNT(*)::int AS c FROM photos WHERE ${localDateSql('created_at')} BETWEEN $1 AND $2`, [from, to]),
   ]);
   const photoCount = photoRow.c;
 
@@ -112,7 +112,7 @@ router.get('/export-invoices.csv', asyncHandler(async (req, res) => {
     ORDER BY v.scheduled_date, inv.number`, [from, to]);
   const csv = toCsv(
     ['Number', 'Status', 'Visit date', 'Property', 'Issued', 'Due', 'Paid', 'Total'],
-    rows.map((r) => [r.number, r.status, r.scheduled_date, r.property, r.issued_at || '', r.due_at || '', r.paid_at || '', r.total.toFixed(2)])
+    rows.map((r) => [r.number, r.status, r.scheduled_date, r.property, r.issued_at ? fmtDateTime(r.issued_at) : '', r.due_at || '', r.paid_at ? fmtDateTime(r.paid_at) : '', r.total.toFixed(2)])
   );
   sendCsv(res, `invoices-${from}_to_${to}.csv`, csv);
 }));
@@ -125,11 +125,11 @@ router.get('/export-issues.csv', asyncHandler(async (req, res) => {
     FROM issues i
     JOIN properties p ON p.id = i.property_id
     LEFT JOIN users u ON u.id = i.reported_by
-    WHERE i.created_at::date BETWEEN $1 AND $2
+    WHERE ${localDateSql('i.created_at')} BETWEEN $1 AND $2
     ORDER BY i.created_at`, [from, to]);
   const csv = toCsv(
     ['Reported', 'Title', 'Status', 'Priority', 'Property', 'Reporter'],
-    rows.map((r) => [r.created_at, r.title, r.status, r.priority, r.property, r.reporter_name || ''])
+    rows.map((r) => [fmtDateTime(r.created_at), r.title, r.status, r.priority, r.property, r.reporter_name || ''])
   );
   sendCsv(res, `issues-${from}_to_${to}.csv`, csv);
 }));

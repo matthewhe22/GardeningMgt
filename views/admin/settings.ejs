@@ -14,6 +14,7 @@
     Neon's "-pooler" host) — once switched, set <code>REQUIRE_DB_POOLER=1</code> to make this a
     hard boot-time failure instead of a warning.</p>
 <% } %>
+<p class="muted">Dates and times are shown in <strong><%= locals.businessTz || 'Australia/Melbourne' %></strong> time<% if (locals.businessTz && locals.businessTz !== 'Australia/Melbourne') { %> (set by the BUSINESS_TZ variable in the hosting settings — remove it to use Melbourne time)<% } %>.</p>
 <% if (locals.saved) { %><p class="alert alert-ok">Settings saved.</p><% } %>
 <% if (locals.secretNeeded) { %><p class="alert alert-error">Nothing was saved: you changed the server address, so type the <%= secretNeeded %> again too. A saved secret is only sent to the server it was entered for.</p><% } %>
 <% if (locals.test) { %>

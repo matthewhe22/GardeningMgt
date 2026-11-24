@@ -1,0 +1,78 @@
+<%- include('../partials/header') %>
+<h1>Clean up old jobs</h1>
+<p class="muted">Close off work that was never finished in the app. Nothing is deleted: photos, checklists and
+  tasks stay on each visit, and the activity log records every visit changed. Contracts left with no upcoming
+  visit get their next one booked by the daily job.</p>
+
+<% if (done === 'overdue') { %><p class="alert alert-ok"><%= n %> overdue visit(s) closed.</p><% } %>
+<% if (done === 'stuck') { %><p class="alert alert-ok"><%= n %> stuck job(s) closed.</p><% } %>
+<% if (flash === 'confirm') { %><p class="alert alert-error">Tick the confirmation box first.</p><% } %>
+<% if (flash === 'none') { %><p class="alert alert-error">Select at least one job first.</p><% } %>
+
+<div class="card" id="overdue">
+  <h2>Overdue visits <span class="muted">(still scheduled, date passed)</span></h2>
+  <form method="get" action="/admin/cleanup#overdue" class="filter-row">
+    <label>Visits dated before
+      <input type="date" name="before" value="<%= before %>" max="<%= today %>"></label>
+    <button class="btn">Show</button>
+  </form>
+  <% if (!overdueTotal) { %>
+    <p class="muted">No scheduled visits dated before <%= before %>.</p>
+  <% } else { %>
+    <table class="table">
+      <tr><th>Month</th><th>Visits</th></tr>
+      <% byMonth.forEach(r => { %><tr><td><%= r.month %></td><td><%= r.n %></td></tr><% }) %>
+      <tr><th>Total</th><th><%= overdueTotal %></th></tr>
+    </table>
+    <% if (keptRecent) { %><p class="muted"><%= keptRecent %> more overdue visit(s) dated from <%= before %> to yesterday are left alone, so gardeners can still catch up on them.</p><% } %>
+    <form method="post" action="/admin/cleanup/overdue" class="form-grid" data-confirm="Close <%= overdueTotal %> overdue visit(s)? This can't be undone in bulk."><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+      <input type="hidden" name="before" value="<%= before %>">
+      <label class="span2">Mark them as
+        <select name="action">
+          <option value="skipped">Skipped (missed — the work wasn't done)</option>
+          <option value="cancelled">Cancelled (called off)</option>
+        </select></label>
+      <label class="span2 confirm-line"><input type="checkbox" name="confirm" required>
+        Close all <%= overdueTotal %> visit(s) dated before <%= before %></label>
+      <button class="btn btn-danger">Close <%= overdueTotal %> overdue visit(s)</button>
+    </form>
+  <% } %>
+</div>
+
+<div class="card" id="stuck">
+  <h2>Stuck jobs <span class="muted">(started, never completed)</span></h2>
+  <p class="muted">In progress for more than <%= stuckHours %> hours, or from an earlier day. Open a job to complete it
+    properly (Manage job), or close the ones that won't be finished.</p>
+  <% if (!stuck.length) { %>
+    <p class="muted">No stuck jobs.</p>
+  <% } else { %>
+    <form method="post" action="/admin/cleanup/stuck" data-confirm="Close the selected job(s)?"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+      <div class="table-wrap">
+      <table class="table">
+        <tr><th></th><th>Job</th><th>Date</th><th>Site</th><th>Gardener</th><th>Started</th><th>Checklist</th><th>Photos</th></tr>
+        <% stuck.forEach(v => { %>
+        <tr>
+          <td><input type="checkbox" name="ids" value="<%= v.id %>" aria-label="Select job #<%= v.id %>"></td>
+          <td><a href="/visits/<%= v.id %>">#<%= v.id %></a></td>
+          <td><%= v.scheduled_date %></td>
+          <td><%= v.property_name || '—' %></td>
+          <td><%= v.gardener_name || '—' %></td>
+          <td><%= fmtDateTime(v.started_at) %></td>
+          <td><%= v.checks ? `${v.checks_done}/${v.checks}` : '—' %></td>
+          <td><%= v.photos %></td>
+        </tr>
+        <% }) %>
+      </table>
+      </div>
+      <div class="form-grid" style="margin-top:10px">
+        <label class="span2">Mark selected as
+          <select name="action">
+            <option value="skipped">Skipped (missed — not finished)</option>
+            <option value="cancelled">Cancelled (called off)</option>
+          </select></label>
+        <button class="btn btn-danger">Close selected jobs</button>
+      </div>
+    </form>
+  <% } %>
+</div>
+<%- include('../partials/footer') %>

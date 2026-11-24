@@ -1,5 +1,6 @@
 <%- include('../partials/header') %>
 <h1>Issues</h1>
+<% if (locals.flash === 'site') { %><p class="alert alert-error">You can only report issues for your own jobs and sites. Choose one of your sites, or report it from the job page.</p><% } %>
 
 <div class="card">
   <form method="get" class="filter-row">
