@@ -806,6 +806,20 @@ router.post('/:id/report/send-to-owners', requireRole('supervisor'), asyncHandle
     return res.redirect(`/visits/${visit.id}?error=piqstale`);
   }
 
+  // Claim the send (a double tap or a resubmitted form must not email the
+  // owners twice). A claim older than 10 minutes is a crashed send: retake it.
+  const claimed = await q1(`UPDATE visits SET owners_report_sending_at = now()
+    WHERE id = $1 AND (owners_report_sending_at IS NULL OR owners_report_sending_at < now() - interval '10 minutes')
+    RETURNING id`, [visit.id]);
+  if (!claimed) return res.redirect(`/visits/${visit.id}?error=piqbusy`);
+  try {
+    return await sendOwnersReport(req, res, visit, property);
+  } finally {
+    await q('UPDATE visits SET owners_report_sending_at = NULL WHERE id = $1', [visit.id]).catch(() => {});
+  }
+}));
+
+async function sendOwnersReport(req, res, visit, property) {
   let emails;
   try {
     emails = await propertyiq.getOwnerEmailsForBuilding(property.piq_building_id);
@@ -850,7 +864,7 @@ router.post('/:id/report/send-to-owners', requireRole('supervisor'), asyncHandle
     : `Failed to send job report for visit #${visit.id} to any of ${emails.length} owner(s) — SMTP not configured or send failed`);
 
   res.redirect(`/visits/${visit.id}?error=${sent ? 'piqsent' : 'piqsendfailed'}`);
-}));
+}
 
 // Admin approves a reviewed job for payment: completed -> approved.
 router.post('/:id/approve', requireRole(), asyncHandler(async (req, res) => {

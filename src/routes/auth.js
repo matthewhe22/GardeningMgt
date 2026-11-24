@@ -5,6 +5,7 @@ const { q, q1 } = db;
 const { logActivity } = require('../activity');
 const { deviceLabel } = require('../device');
 const { asyncHandler } = require('../asyncHandler');
+const { newSession, revokeSessions } = require('../auth');
 const { MAX_FAILS, throttleKey, recordAttempt, clearAttempts } = require('../loginThrottle');
 
 const router = express.Router();
@@ -37,7 +38,7 @@ router.post('/login', asyncHandler(async (req, res) => {
   }
   await clearAttempts(db, key);
   // Rotate session on login to prevent fixation.
-  req.session = { userId: user.id };
+  req.session = newSession(user);
   const device = deviceLabel(req.get('user-agent'));
   await q('UPDATE users SET last_login_at = now() WHERE id = $1', [user.id]);
   await logActivity(user.id, 'auth.login', 'user', user.id, `${user.name} signed in (${device})`);
@@ -45,9 +46,20 @@ router.post('/login', asyncHandler(async (req, res) => {
 }));
 
 router.post('/logout', asyncHandler(async (req, res) => {
-  const id = req.session.userId;
+  const id = res.locals.user && res.locals.user.id;
   req.session = null;
   if (id) await logActivity(id, 'auth.logout', 'user', id, 'Signed out');
+  res.redirect('/login');
+}));
+
+// Sign out of every device (e.g. a lost phone): all of this user's sessions,
+// including any copied cookie, stop working.
+router.post('/logout/all', asyncHandler(async (req, res) => {
+  const id = res.locals.user && res.locals.user.id;
+  if (!id) return res.redirect('/login');
+  await revokeSessions(id);
+  req.session = null;
+  await logActivity(id, 'auth.logout_all', 'user', id, 'Signed out of all devices');
   res.redirect('/login');
 }));
 

@@ -294,7 +294,10 @@ router.post('/users/:id/password', requireRole(), asyncHandler(async (req, res) 
   if (!target) return res.redirect('/admin/users');
   const { password } = req.body;
   if (!password || String(password).length < 8) return res.redirect('/admin/users?error=weak');
-  await q('UPDATE users SET password_hash = $1 WHERE id = $2', [await bcrypt.hash(password, 10), id]);
+  // A new password also signs that user out everywhere (sessions made with the
+  // old one stop working).
+  await q('UPDATE users SET password_hash = $1, session_version = session_version + 1 WHERE id = $2',
+    [await bcrypt.hash(password, 10), id]);
   await logActivity(req.user.id, 'user.password_reset', 'user', id, `Reset password for ${target.name}`);
   res.redirect('/admin/users?reset=1');
 }));

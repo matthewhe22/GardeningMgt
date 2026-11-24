@@ -81,6 +81,8 @@
     <p class="alert alert-error"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg> Owner emails were found, but sending failed — check the Email (SMTP) setup on Settings.</p>
   <% } else if (locals.flash === 'piqsent') { %>
     <p class="alert alert-ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 5 5L19 7"/></svg> Report sent to the building's owners via PropertyIQ.</p>
+  <% } else if (locals.flash === 'piqbusy') { %>
+    <p class="alert alert-error">This report is already being sent to the owners. Wait a minute, then check the activity log before sending again.</p>
   <% } else if (locals.flash === 'piqstale') { %>
     <p class="alert alert-error"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg> This site's details changed since you looked up the owners — please review them again before sending.</p>
   <% } %>

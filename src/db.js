@@ -481,7 +481,7 @@ function ensureCriticalSchema() {
 
 // Bump when SCHEMA or the migrations below change, so existing databases
 // re-run the DDL exactly once instead of on every serverless cold start.
-const SCHEMA_VERSION = '19';
+const SCHEMA_VERSION = '20';
 
 /**
  * Numeric, forward-only comparison of a stored schema_version against this
@@ -568,6 +568,12 @@ async function runMigrations() {
   // Set once the original has been copied to the off-site backup bucket.
   await pool.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS backed_up_at TIMESTAMP');
   await pool.query('CREATE INDEX IF NOT EXISTS idx_photos_task ON photos (task_id)');
+  // Bumped to sign a user out everywhere (password reset, "sign out of all
+  // devices"): sessions are signed cookies, so this is how one is revoked.
+  await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 0');
+  // Claimed while an owner report is being emailed, so a double tap or a
+  // resubmitted form can't send it twice.
+  await pool.query('ALTER TABLE visits ADD COLUMN IF NOT EXISTS owners_report_sending_at TIMESTAMP');
   await pool.query('ALTER TABLE job_scopes ADD COLUMN IF NOT EXISTS library_id INTEGER REFERENCES scope_library(id) ON DELETE SET NULL');
   // One row per library item per job, so concurrent template applies can't
   // duplicate items (and blow past the 20-item cap). Drop any duplicates first.

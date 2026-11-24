@@ -91,6 +91,13 @@ async function insertPhotoRow({
     [filename, originalName, mime, inline ? buffer : Buffer.alloc(0), thumbData, caption, visitId, issueId, commentId,
       jobScopeId, scopeCheckId, libraryScopeId, userId, shared, takenAt ? takenAt.toISOString() : null, taskId, takenSource]
   );
+  // A task's photo is the evidence it was done: mark a pending / in-progress
+  // task done so the gardener doesn't also have to change its status (a
+  // blocked task stays blocked; an approved job's tasks can't get photos).
+  if (taskId) {
+    await pool.query(`UPDATE tasks SET status = 'done', completed_at = now()
+      WHERE id = $1 AND status IN ('pending', 'in_progress')`, [taskId]);
+  }
   return filename;
 }
 
