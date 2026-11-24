@@ -108,12 +108,28 @@
 </div>
 
 <div class="card">
-  <h2>Email (invoice sending)</h2>
-  <p class="muted">When a job completes, its invoice is emailed automatically to the site's
-    billing email (set per-site on the Properties page). Configure any SMTP account below —
-    a normal mailbox (Gmail, Office 365, etc. — usually needs an "app password") or an SMTP
-    relay from your host/provider both work.</p>
+  <h2>Email</h2>
+  <p class="muted">Used for invoices (sent to the site's billing email, set per site on the
+    Properties page), job reports to admins, reports to owners and visit reminders.
+    <strong>SMTP2GO</strong> sends through its web API: create an API key in SMTP2GO under
+    Sending → API Keys (with permission to send email), and use a From email on a sender
+    domain or single sender you have verified there.</p>
+  <% const emailProvider = settings.email_provider === 'smtp2go' ? 'smtp2go' : (settings.email_provider === 'smtp' || settings.smtp_host ? 'smtp' : 'smtp2go'); %>
   <form method="post" action="/admin/settings" class="form-grid"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+    <label class="span2">Send email with
+      <select name="email_provider">
+        <option value="smtp2go" <%= emailProvider === 'smtp2go' ? 'selected' : '' %>>SMTP2GO (API key)</option>
+        <option value="smtp" <%= emailProvider === 'smtp' ? 'selected' : '' %>>SMTP server (host, username, password)</option>
+      </select></label>
+    <label class="span2">SMTP2GO API key <span class="muted">(for SMTP2GO)</span>
+      <input type="password" name="smtp2go_api_key" autocomplete="off"
+        value="<%= settings.smtp2go_api_key ? '********' : '' %>"
+        placeholder="<%= settings.smtp2go_api_key ? 'saved — leave as is to keep' : 'api-…' %>"></label>
+    <label>From email
+      <input type="email" name="smtp_from_email" value="<%= settings.smtp_from_email || '' %>" placeholder="invoices@yourcompany.com"></label>
+    <label>From name <span class="muted">(optional)</span>
+      <input type="text" name="smtp_from_name" value="<%= settings.smtp_from_name || '' %>" placeholder="e.g. Green Thumb Gardening"></label>
+    <p class="muted span2" style="margin:4px 0 0">For an SMTP server only:</p>
     <label>SMTP host
       <input type="text" name="smtp_host" value="<%= settings.smtp_host || '' %>" placeholder="smtp.gmail.com"></label>
     <label>Port
@@ -124,14 +140,10 @@
       <input type="password" name="smtp_password"
         value="<%= settings.smtp_password ? '********' : '' %>"
         placeholder="<%= settings.smtp_password ? 'saved — leave as is to keep' : 'app password or SMTP password' %>"></label>
-    <label>From email
-      <input type="email" name="smtp_from_email" value="<%= settings.smtp_from_email || '' %>" placeholder="invoices@yourcompany.com"></label>
-    <label>From name <span class="muted">(optional)</span>
-      <input type="text" name="smtp_from_name" value="<%= settings.smtp_from_name || '' %>" placeholder="e.g. Green Thumb Gardening"></label>
     <button class="btn btn-primary">Save settings</button>
   </form>
   <form method="post" action="/admin/settings/test-email" style="margin-top:8px"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
-    <button class="btn">Test connection</button>
+    <button class="btn"><%= emailProvider === 'smtp2go' ? 'Send a test email to me' : 'Test connection' %></button>
   </form>
 </div>
 
@@ -187,6 +199,39 @@
   <% } %>
   <form method="post" action="/admin/settings/test-storage" style="margin-top:8px"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
     <button class="btn">Test photo storage</button>
+  </form>
+</div>
+
+<div class="card" id="photo-backup">
+  <h2>Off-site photo backup</h2>
+  <p class="muted">Supabase's database backups don't include the photo bucket. When this is on,
+    the daily job copies each new photo to a second bucket (e.g. Cloudflare R2) once; photos
+    deleted here are kept there. Use a token that may only read and write that one bucket.</p>
+  <% const bs = locals.backupStatus; %>
+  <% if (bs) { %><p><strong><%= bs.on ? 'On' : 'Off' %></strong> · <%= bs.done %> of <%= bs.total %> photos backed up<% if (bs.on && !bs.complete) { %> · <span style="color:var(--danger, #b42318)">settings incomplete, nothing is copied</span><% } %></p><% } %>
+  <% if (locals.backupTest) { %>
+    <p class="alert <%= backupTest.ok ? 'alert-ok' : 'alert-error' %>"><%= backupTest.message %></p>
+  <% } %>
+  <form method="post" action="/admin/settings" class="form-grid"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+    <input type="hidden" name="photo_backup_enabled" value="0">
+    <label class="span2 confirm-line"><input type="checkbox" name="photo_backup_enabled" value="1" <%= settings.photo_backup_enabled === '1' ? 'checked' : '' %>>
+      Back up photos daily</label>
+    <label>Bucket
+      <input type="text" name="photo_backup_bucket" value="<%= settings.photo_backup_bucket || '' %>" placeholder="gardeningmgt-photos"></label>
+    <label>Region
+      <input type="text" name="photo_backup_region" value="<%= settings.photo_backup_region || '' %>" placeholder="auto"></label>
+    <label class="span2">Endpoint
+      <input type="url" name="photo_backup_endpoint" value="<%= settings.photo_backup_endpoint || '' %>" placeholder="https://<account-id>.r2.cloudflarestorage.com"></label>
+    <label>Access key ID
+      <input type="text" name="photo_backup_access_key_id" autocomplete="off" value="<%= settings.photo_backup_access_key_id || '' %>"></label>
+    <label>Secret access key
+      <input type="password" name="photo_backup_secret_access_key" autocomplete="off"
+        value="<%= settings.photo_backup_secret_access_key ? '********' : '' %>"
+        placeholder="<%= settings.photo_backup_secret_access_key ? 'saved — leave as is to keep' : 'paste secret value' %>"></label>
+    <button class="btn btn-primary">Save settings</button>
+  </form>
+  <form method="post" action="/admin/settings/test-backup" style="margin-top:8px"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+    <button class="btn">Test backup bucket</button>
   </form>
 </div>
 

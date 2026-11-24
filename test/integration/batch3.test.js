@@ -24,8 +24,6 @@ test('review batch 3: photo & storage hardening', { skip: !(TEST_DB && TEST_S3) 
   Object.assign(process.env, {
     DATABASE_URL: TEST_DB, DB_SKIP_INIT: '', SESSION_SECRET: 'test-secret-for-integration-tests',
     S3_BUCKET: bucket, S3_ENDPOINT: TEST_S3, S3_REGION: 'us-east-1', S3_ACCESS_KEY_ID: 'test', S3_SECRET_ACCESS_KEY: 'test',
-    BACKUP_S3_BUCKET: backupBucket, BACKUP_S3_ENDPOINT: TEST_S3, BACKUP_S3_REGION: 'us-east-1',
-    BACKUP_S3_ACCESS_KEY_ID: 'test', BACKUP_S3_SECRET_ACCESS_KEY: 'test',
     CRON_SECRET: 'b3-cron-secret',
   });
   const { ready, q, q1, pool } = require('../../src/db');
@@ -198,6 +196,10 @@ test('review batch 3: photo & storage hardening', { skip: !(TEST_DB && TEST_S3) 
 
   await t.test('photos are copied to the backup bucket once', async () => {
     const photoBackup = require('../../src/photoBackup');
+    const { setSetting } = require('../../src/settings');
+    for (const [k, v] of Object.entries({ photo_backup_enabled: '1', photo_backup_bucket: backupBucket,
+      photo_backup_endpoint: TEST_S3, photo_backup_region: 'us-east-1',
+      photo_backup_access_key_id: 'test', photo_backup_secret_access_key: 'test' })) await setSetting(k, v);
     const first = await photoBackup.backupPhotos(q, { maxMs: 30000 });
     assert.ok(first.copied >= 1, JSON.stringify(first));
     const any = await q1(`SELECT filename FROM photos WHERE backed_up_at IS NOT NULL AND filename LIKE $1 LIMIT 1`, ['%']);

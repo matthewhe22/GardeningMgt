@@ -19,7 +19,7 @@ normal Node.js server.
 | Job completion summary sent to supervisors & admins | 🔔 Notifications |
 | Per-job comments (supervisor ↔ gardener) | Job page |
 | Invoicing per job (pre-filled from the site's gardening fee), with per-site billing name/address/email and a GST-inclusive breakdown | **Invoices** (staff), **Properties** |
-| Automatic invoice creation + emailing (PDF attached) to the site's billing address when a job completes | Job page, **Properties**, **Settings** (email/SMTP) |
+| Automatic invoice creation + emailing (PDF attached) to the site's billing address when a job completes | Job page, **Properties**, **Settings** (email: SMTP2GO or SMTP) |
 | Reporting (visits, hours per gardener, issues, invoice totals) | **Reports** (staff) |
 | Global scope library (≤20 items + standard photos) → templates (Standard 1, 2…) → apply to all / selected sites | **Scope standards** |
 | Per-site scope adjustment (optional; marks the site “adjusted”) | **Sites** → 📋 scope chip |
@@ -176,21 +176,18 @@ This writes one `pg_dump` custom-format file with every table and column.
 server's major version or newer.
 
 **2. Photo originals (object storage).** Supabase's database backups do not
-include Storage. When a second bucket is configured, the daily job copies
-each new photo there (time-boxed, so a big backlog catches up over a few
-days), and records it in `photos.backed_up_at`. Nothing is ever deleted from
-the backup. Use a different provider than the primary, e.g. a Cloudflare R2
-bucket:
+include Storage. Set up a second bucket in **Settings → Off-site photo
+backup** (bucket, endpoint, region, access key; off by default) and tick
+**Back up photos daily**. The daily job then copies each new photo there
+(time-boxed, so a big backlog catches up over a few days) and records it in
+`photos.backed_up_at`. Nothing is ever deleted from the backup. Use a
+different provider than the primary, e.g. a Cloudflare R2 bucket
+(endpoint `https://<account-id>.r2.cloudflarestorage.com`, region `auto`)
+with an **Object Read & Write** token for that bucket only. **Test backup
+bucket** checks the settings without switching anything on.
 
-| Variable | Notes |
-|---|---|
-| `BACKUP_S3_BUCKET` | backup bucket name (enables photo backups) |
-| `BACKUP_S3_ENDPOINT` | e.g. `https://<account-id>.r2.cloudflarestorage.com` |
-| `BACKUP_S3_REGION` | `auto` for R2 |
-| `BACKUP_S3_ACCESS_KEY_ID` / `BACKUP_S3_SECRET_ACCESS_KEY` | an **Object Read & Write** token for that bucket only |
-
-To copy the existing backlog in one go (from your machine, with the same
-`S3_*`, `BACKUP_S3_*` and `DATABASE_URL` values exported):
+To copy the existing backlog in one go (from your machine, with the
+`S3_*`, `DATABASE_URL` and `SESSION_SECRET` / `SETTINGS_KEY` values exported):
 
 ```bash
 npm run backup:photos
@@ -264,10 +261,9 @@ Demo accounts (after seeding):
 | `CRON_SECRET` | unset | If set, `/cron/reminders` requires `Authorization: Bearer <secret>` |
 | `BOOTSTRAP_ADMIN_EMAIL/_PASSWORD` | admin@example.com / admin1234 | First admin on an empty database |
 | `APP_URL` | request origin | Public URL used in email links (job report "Review & approve" button), e.g. `https://gardeningmgt.vercel.app` |
-| `RESEND_API_KEY` / `RESEND_FROM` | unset | Fallback email provider for job reports when SMTP isn't configured in **Settings** |
+| `RESEND_API_KEY` / `RESEND_FROM` | unset | Fallback email provider when no email is set up in **Settings** (SMTP2GO or SMTP) |
 | `PHOTO_MAX_AGE_HOURS` | 12 | Oldest capture time (from the photo's EXIF) accepted for a job photo |
 | `PHOTO_START_GRACE_MINUTES` | 30 | How long before a job's start time a job photo may have been taken |
-| `BACKUP_S3_*` | unset | Off-site copy of photo originals — see Backups |
 | `BUSINESS_TZ` | Australia/Melbourne | Timezone for the business calendar, reminder scheduling and every timestamp shown to users |
 | `OSRM_URL` | public demo server | Road-distance routing endpoint (OSRM). Falls back to straight-line if unreachable; self-host for production volume — see [docs/OSRM.md](docs/OSRM.md) |
 | `GEOCODER_URL` / `GEOCODER_EMAIL` | Nominatim | Address→coordinates geocoder (used by Sites) |
