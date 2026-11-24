@@ -364,10 +364,27 @@ router.get('/settings', requireRole(), asyncHandler(async (req, res) => {
   res.render('admin/settings', {
     title: 'Settings', settings, branding,
     saved: req.query.saved, brandingError: req.query.brandingError || null, test: null, emailTest: null, piqTest: null,
+    secretNeeded: { piq_base_url: 'PropertyIQ client secret', smtp_host: 'SMTP password' }[req.query.secretneeded] || null,
   });
 }));
 
+// A saved secret is only ever sent to the server it was entered for: changing
+// that server's address means typing the secret again (otherwise anyone with
+// admin access could point the app at their own server and collect it).
+const SECRET_FOR_HOST = { piq_base_url: 'piq_client_secret', smtp_host: 'smtp_password' };
+
 router.post('/settings', requireRole(), asyncHandler(async (req, res) => {
+  const current = await getSettings(ALL_SETTING_KEYS);
+  for (const [hostKey, secretKey] of Object.entries(SECRET_FOR_HOST)) {
+    if (!Object.prototype.hasOwnProperty.call(req.body, hostKey)) continue;
+    const next = String(req.body[hostKey] || '').trim();
+    // Clearing the address sends the secret nowhere, so that's fine.
+    const changed = next !== '' && next !== String(current[hostKey] || '').trim();
+    const secretKept = String(req.body[secretKey] || '').trim() === '********';
+    if (changed && secretKept && current[secretKey]) {
+      return res.redirect(`/admin/settings?secretneeded=${hostKey}`);
+    }
+  }
   // The page has a separate form per section, all posting here: only save
   // the fields this form actually sent, so saving one section never clears
   // another (absent ≠ emptied).

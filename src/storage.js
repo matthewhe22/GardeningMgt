@@ -53,6 +53,8 @@ function getClient() {
     // R2 / other S3-compatible stores don't all accept the trailing checksums
     // the SDK adds to server-side uploads.
     requestChecksumCalculation: 'WHEN_REQUIRED',
+    // Don't let a hung storage server hold a request (or the daily job) open.
+    requestHandler: { connectionTimeout: 10000, requestTimeout: 60000 },
     responseChecksumValidation: 'WHEN_REQUIRED',
     credentials: (env('S3_ACCESS_KEY_ID') && env('S3_SECRET_ACCESS_KEY'))
       ? { accessKeyId: env('S3_ACCESS_KEY_ID'), secretAccessKey: env('S3_SECRET_ACCESS_KEY') }

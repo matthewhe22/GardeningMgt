@@ -27,7 +27,14 @@ const isLocal = /localhost|127\.0\.0\.1/.test(DB_URL);
 // more out of the parallel (Promise.all) page queries. On a direct connection
 // we stay conservative to avoid exhausting Postgres across serverless
 // instances. DB_POOL_MAX overrides explicitly.
-const usingPooler = /pgbouncer=true|:6543\b|:6432\b|pooler\./i.test(DB_URL);
+// Supabase's pooler host on :5432 is *session* mode: one server connection per
+// client connection, so it protects nothing on serverless — only :6543
+// (transaction mode) counts there. (Neon's "-pooler" host is transaction mode on 5432.)
+const dbHostPort = (() => {
+  try { const u = new URL(DB_URL); return { host: u.hostname, port: u.port || '5432' }; } catch (_) { return { host: '', port: '' }; }
+})();
+const supabaseSessionPooler = /pooler\.supabase\.com$/i.test(dbHostPort.host) && dbHostPort.port === '5432';
+const usingPooler = !supabaseSessionPooler && /pgbouncer=true|:6543\b|:6432\b|pooler\./i.test(DB_URL);
 // On Vercel, every serverless instance opens its own independent pool — a
 // direct (non-pooler) DATABASE_URL means N concurrent instances can each hold
 // up to `max` connections with no coordination between them, so a real
@@ -39,7 +46,9 @@ const dbPoolerRisk = !!(process.env.VERCEL && !usingPooler && !isLocal);
 // connection string: refuses to boot instead of just warning. Off by default
 // so flipping in this stricter check can never surprise-break an existing
 // deploy that hasn't switched yet.
-if (dbPoolerRisk && process.env.REQUIRE_DB_POOLER === '1') {
+// (A Supabase session-mode pooler URL only warns: it used to count as pooled,
+// so refusing to boot on it now could take down a working deploy.)
+if (dbPoolerRisk && !supabaseSessionPooler && process.env.REQUIRE_DB_POOLER === '1') {
   throw new Error(
     'REQUIRE_DB_POOLER=1 is set, but DATABASE_URL does not look like a pooled connection string ' +
     '(no :6543/:6432/"pooler."/?pgbouncer=true) — refusing to start on Vercel with a direct connection. ' +
@@ -56,7 +65,8 @@ const pool = new Pool({
   ssl: isLocal
     ? false
     : process.env.DB_SSL_CA
-      ? { rejectUnauthorized: true, ca: process.env.DB_SSL_CA }
+      // Accept the PEM pasted with literal \n sequences (common in env var UIs).
+      ? { rejectUnauthorized: true, ca: process.env.DB_SSL_CA.replace(/\\n/g, '\n') }
       : { rejectUnauthorized: false },
   max: process.env.DB_POOL_MAX
     ? Number(process.env.DB_POOL_MAX)
@@ -100,7 +110,10 @@ if (!isLocal && !process.env.DB_SSL_CA) {
     'Set DB_SSL_CA to the provider\'s CA certificate (PEM) to verify the connection.');
 }
 
-if (dbPoolerRisk) {
+if (dbPoolerRisk && supabaseSessionPooler) {
+  console.warn('[db] WARNING: DATABASE_URL uses Supabase\'s pooler in session mode (port 5432). On Vercel ' +
+    'each instance then holds real database connections; switch the port to 6543 (transaction mode).');
+} else if (dbPoolerRisk) {
   console.warn('[db] WARNING: running on Vercel with a direct (non-pooler) DATABASE_URL. ' +
     'Under real concurrency this can exhaust Postgres\' connection slots and 500 the whole app at ' +
     'once. Point DATABASE_URL at your provider\'s pooler (e.g. Supabase port 6543, or Neon\'s ' +
@@ -501,91 +514,90 @@ function schemaUpToDate(storedValue) {
  * DB_SKIP_INIT=1 boot path so a version bump self-heals either way instead of
  * only being applied on deployments that happen to run without the flag.
  */
-async function runMigrations() {
-  await pool.query(SCHEMA);
-  await ensureCriticalSchema();
+async function migrateWith(db) {
+  await db.query(SCHEMA);
   // Migrations for databases created before these columns existed.
-  await pool.query('ALTER TABLE properties ADD COLUMN IF NOT EXISTS lots INTEGER');
-  await pool.query('ALTER TABLE visits ADD COLUMN IF NOT EXISTS job_id INTEGER REFERENCES jobs(id)');
-  await pool.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS visit_comment_id INTEGER REFERENCES visit_comments(id) ON DELETE SET NULL');
+  await db.query('ALTER TABLE properties ADD COLUMN IF NOT EXISTS lots INTEGER');
+  await db.query('ALTER TABLE visits ADD COLUMN IF NOT EXISTS job_id INTEGER REFERENCES jobs(id)');
+  await db.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS visit_comment_id INTEGER REFERENCES visit_comments(id) ON DELETE SET NULL');
   // Renewal tracking: flag when a contract has been renewed/closed.
-  await pool.query("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS renewal_acknowledged BOOLEAN NOT NULL DEFAULT false");
+  await db.query("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS renewal_acknowledged BOOLEAN NOT NULL DEFAULT false");
   // Admin-only flat fee that seeds an invoice's line item.
-  await pool.query("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS gardening_fee NUMERIC(10,2)");
+  await db.query("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS gardening_fee NUMERIC(10,2)");
   // invoice_items money columns were REAL (binary float), which accumulates
   // cent-level drift in SUM(quantity * unit_price) aggregates. NUMERIC(10,2)
   // is exact; Postgres converts existing data automatically. Safe to run
   // every time this migration block runs — a same-type ALTER COLUMN TYPE is
   // a no-op, so no IF NOT EXISTS guard is needed.
-  await pool.query('ALTER TABLE invoice_items ALTER COLUMN quantity TYPE NUMERIC(10,2), ALTER COLUMN unit_price TYPE NUMERIC(10,2)');
+  await db.query('ALTER TABLE invoice_items ALTER COLUMN quantity TYPE NUMERIC(10,2), ALTER COLUMN unit_price TYPE NUMERIC(10,2)');
   // Invoice due date, so the invoice PDF/print view can show it.
-  await pool.query('ALTER TABLE invoices ADD COLUMN IF NOT EXISTS due_at DATE');
+  await db.query('ALTER TABLE invoices ADD COLUMN IF NOT EXISTS due_at DATE');
   // Client billing contact, alongside the existing contact_name/contact_phone.
-  await pool.query('ALTER TABLE properties ADD COLUMN IF NOT EXISTS contact_email TEXT');
+  await db.query('ALTER TABLE properties ADD COLUMN IF NOT EXISTS contact_email TEXT');
   // Small JPEG thumbnail generated at upload time (src/upload.js), so gallery
   // pages stop serving up-to-10MB originals as list-view images. NULL on
   // existing rows and on any photo whose format sharp couldn't thumbnail —
   // the serve route (src/server.js) falls back to the original in both cases.
-  await pool.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS thumb_data BYTEA');
+  await db.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS thumb_data BYTEA');
   // Per-site invoice "bill to" details, so a site whose billing contact
   // differs from its on-the-ground contact still invoices the right party.
-  await pool.query('ALTER TABLE properties ADD COLUMN IF NOT EXISTS billing_name TEXT');
-  await pool.query('ALTER TABLE properties ADD COLUMN IF NOT EXISTS billing_address TEXT');
-  await pool.query('ALTER TABLE properties ADD COLUMN IF NOT EXISTS billing_email TEXT');
-  await pool.query("ALTER TABLE properties ADD COLUMN IF NOT EXISTS gst_applicable BOOLEAN NOT NULL DEFAULT true");
+  await db.query('ALTER TABLE properties ADD COLUMN IF NOT EXISTS billing_name TEXT');
+  await db.query('ALTER TABLE properties ADD COLUMN IF NOT EXISTS billing_address TEXT');
+  await db.query('ALTER TABLE properties ADD COLUMN IF NOT EXISTS billing_email TEXT');
+  await db.query("ALTER TABLE properties ADD COLUMN IF NOT EXISTS gst_applicable BOOLEAN NOT NULL DEFAULT true");
   // Cached PropertyIQ building match for this site, keyed by address (see
   // src/propertyiq.js). NULL until the first "send report to owners" lookup
   // succeeds, so repeat sends skip the address-matching pass over PIQ's
   // building list.
-  await pool.query('ALTER TABLE properties ADD COLUMN IF NOT EXISTS piq_building_id TEXT');
+  await db.query('ALTER TABLE properties ADD COLUMN IF NOT EXISTS piq_building_id TEXT');
   // Sign-in tracking for the admin user list.
-  await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP');
+  await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP');
   // Scope of duties: standard photos and per-item evidence photos.
-  await pool.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS job_scope_id INTEGER REFERENCES job_scopes(id) ON DELETE CASCADE');
-  await pool.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS scope_check_id INTEGER REFERENCES visit_scope_checks(id) ON DELETE SET NULL');
-  await pool.query('CREATE INDEX IF NOT EXISTS idx_photos_job_scope ON photos (job_scope_id)');
-  await pool.query('CREATE INDEX IF NOT EXISTS idx_photos_scope_check ON photos (scope_check_id)');
+  await db.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS job_scope_id INTEGER REFERENCES job_scopes(id) ON DELETE CASCADE');
+  await db.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS scope_check_id INTEGER REFERENCES visit_scope_checks(id) ON DELETE SET NULL');
+  await db.query('CREATE INDEX IF NOT EXISTS idx_photos_job_scope ON photos (job_scope_id)');
+  await db.query('CREATE INDEX IF NOT EXISTS idx_photos_scope_check ON photos (scope_check_id)');
   // Scope templates: job items linked to the global library, jobs linked to a template.
-  await pool.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS library_scope_id INTEGER REFERENCES scope_library(id) ON DELETE CASCADE');
-  await pool.query('CREATE INDEX IF NOT EXISTS idx_photos_library_scope ON photos (library_scope_id)');
+  await db.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS library_scope_id INTEGER REFERENCES scope_library(id) ON DELETE CASCADE');
+  await db.query('CREATE INDEX IF NOT EXISTS idx_photos_library_scope ON photos (library_scope_id)');
   // When a job photo was actually taken (EXIF capture time, UTC), checked
   // against the live-capture rule on upload. NULL for older/admin photos.
-  await pool.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS taken_at TIMESTAMP');
+  await db.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS taken_at TIMESTAMP');
   // Evidence photos on a job's ad-hoc tasks (required before completing the job).
-  await pool.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS task_id INTEGER REFERENCES tasks(id) ON DELETE SET NULL');
+  await db.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS task_id INTEGER REFERENCES tasks(id) ON DELETE SET NULL');
   // Foreign keys that are looked up or joined on hot paths: the invoice list
   // sums each invoice's items, and deleting future visits checks these.
-  await pool.query('CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items (invoice_id)');
-  await pool.query('CREATE INDEX IF NOT EXISTS idx_notifications_visit ON notifications (visit_id)');
-  await pool.query('CREATE INDEX IF NOT EXISTS idx_issues_visit ON issues (visit_id)');
+  await db.query('CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items (invoice_id)');
+  await db.query('CREATE INDEX IF NOT EXISTS idx_notifications_visit ON notifications (visit_id)');
+  await db.query('CREATE INDEX IF NOT EXISTS idx_issues_visit ON issues (visit_id)');
   // When a completed job is reopened, the minutes already recorded are kept in
   // duration_minutes and only the time since resumed_at is added on
   // re-completion (it used to count the whole gap since the first start).
-  await pool.query('ALTER TABLE visits ADD COLUMN IF NOT EXISTS resumed_at TIMESTAMP');
+  await db.query('ALTER TABLE visits ADD COLUMN IF NOT EXISTS resumed_at TIMESTAMP');
   // Where a job photo's capture time came from: 'exif' (the camera's own
   // record) or 'client' (the phone's clock, when the file carried none).
-  await pool.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS taken_source TEXT');
+  await db.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS taken_source TEXT');
   // Set once the original has been copied to the off-site backup bucket.
-  await pool.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS backed_up_at TIMESTAMP');
-  await pool.query('CREATE INDEX IF NOT EXISTS idx_photos_task ON photos (task_id)');
+  await db.query('ALTER TABLE photos ADD COLUMN IF NOT EXISTS backed_up_at TIMESTAMP');
+  await db.query('CREATE INDEX IF NOT EXISTS idx_photos_task ON photos (task_id)');
   // Bumped to sign a user out everywhere (password reset, "sign out of all
   // devices"): sessions are signed cookies, so this is how one is revoked.
-  await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 0');
+  await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 0');
   // Claimed while an owner report is being emailed, so a double tap or a
   // resubmitted form can't send it twice.
-  await pool.query('ALTER TABLE visits ADD COLUMN IF NOT EXISTS owners_report_sending_at TIMESTAMP');
-  await pool.query('ALTER TABLE job_scopes ADD COLUMN IF NOT EXISTS library_id INTEGER REFERENCES scope_library(id) ON DELETE SET NULL');
+  await db.query('ALTER TABLE visits ADD COLUMN IF NOT EXISTS owners_report_sending_at TIMESTAMP');
+  await db.query('ALTER TABLE job_scopes ADD COLUMN IF NOT EXISTS library_id INTEGER REFERENCES scope_library(id) ON DELETE SET NULL');
   // One row per library item per job, so concurrent template applies can't
   // duplicate items (and blow past the 20-item cap). Drop any duplicates first.
-  await pool.query(`DELETE FROM job_scopes a USING job_scopes b
+  await db.query(`DELETE FROM job_scopes a USING job_scopes b
     WHERE a.library_id IS NOT NULL AND a.job_id = b.job_id AND a.library_id = b.library_id AND a.id > b.id`);
-  await pool.query('CREATE UNIQUE INDEX IF NOT EXISTS uq_job_scopes_library ON job_scopes (job_id, library_id) WHERE library_id IS NOT NULL');
-  await pool.query('ALTER TABLE jobs ADD COLUMN IF NOT EXISTS template_id INTEGER REFERENCES scope_templates(id) ON DELETE SET NULL');
-  await pool.query('ALTER TABLE jobs ADD COLUMN IF NOT EXISTS scope_customized BOOLEAN NOT NULL DEFAULT false');
+  await db.query('CREATE UNIQUE INDEX IF NOT EXISTS uq_job_scopes_library ON job_scopes (job_id, library_id) WHERE library_id IS NOT NULL');
+  await db.query('ALTER TABLE jobs ADD COLUMN IF NOT EXISTS template_id INTEGER REFERENCES scope_templates(id) ON DELETE SET NULL');
+  await db.query('ALTER TABLE jobs ADD COLUMN IF NOT EXISTS scope_customized BOOLEAN NOT NULL DEFAULT false');
   // Payment approval: new 'approved' visit status + who/when.
-  await pool.query('ALTER TABLE visits ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP');
-  await pool.query('ALTER TABLE visits ADD COLUMN IF NOT EXISTS approved_by INTEGER REFERENCES users(id)');
-  await pool.query(`DO $$ BEGIN
+  await db.query('ALTER TABLE visits ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP');
+  await db.query('ALTER TABLE visits ADD COLUMN IF NOT EXISTS approved_by INTEGER REFERENCES users(id)');
+  await db.query(`DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'visits_status_check'
                    AND pg_get_constraintdef(oid) LIKE '%approved%') THEN
       ALTER TABLE visits DROP CONSTRAINT IF EXISTS visits_status_check;
@@ -595,12 +607,12 @@ async function runMigrations() {
   END $$`);
   // Set the first time a visit reaches a terminal state and schedules the
   // next occurrence, so reopening/re-completing never books a duplicate.
-  await pool.query('ALTER TABLE visits ADD COLUMN IF NOT EXISTS advanced_at TIMESTAMP');
+  await db.query('ALTER TABLE visits ADD COLUMN IF NOT EXISTS advanced_at TIMESTAMP');
   // Per-admin opt-in/out of the emailed job report (on by default).
-  await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS receive_job_reports BOOLEAN NOT NULL DEFAULT true');
-  await pool.query(`UPDATE visits SET advanced_at = COALESCE(finished_at, now())
+  await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS receive_job_reports BOOLEAN NOT NULL DEFAULT true');
+  await db.query(`UPDATE visits SET advanced_at = COALESCE(finished_at, now())
     WHERE advanced_at IS NULL AND status IN ('completed','approved','skipped','cancelled')`);
-  const { c } = (await pool.query('SELECT COUNT(*)::int AS c FROM users')).rows[0];
+  const { c } = (await db.query('SELECT COUNT(*)::int AS c FROM users')).rows[0];
   if (c === 0) {
     const bcrypt = require('bcryptjs');
     const crypto = require('crypto');
@@ -610,7 +622,7 @@ async function runMigrations() {
     const inProd = process.env.VERCEL || process.env.NODE_ENV === 'production';
     const password = process.env.BOOTSTRAP_ADMIN_PASSWORD
       || (inProd ? crypto.randomBytes(9).toString('base64url') : 'admin1234');
-    await pool.query(
+    await db.query(
       `INSERT INTO users (name, email, password_hash, role) VALUES ($1, $2, $3, 'admin')`,
       ['Admin', email.toLowerCase(), bcrypt.hashSync(password, 10)]
     );
@@ -620,7 +632,7 @@ async function runMigrations() {
   // running SCHEMA_VERSION N-1 during a rolling deploy must not stomp the N
   // a newer instance already wrote, which would make every subsequent cold
   // start re-run this whole block for nothing (or, worse, thrash forever).
-  await pool.query(
+  await db.query(
     `INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', $1, now())
      ON CONFLICT (key) DO UPDATE SET
        value = CASE WHEN EXCLUDED.value::int > settings.value::int THEN EXCLUDED.value ELSE settings.value END,
@@ -628,6 +640,42 @@ async function runMigrations() {
     [SCHEMA_VERSION]
   );
 }
+
+/**
+ * Runs the migrations one server at a time, all-or-nothing: inside one
+ * transaction holding an advisory lock (transaction-scoped, so it's also safe
+ * through a transaction-mode pooler). Two instances cold-starting together no
+ * longer run the same ALTERs at once, and a half-applied upgrade can't be left
+ * behind. lock_timeout makes it give up (and retry on a later request) rather
+ * than queue every live query behind an ALTER waiting for a busy table.
+ */
+const MIGRATION_LOCK_KEY = 4720191; // arbitrary, unique to this app
+async function runMigrations() {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query("SET LOCAL lock_timeout = '10s'");
+    await client.query("SET LOCAL statement_timeout = '120s'");
+    await client.query('SELECT pg_advisory_xact_lock($1)', [MIGRATION_LOCK_KEY]);
+    // Another instance may have finished the upgrade while this one waited.
+    let stored = null;
+    try {
+      await client.query('SAVEPOINT v');
+      const v = (await client.query("SELECT value FROM settings WHERE key = 'schema_version'")).rows[0];
+      stored = v && v.value;
+    } catch (e) { await client.query('ROLLBACK TO SAVEPOINT v'); }
+    if (!schemaUpToDate(stored)) await migrateWith(client);
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+  // After the tables exist (its indexes are on jobs and invoices).
+  await ensureCriticalSchema();
+}
+
 
 /**
  * Create the schema (idempotent) and, on an empty database, a bootstrap
@@ -689,4 +737,4 @@ function readySkipInit() {
   return skipInitPromise;
 }
 
-module.exports = { pool, q, q1, ready, withTransaction, dbPoolerRisk };
+module.exports = { pool, q, q1, ready, withTransaction, dbPoolerRisk, runMigrations };

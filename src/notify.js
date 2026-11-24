@@ -16,6 +16,7 @@ async function sendSms(toPhone, body) {
       `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`,
       {
         method: 'POST',
+        signal: AbortSignal.timeout(15000),
         headers: {
           Authorization: 'Basic ' + Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString('base64'),
           'Content-Type': 'application/x-www-form-urlencoded',
@@ -53,6 +54,7 @@ async function sendEmail(toEmail, subject, text, { html, attachments } = {}) {
       method: 'POST',
       headers: { Authorization: `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(20000),
     });
     if (!res.ok) console.error('[notify] email rejected:', res.status, (await res.text()).slice(0, 200));
     return res.ok;

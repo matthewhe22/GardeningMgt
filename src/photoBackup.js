@@ -31,6 +31,8 @@ function backupClient() {
     endpoint: endpoint || undefined,
     forcePathStyle: !!endpoint,
     requestChecksumCalculation: 'WHEN_REQUIRED',
+    // Don't let a hung storage server hold a request (or the daily job) open.
+    requestHandler: { connectionTimeout: 10000, requestTimeout: 60000 },
     responseChecksumValidation: 'WHEN_REQUIRED',
     credentials: (env('BACKUP_S3_ACCESS_KEY_ID') && env('BACKUP_S3_SECRET_ACCESS_KEY'))
       ? { accessKeyId: env('BACKUP_S3_ACCESS_KEY_ID'), secretAccessKey: env('BACKUP_S3_SECRET_ACCESS_KEY') }
