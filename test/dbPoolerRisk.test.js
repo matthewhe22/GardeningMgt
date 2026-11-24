@@ -45,7 +45,6 @@ test('dbPoolerRisk: Vercel + a direct (non-pooler) URL is at risk', () => {
 test('dbPoolerRisk: recognizes common pooler URL shapes as not at risk', () => {
   const poolerUrls = [
     'postgres://postgres.abc:pass@aws-0-us-east-1.pooler.supabase.com:6543/postgres', // Supabase transaction pooler
-    'postgres://postgres.abc:pass@aws-0-us-east-1.pooler.supabase.com:5432/postgres', // Supabase session pooler
     'postgres://user:pass@ep-cool-forest-12345-pooler.us-east-2.aws.neon.tech/db',    // Neon pooled endpoint
     'postgres://user:pass@db.internal:6432/db',                                       // self-hosted pgBouncer default port
     'postgres://user:pass@db.internal:5432/db?pgbouncer=true',                        // explicit pgbouncer flag

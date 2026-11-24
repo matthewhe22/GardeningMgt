@@ -10,6 +10,15 @@ const { createInvoiceForVisit, invoiceWithItems } = require('../invoicing');
 
 const router = express.Router();
 
+// Allowed status changes. Void is final apart from restoring it to a draft;
+// "paid" can be undone back to "sent" (e.g. a payment recorded by mistake).
+const NEXT_STATUS = {
+  draft: ['sent', 'paid', 'void'],
+  sent: ['paid', 'void'],
+  paid: ['sent'],
+  void: ['draft'],
+};
+
 // Invoicing is staff-only.
 router.use(requireRole('supervisor'));
 
@@ -48,7 +57,10 @@ router.post('/', asyncHandler(async (req, res) => {
 router.get('/:id', asyncHandler(async (req, res) => {
   const invoice = await invoiceWithItems(req.params.id);
   if (!invoice) return res.status(404).render('error', { title: 'Not found', message: 'Invoice not found.' });
-  res.render('invoices/show', { title: invoice.number, invoice, error: req.query.error || null });
+  res.render('invoices/show', {
+    title: invoice.number, invoice, error: req.query.error || null,
+    nextStatuses: NEXT_STATUS[invoice.status] || [],
+  });
 }));
 
 // PDF export — same gating as this whole router (staff-only), following the
@@ -77,7 +89,17 @@ router.post('/:id/delete', asyncHandler(async (req, res) => {
   res.redirect('/invoices?deleted=1');
 }));
 
+// Line items can only change while an invoice is a draft: once sent or paid,
+// the client has it (void it and create a new one to correct it).
+async function draftOnly(req, res) {
+  const inv = await q1('SELECT status FROM invoices WHERE id = $1', [Number(req.params.id) || 0]);
+  if (!inv) { res.redirect('/invoices'); return false; }
+  if (inv.status !== 'draft') { res.redirect(`/invoices/${req.params.id}?error=notdraftedit`); return false; }
+  return true;
+}
+
 router.post('/:id/items', asyncHandler(async (req, res) => {
+  if (!(await draftOnly(req, res))) return;
   const { description, quantity, unit_price } = req.body;
   if ((description || '').trim()) {
     // Clamp to non-negative so a stray '-5' can't create negative money.
@@ -92,6 +114,7 @@ router.post('/:id/items', asyncHandler(async (req, res) => {
 }));
 
 router.post('/:id/items/:itemId/delete', asyncHandler(async (req, res) => {
+  if (!(await draftOnly(req, res))) return;
   await q('DELETE FROM invoice_items WHERE id = $1 AND invoice_id = $2', [req.params.itemId, req.params.id]);
   await logActivity(req.user.id, 'invoice.item.remove', 'invoice', Number(req.params.id),
     `Removed a line from invoice #${req.params.id}`);
@@ -101,12 +124,16 @@ router.post('/:id/items/:itemId/delete', asyncHandler(async (req, res) => {
 router.post('/:id/status', asyncHandler(async (req, res) => {
   const status = req.body.status;
   if (!['draft', 'sent', 'paid', 'void'].includes(status)) return res.redirect(`/invoices/${req.params.id}`);
+  const current = await q1('SELECT status FROM invoices WHERE id = $1', [Number(req.params.id) || 0]);
+  if (!current) return res.redirect('/invoices');
+  if (status === current.status) return res.redirect(`/invoices/${req.params.id}`);
+  if (!NEXT_STATUS[current.status].includes(status)) return res.redirect(`/invoices/${req.params.id}?error=transition`);
   try {
     await q(`
       UPDATE invoices SET status = $1,
         issued_at = CASE WHEN $1 = 'sent' AND issued_at IS NULL THEN now() ELSE issued_at END,
-        paid_at   = CASE WHEN $1 = 'paid' THEN now() ELSE paid_at END
-      WHERE id = $2`, [status, req.params.id]);
+        paid_at   = CASE WHEN $1 = 'paid' THEN now() WHEN $1 = 'sent' THEN NULL ELSE paid_at END
+      WHERE id = $2 AND status = $3`, [status, req.params.id, current.status]);
   } catch (e) {
     // Un-voiding this invoice while another live invoice already exists for
     // the same visit (uq_invoices_visit_open) — send back a friendly error

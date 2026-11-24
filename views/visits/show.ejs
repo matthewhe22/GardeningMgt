@@ -38,6 +38,21 @@
     <p class="alert alert-error">⚠ The job report email couldn’t be sent — check the email setup on Settings (SMTP), or the Activity log for details.</p>
   <% } else if (locals.flash === 'future') { %>
     <p class="alert alert-error">⚠ This visit is booked for <%= visit.scheduled_date %>. To do it today, first move it to today (Change visit date), then start.</p>
+  <% } else if (locals.flash === 'staffgaps') { %>
+    <% const sg = [];
+       const sgUnresolved = checks.filter(c => !isResolved(c)).length;
+       const sgNoPhoto = checks.filter(needsPhoto).length;
+       if (!totalPhotos) sg.push('no photos');
+       if (sgUnresolved) sg.push(sgUnresolved + ' checklist item(s) not ticked or explained');
+       if (sgNoPhoto) sg.push(sgNoPhoto + ' checklist item(s) without a photo');
+       if (tasksNoPhoto.length) sg.push(tasksNoPhoto.length + ' task(s) without a photo'); %>
+    <p class="alert alert-error">⚠ This job can't be marked completed yet: <%= sg.join(', ') || 'something is missing' %>. To complete it anyway, tick “Complete even if something is missing” in Manage job (this is recorded in the activity log).</p>
+  <% } else if (locals.flash === 'stale') { %>
+    <p class="alert alert-error">⚠ This job changed since you opened the page (e.g. the gardener completed it), so nothing was saved. Check the job below and try again.</p>
+  <% } else if (locals.flash === 'invoiced') { %>
+    <p class="alert alert-error">⚠ This job's invoice has already been sent or paid, so the job can't be cancelled or skipped. Void the invoice first.</p>
+  <% } else if (locals.flash === 'notactive') { %>
+    <p class="alert alert-error">⚠ This visit was <%= visit.status === 'cancelled' ? 'cancelled' : visit.status === 'skipped' ? 'skipped' : 'closed' %> by the office, so it can't be started. Ask a supervisor if it should go ahead.</p>
   <% } else if (locals.flash === 'notstarted') { %>
     <p class="alert alert-error">⚠ Start the job before ticking off the checklist or adding photos.</p>
   <% } else if (locals.flash === 'locked') { %>
@@ -66,6 +81,8 @@
     <p class="alert alert-error"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg> Owner emails were found, but sending failed — check the Email (SMTP) setup on Settings.</p>
   <% } else if (locals.flash === 'piqsent') { %>
     <p class="alert alert-ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 5 5L19 7"/></svg> Report sent to the building's owners via PropertyIQ.</p>
+  <% } else if (locals.flash === 'piqbusy') { %>
+    <p class="alert alert-error">This report is already being sent to the owners. Wait a minute, then check the activity log before sending again.</p>
   <% } else if (locals.flash === 'piqstale') { %>
     <p class="alert alert-error"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.1 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4.5"/><path d="M12 16.8h.01"/></svg> This site's details changed since you looked up the owners — please review them again before sending.</p>
   <% } %>
@@ -197,6 +214,8 @@
       </form>
     </details>
     <% } %>
+  <% } else if (!staff && ['cancelled', 'skipped'].includes(visit.status)) { %>
+    <p class="muted">This visit was <%= visit.status %> by the office — there's nothing to start.</p>
   <% } else { %>
     <form method="post" action="/visits/<%= visit.id %>/timer/start" class="gps-form mobile-sticky-cta"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
       <input type="hidden" name="lat"><input type="hidden" name="lng">
@@ -252,7 +271,7 @@
         <% c.photos.forEach(ph => { %>
           <figure class="photo">
             <a href="/uploads/<%= ph.filename %>" target="_blank"><img src="/uploads/<%= ph.filename %>/thumb" alt="<%= c.title %>" loading="lazy"></a>
-            <% if (ph.taken_at) { %><figcaption class="photo-taken">Taken <%= fmtDateTime(ph.taken_at) %></figcaption><% } %>
+            <% if (ph.taken_at) { %><figcaption class="photo-taken">Taken <%= fmtDateTime(ph.taken_at) %><% if (staff && ph.taken_source === 'client') { %><br><span class="photo-unverified" title="The photo file carried no camera time, so the phone's clock was used">time from phone</span><% } %></figcaption><% } %>
             <% if (!locked) { %>
             <form method="post" action="/visits/<%= visit.id %>/scope/<%= c.id %>/photos/<%= ph.id %>/delete" data-confirm="Remove this photo?"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
               <button class="link-btn danger-link">✕ remove</button></form>
@@ -287,7 +306,7 @@
             <% tPhotos.forEach(ph => { %>
               <figure class="photo">
                 <a href="/uploads/<%= ph.filename %>" target="_blank"><img src="/uploads/<%= ph.filename %>/thumb" alt="<%= t.title %>" loading="lazy"></a>
-                <% if (ph.taken_at) { %><figcaption class="photo-taken">Taken <%= fmtDateTime(ph.taken_at) %></figcaption><% } %>
+                <% if (ph.taken_at) { %><figcaption class="photo-taken">Taken <%= fmtDateTime(ph.taken_at) %><% if (staff && ph.taken_source === 'client') { %><br><span class="photo-unverified" title="The photo file carried no camera time, so the phone's clock was used">time from phone</span><% } %></figcaption><% } %>
                 <% if (running && !locked && (staff || ph.uploaded_by === user.id)) { %>
                 <form method="post" action="/photos/<%= ph.id %>/delete" data-confirm="Remove this photo?"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
                   <button class="link-btn danger-link">✕ remove</button></form>
@@ -308,7 +327,7 @@
         </td>
         <td class="task-status-cell">
           <form method="post" action="/tasks/<%= t.id %>/status" class="inline"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
-            <select name="status" data-autosubmit aria-label="Change task status">
+            <select name="status" data-autosubmit aria-label="Change task status" <%= (approved || (locked && !staff)) ? 'disabled' : '' %>>
               <% ['pending','in_progress','done','blocked'].forEach(s => { %>
                 <option value="<%= s %>" <%= t.status === s ? 'selected' : '' %>><%= s.replace('_',' ') %></option>
               <% }) %>
@@ -318,7 +337,7 @@
       </tr>
       <% }) %>
     </table>
-<% if (!approved) { %>
+<% if (!approved && !(locked && !staff)) { %>
     <form method="post" action="/visits/<%= visit.id %>/tasks" class="add-row" data-draft-label="task"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
       <input type="text" name="title" placeholder="New task…" required>
       <button class="btn">Add</button>
@@ -334,6 +353,7 @@
           <a href="/uploads/<%= ph.filename %>" target="_blank"><img src="/uploads/<%= ph.filename %>/thumb" alt="<%= ph.caption || ph.original_name %>" loading="lazy"></a>
           <figcaption>
             <span class="photo-stamp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M8 3v4M16 3v4M3.5 10h17"/></svg> <%= ph.taken_at ? 'Taken ' + fmtDateTime(ph.taken_at) : fmtDateTime(ph.created_at) %></span><br>
+            <% if (staff && ph.taken_source === 'client') { %><span class="photo-unverified" title="The photo file carried no camera time, so the phone's clock was used">time from phone</span><br><% } %>
             <% if (ph.caption) { %><%= ph.caption %> · <% } %><span class="muted">by <%= ph.uploader_name %></span>
             <% if (staff || ph.uploaded_by === user.id) { %>
               <form method="post" action="/photos/<%= ph.id %>/delete" class="inline" data-confirm="Delete this photo?"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %><button class="link-btn link-btn-danger">Delete</button></form>
@@ -404,7 +424,7 @@
       <% } %>
       <% if (!tasks.length) { %>
       <div class="more-row"><span class="more-label">Add a task</span>
-      <% if (!approved) { %>
+      <% if (!approved && !(locked && !staff)) { %>
     <form method="post" action="/visits/<%= visit.id %>/tasks" class="add-row" data-draft-label="task"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
       <input type="text" name="title" placeholder="New task…" required>
       <button class="btn">Add</button>
@@ -450,6 +470,7 @@
   <p class="muted">This job is approved for payment and locked.<% if (isAdmin) { %> Use <a href="#review">Withdraw approval</a> to change it.<% } %></p>
   <% } else { %>
   <form method="post" action="/visits/<%= visit.id %>/update" class="form-grid"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+    <input type="hidden" name="status_was" value="<%= visit.status %>">
     <label>Gardener
       <select name="gardener_id">
         <option value="">Unassigned</option>
@@ -473,6 +494,9 @@
     </label>
     <label>Duration (min) <input type="number" name="duration_minutes" value="<%= visit.duration_minutes || '' %>"></label>
     <label class="span2">Notes <input type="text" name="notes" value="<%= visit.notes || '' %>"></label>
+    <% if (visit.status !== 'completed') { %>
+    <label class="confirm-line span2"><input type="checkbox" name="force_complete" value="1"> Complete even if photos or checklist items are missing (recorded in the activity log)</label>
+    <% } %>
     <button class="btn btn-primary">Save changes</button>
   </form>
   <% } %>

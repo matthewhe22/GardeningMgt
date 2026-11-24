@@ -46,20 +46,39 @@ async function loadReportData(visitId) {
  * archiveToOneDrive uploads separately, so there's no need to hold every
  * original's bytes in memory just to inline them here too.
  */
+/**
+ * A small JPEG for each photo, for embedding in reports (PDF, inline HTML):
+ * the upload-time thumbnail when there is one, otherwise the original —
+ * read from the database, or from object storage when the bytes live there
+ * (`data` is empty) — shrunk to thumbnail size. Keeps reports small enough to
+ * email and never holds every full original in memory at once.
+ * @returns {Promise<Object<number, Buffer>>} photo id -> JPEG bytes (missing when unavailable)
+ */
+async function loadReportImages(photos) {
+  const out = {};
+  if (!photos.length) return out;
+  const ids = photos.map((p) => p.id);
+  const rows = await q(`SELECT id, filename, thumb_data,
+      CASE WHEN thumb_data IS NULL OR octet_length(thumb_data) = 0 THEN data END AS data
+    FROM photos WHERE id = ANY($1)`, [ids]);
+  const { makeThumbnail } = require('./upload'); // lazy: upload.js isn't needed elsewhere here
+  for (const r of rows) {
+    if (r.thumb_data && r.thumb_data.length) { out[r.id] = r.thumb_data; continue; }
+    let original = r.data && r.data.length ? r.data : null;
+    if (!original && storage.enabled()) {
+      try { original = await storage.getObjectBuffer(r.filename); } catch (_) { original = null; }
+    }
+    const small = original ? await makeThumbnail(original) : null;
+    if (small) out[r.id] = small;
+  }
+  return out;
+}
+
 async function renderReportHtml(data, { inlinePhotos = false } = {}) {
   let photoSrc = (ph) => `/uploads/${ph.filename}`;
   if (inlinePhotos && data.photos.length) {
-    // One query for all photo bytes (was N+1) — thumbnails only, so this
-    // stays small even for a job with many photos.
-    const ids = data.photos.map((p) => p.id);
-    const rows = await q('SELECT id, thumb_data, data, mime FROM photos WHERE id = ANY($1)', [ids]);
-    const srcs = {};
-    for (const r of rows) {
-      const bytes = (r.thumb_data && r.thumb_data.length) ? r.thumb_data : r.data;
-      const mime = (r.thumb_data && r.thumb_data.length) ? 'image/jpeg' : r.mime;
-      srcs[r.id] = `data:${mime};base64,${bytes.toString('base64')}`;
-    }
-    photoSrc = (ph) => srcs[ph.id] || '';
+    const images = await loadReportImages(data.photos);
+    photoSrc = (ph) => (images[ph.id] ? `data:image/jpeg;base64,${images[ph.id].toString('base64')}` : '');
   }
   // Self-contained location snapshot from the captured GPS: OSM tiles are
   // embedded as data URIs so the report still renders offline / from the
@@ -133,12 +152,9 @@ async function renderReportPdf(data) {
   // user-entered text never renders as boxes or breaks encoding.
   const clean = (s) => String(s == null ? '' : s).replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF]/g, '').trim();
 
-  // Photo bytes (only JPEG/PNG can be embedded by pdfkit) in one query.
-  const photoBytes = {};
-  if (photos.length) {
-    const rows = await q('SELECT id, data, mime FROM photos WHERE id = ANY($1)', [photos.map((p) => p.id)]);
-    for (const r of rows) photoBytes[r.id] = r;
-  }
+  // A small JPEG per photo (works for photos in the database or in object
+  // storage, and keeps the PDF small enough to email).
+  const photoImages = await loadReportImages(photos);
   const mapLink = externalMapUrl(gpsPoints, visit);
   // The job-location map, rasterised to PNG so pdfkit can embed it (it can't
   // render SVG). Best-effort: null when there's no location or rasterisation
@@ -266,16 +282,16 @@ async function renderReportPdf(data) {
       photos.forEach((ph) => {
         if (col === 0) { ensure(rowH); rowTop = doc.y; }
         const x = left + col * (cellW + gutter);
-        const rec = photoBytes[ph.id];
+        const img = photoImages[ph.id];
         const caption = `${fmtDateTime(ph.created_at)}${ph.caption ? ` - ${clean(ph.caption)}` : ''} - ${clean(ph.uploader_name) || 'unknown'}`;
-        if (rec && /jpe?g|png/i.test(rec.mime)) {
+        if (img) {
           try {
-            doc.image(rec.data, x, rowTop, { fit: [cellW, imgH], align: 'center', valign: 'center' });
+            doc.image(img, x, rowTop, { fit: [cellW, imgH], align: 'center', valign: 'center' });
           } catch (e) {
             doc.fillColor(MUTED).font('Helvetica').fontSize(8).text(`[${clean(ph.filename)}]`, x, rowTop, { width: cellW });
           }
         } else {
-          doc.fillColor(MUTED).font('Helvetica').fontSize(8).text(`[${rec ? clean(rec.mime) : 'no image'}]`, x, rowTop, { width: cellW });
+          doc.fillColor(MUTED).font('Helvetica').fontSize(8).text('[photo unavailable]', x, rowTop, { width: cellW });
         }
         doc.fillColor(MUTED).font('Helvetica').fontSize(7)
           .text(caption, x, rowTop + imgH + 3, { width: cellW, height: capH, ellipsis: true });

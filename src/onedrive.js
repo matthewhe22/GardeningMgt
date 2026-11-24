@@ -35,6 +35,7 @@ async function getAccessToken(cfg) {
     `https://login.microsoftonline.com/${encodeURIComponent(cfg.onedrive_tenant_id)}/oauth2/v2.0/token`,
     {
       method: 'POST',
+      signal: AbortSignal.timeout(15000),
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         grant_type: 'client_credentials',
@@ -68,6 +69,7 @@ async function uploadFile(relPath, content, mime, ctx = {}) {
     `/drive/root:/${drivePath}:/content`;
   const res = await fetch(url, {
     method: 'PUT',
+    signal: AbortSignal.timeout(60000),
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': mime },
     body: content,
   });
@@ -87,7 +89,7 @@ async function testConnection() {
     const token = await getAccessToken(cfg);
     const res = await fetch(
       `https://graph.microsoft.com/v1.0/sites/${encodeURIComponent(cfg.onedrive_site_id)}/drive`,
-      { headers: { Authorization: `Bearer ${token}` } });
+      { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15000) });
     const data = await res.json();
     if (!res.ok) return { ok: false, message: `Drive lookup failed: ${data.error?.message || res.status}` };
     return { ok: true, message: `Connected: ${data.driveType} drive "${data.name || cfg.onedrive_site_id}" (${data.quota ? Math.round(data.quota.used / 1e6) + ' MB used' : 'ok'})` };

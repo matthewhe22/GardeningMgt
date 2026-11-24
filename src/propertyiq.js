@@ -17,6 +17,9 @@
  */
 const { getSettings } = require('./settings');
 
+/** PropertyIQ calls give up after this long (a hung API must not hang the page). */
+const OUTBOUND_TIMEOUT_MS = 15000;
+
 const SETTING_KEYS = ['piq_base_url', 'piq_client_id', 'piq_client_secret', 'piq_scope'];
 const DEFAULT_SCOPE = 'buildings lots';
 
@@ -43,7 +46,7 @@ async function getAccessToken(cfg) {
     `&client_id=${encodeURIComponent(cfg.piq_client_id)}` +
     `&client_secret=${encodeURIComponent(cfg.piq_client_secret)}` +
     `&scope=${encodeURIComponent(cfg.piq_scope)}`;
-  const res = await fetch(url, { method: 'POST' });
+  const res = await fetch(url, { method: 'POST', signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || !data.access_token) {
     throw new Error(`PropertyIQ token request failed (${res.status}): ${data.error_description || data.error || res.statusText}`);
@@ -58,6 +61,7 @@ async function getAccessToken(cfg) {
 async function apiGet(cfg, path, token) {
   const res = await fetch(`${cfg.piq_base_url}${path}`, {
     headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS),
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');

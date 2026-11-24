@@ -49,7 +49,7 @@ async function sendRemindersForDateWith(deps, date, opts = {}) {
          u.phone AS gardener_phone, u.email AS gardener_email
        FROM visits v
        JOIN properties p ON p.id = v.property_id
-       JOIN users u ON u.id = v.gardener_id
+       JOIN users u ON u.id = v.gardener_id AND u.active
        WHERE v.scheduled_date = $1 AND v.status = 'scheduled' AND v.gardener_id IS NOT NULL
          AND ($2 OR v.reminder_sent_at IS NULL)
        FOR UPDATE OF v SKIP LOCKED`,
@@ -112,7 +112,8 @@ async function backfillSchedules() {
   const { nextOccurrenceOnOrAfter } = require('./recurrence');
   const today = businessToday();
   const jobs = await q(`
-    SELECT j.* FROM jobs j
+    SELECT j.*, CASE WHEN g.active THEN j.gardener_id END AS gardener_id
+    FROM jobs j LEFT JOIN users g ON g.id = j.gardener_id
     WHERE j.active AND j.end_date >= $1
       AND NOT EXISTS (
         SELECT 1 FROM visits v
@@ -179,6 +180,8 @@ function startReminderScheduler() {
     await backfillSchedules();
     await pruneOldRecords();
     try { await require('./storage').sweepPending(); } catch (e) { console.warn('[reminders] sweeping pending uploads failed:', e.message); }
+    try { await require('./storage').sweepOrphans(q); } catch (e) { console.warn('[reminders] sweeping orphaned photos failed:', e.message); }
+    try { await require('./photoBackup').backupPhotos(q, { maxMs: 10 * 60000 }); } catch (e) { console.warn('[reminders] photo backup failed:', e.message); }
     if (sent) console.log(`[reminders] auto-sent ${sent} reminder(s) for ${today}`);
   }, { timezone: TZ });
 }

@@ -3,7 +3,7 @@ const crypto = require('crypto');
 const express = require('express');
 const cookieSession = require('cookie-session');
 
-const { q1, pool, ready, dbPoolerRisk } = require('./db');
+const { q, q1, pool, ready, dbPoolerRisk } = require('./db');
 const { currentUser, requireLogin, isStaff } = require('./auth');
 const { canSeeIssue } = require('./access');
 const { sendRemindersForDate, pruneOldRecords } = require('./reminders');
@@ -160,19 +160,40 @@ app.get('/cron/reminders', asyncHandler(async (req, res) => {
     return res.status(401).json({ ok: false });
   }
   const today = businessToday();
-  const [sent, rolled] = [await sendRemindersForDate(today), await require('./reminders').backfillSchedules()];
-  const pruned = await pruneOldRecords();
+  // Each step runs on its own: one failing (a provider down, a slow query)
+  // must not skip the rest — Vercel doesn't retry a cron run. Failures are
+  // logged and recorded in the activity log so they're visible in the app.
+  const result = { ok: true, date: today };
+  const failed = [];
+  const step = async (name, fn) => {
+    try { result[name] = await fn(); } catch (e) {
+      failed.push(name);
+      console.error(`[cron] ${name} failed:`, e);
+    }
+  };
+  await step('sent', () => sendRemindersForDate(today));
+  await step('rolled', () => require('./reminders').backfillSchedules());
+  await step('pruned', () => pruneOldRecords());
   // Geocode a bounded batch of properties still missing coordinates (e.g.
   // from a spreadsheet import that intentionally skipped geocoding inline —
   // see routes/admin.js). Rate-limited the same as the manual "Find missing
   // coordinates" button; running daily via cron means a large import fills in
   // over a few days without ever risking a request timeout.
-  const { geocodeMissingBatch } = require('./geocode');
-  const geocoded = await geocodeMissingBatch(Number(process.env.GEOCODE_BATCH || 5));
+  await step('geocoded', () => require('./geocode').geocodeMissingBatch(Number(process.env.GEOCODE_BATCH || 5)));
   // Unfinished direct photo uploads (dropped connections) left under pending/.
-  let sweptUploads = 0;
-  try { sweptUploads = await storage.sweepPending(); } catch (e) { console.warn('[cron] sweeping pending uploads failed:', e.message); }
-  res.json({ ok: true, date: today, sent, rolled, pruned, geocoded, sweptUploads });
+  await step('sweptUploads', () => storage.sweepPending());
+  // Photos in the bucket that no database row refers to any more.
+  await step('sweptOrphans', () => storage.sweepOrphans(q));
+  // Copy new photo originals to the off-site backup bucket (time-boxed).
+  await step('photoBackup', () => require('./photoBackup').backupPhotos(q, { maxMs: 20000 }));
+  if (failed.length) {
+    result.failed = failed;
+    try {
+      await require('./activity').logActivity(null, 'system.cron_failed', null, null,
+        `Daily job: ${failed.join(', ')} failed (see server logs)`);
+    } catch (_) { /* logging is best-effort */ }
+  }
+  res.json(result);
 }));
 
 // CSRF protection on all state-changing requests (after session is set up).
@@ -197,22 +218,39 @@ app.get('/uploads/:filename', requireLogin, asyncHandler(async (req, res) => {
     WHERE ph.filename = $1`, [req.params.filename]);
   if (!photo) return res.status(404).end();
   if (!(await photoAllowed(res.locals.user, photo))) return res.status(404).end();
-  res.set('Content-Type', photo.mime);
-  // Filenames are unique, immutable content keys, so the browser can keep them
-  // for a long time and never re-fetch — repeat photo views become instant.
-  res.set('Cache-Control', 'private, max-age=31536000, immutable');
+  // Filenames are unique, immutable content keys, so the browser can keep a
+  // photo for a long time and never re-fetch it — but only a real photo: an
+  // error must not be cached, or one storage hiccup leaves that photo broken
+  // in the browser for a year.
+  const cacheForever = () => {
+    res.set('Content-Type', photo.mime);
+    res.set('Cache-Control', 'private, max-age=31536000, immutable');
+  };
   // Photos stored in object storage keep an empty `data` buffer — stream those
   // from the bucket (through the function, so the auth check above still gates
   // access); inline bytes are sent directly.
-  if (storage.enabled() && photo.data && photo.data.length === 0) {
-    try {
-      const body = await storage.getObjectStream(req.params.filename);
-      body.on('error', () => { if (!res.headersSent) res.status(502).end(); });
-      return body.pipe(res);
-    } catch (e) {
-      return res.status(404).end();
+  if (photo.data && photo.data.length === 0) {
+    if (!storage.enabled()) {
+      console.error(`[uploads] ${req.params.filename} is in object storage but S3_BUCKET is not set`);
+      return res.status(503).set('Cache-Control', 'no-store').end();
     }
+    let body;
+    try {
+      body = await storage.getObjectStream(req.params.filename);
+    } catch (e) {
+      const missing = e && (e.name === 'NoSuchKey' || e.$metadata?.httpStatusCode === 404);
+      console.error(`[uploads] ${req.params.filename}: ${e.name || ''} ${e.message}`);
+      return res.status(missing ? 404 : 502).set('Cache-Control', 'no-store').end();
+    }
+    cacheForever();
+    // A stream that fails part-way must end the response, not leave it hanging.
+    body.on('error', (e) => {
+      console.error(`[uploads] ${req.params.filename} stream: ${e.message}`);
+      res.destroy(e);
+    });
+    return body.pipe(res);
   }
+  cacheForever();
   res.send(photo.data);
 }));
 
@@ -261,8 +299,8 @@ app.use((err, req, res, next) => {
   // (instead of a dead-end error page the gardener has to navigate back from).
   const uploadErr = err.code === 'LIMIT_FILE_SIZE' || err.code === 'LIMIT_UNEXPECTED_FILE' || err.code === 'LIMIT_FILE_COUNT';
   const onVisit = req.method === 'POST' && /^\/visits\/(\d+)\//.exec(req.path);
-  // The single-photo endpoint is called by fetch() and expects JSON back.
-  if (req.method === 'POST' && /^\/visits\/\d+\/photo$/.test(req.path)) {
+  // The photo upload endpoints are called by fetch() and expect JSON back.
+  if (req.method === 'POST' && /^\/visits\/\d+\/photo(\/(presign|complete))?$/.test(req.path)) {
     const msg = err.code === 'LIMIT_FILE_SIZE' ? 'That photo is too large.'
       : err.code === 'EBADCSRFTOKEN' ? 'Your session expired. Reload the page and try again.'
         : uploadErr ? 'That file is not a supported photo.' : 'Upload failed. Please try again.';

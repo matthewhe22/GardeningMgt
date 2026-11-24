@@ -1,3 +1,30 @@
+// Everything runs inside one function so the file can run again in the same
+// window: when a form's response is a rendered page (not a redirect) it is
+// shown with document.open()/write(), which keeps the window and re-runs this
+// script. Top-level const/let would then throw "already declared" and leave the
+// new page with no script at all (no CSRF fields, no double-submit guard).
+(function gmgtApp() {
+// Undo the previous run's window-level listeners and timers.
+if (typeof window.__gmgtTeardown === 'function') { try { window.__gmgtTeardown(); } catch (_) { /* ignore */ } }
+const teardown = [];
+window.__gmgtTeardown = () => { teardown.splice(0).forEach((fn) => fn()); };
+function onWindow(type, fn) {
+  window.addEventListener(type, fn);
+  teardown.push(() => window.removeEventListener(type, fn));
+}
+
+// Signing out: forget the job pages kept for offline use on this device.
+document.querySelectorAll('form[action^="/logout"]').forEach((form) => {
+  form.addEventListener('submit', () => {
+    try { if (window.caches) caches.delete('gmgt-pages-v1'); } catch (_) { /* ignore */ }
+    try {
+      if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage('gmgt:clear-pages');
+      }
+    } catch (_) { /* ignore */ }
+  });
+});
+
 // --- CSRF: inject the session token into every same-origin POST form ---
 const CSRF = document.querySelector('meta[name="csrf-token"]')?.content || '';
 document.querySelectorAll('form').forEach((form) => {
@@ -483,7 +510,10 @@ function putToBucket(url, headers, blob, onProgress) {
 }
 
 function photoMime(file) {
-  if (file.type) return file.type;
+  // Some browsers report JPEGs as "image/jpg" or "image/pjpeg".
+  const t = (file.type || '').toLowerCase();
+  if (t === 'image/jpg' || t === 'image/pjpeg') return 'image/jpeg';
+  if (t) return t;
   const ext = (file.name.split('.').pop() || '').toLowerCase();
   return { heic: 'image/heic', heif: 'image/heif', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' }[ext] || '';
 }
@@ -503,7 +533,10 @@ async function uploadLivePhoto(endpoint, prepared, extra, onProgress) {
       try {
         await putToBucket(pre.url, pre.headers, prepared.file, onProgress);
       } catch (err) {
-        if (err.status !== 0 || navigator.onLine === false) throw err;
+        // A refused connection means the bucket doesn't accept this browser
+        // (CORS) — but only if no direct upload has worked on this page yet;
+        // after one has, it's just a dropped connection: report it, retry later.
+        if (err.status !== 0 || navigator.onLine === false || directUploads === true) throw err;
         // Online but the bucket is unreachable from here (usually its CORS
         // rules don't allow this site yet) — send through the app instead.
         console.warn('Direct photo upload unavailable, using the app upload instead.');
@@ -520,8 +553,9 @@ async function uploadLivePhoto(endpoint, prepared, extra, onProgress) {
 }
 
 // Upload every selected photo of a data-photo-endpoint form. Resolves true when
-// all went up; on failure shows why, keeps the photos not yet uploaded
-// selected, and resolves false.
+// all went up. A photo the server refuses (too old, HEIC, …) is skipped and the
+// rest still go up; a lost connection stops there. Photos that didn't make it
+// stay selected (so a retry doesn't duplicate) and the reason is shown.
 async function uploadLivePhotos(form) {
   const inputs = [...form.querySelectorAll('input[type=file]')];
   const files = [];
@@ -542,13 +576,15 @@ async function uploadLivePhotos(form) {
   };
   const total = files.length;
   let done = 0;
+  const failed = [];
+  let firstError = null;
   // Straight to the bucket there's no request-size cap, so a photo the browser
   // can't shrink (e.g. HEIC on Android) can still go up as-is.
   const maxBytes = form.dataset.photoDirect === '1' && directUploads !== false ? 10 * 1024 * 1024 : LIVE_MAX_BYTES;
   let next = prepareLivePhoto(files[0], maxAge, maxBytes);
-  try {
-    for (let i = 0; i < total; i++) {
-      say(`Preparing photo ${i + 1} of ${total}…`);
+  for (let i = 0; i < total; i++) {
+    say(`Preparing photo ${i + 1} of ${total}…`);
+    try {
       const prepared = await next;
       // Compress the following photo while this one uploads.
       next = i + 1 < total ? prepareLivePhoto(files[i + 1], maxAge, maxBytes) : null;
@@ -557,24 +593,46 @@ async function uploadLivePhotos(form) {
         say(`Uploading photo ${i + 1} of ${total}… ${Math.round(p * 100)}%`);
       });
       done++;
+    } catch (err) {
+      failed.push(files[i]);
+      if (!firstError) firstError = err;
+      if (i + 1 < total && !next) next = prepareLivePhoto(files[i + 1], maxAge, maxBytes);
+      // No connection: the rest would fail the same way.
+      if (err.message === OFFLINE_MSG || navigator.onLine === false) {
+        failed.push(...files.slice(i + 1));
+        break;
+      }
     }
+  }
+  if (!failed.length) {
     say(total === 1 ? 'Photo uploaded.' : `${total} photos uploaded.`);
     inputs.forEach((inp) => { inp.value = ''; });
     return true;
-  } catch (err) {
-    // Keep only the photos that didn't make it, so a retry doesn't duplicate.
-    const remaining = files.slice(done);
-    try {
-      const dt = new DataTransfer();
-      remaining.forEach((f) => dt.items.add(f));
-      inputs.forEach((inp, idx) => { inp.files = idx === 0 ? dt.files : new DataTransfer().files; });
-      inputs.forEach((inp) => inp.dispatchEvent(new Event('change')));
-    } catch (_) {
-      inputs.forEach((inp) => { inp.value = ''; });
-    }
-    say((done ? `${done} of ${total} uploaded. ` : '') + err.message, true);
-    return false;
   }
+  try {
+    const dt = new DataTransfer();
+    failed.forEach((f) => dt.items.add(f));
+    inputs.forEach((inp, idx) => { inp.files = idx === 0 ? dt.files : new DataTransfer().files; });
+    inputs.forEach((inp) => inp.dispatchEvent(new Event('change')));
+  } catch (_) {
+    inputs.forEach((inp) => { inp.value = ''; });
+  }
+  say((done ? `${done} of ${total} uploaded. ` : '') + firstError.message, true);
+  return false;
+}
+
+// When a scope item's photo is refused, still save its Done tick and comment
+// (without the photos) so the gardener doesn't lose them; the refused photo
+// and its reason stay on screen.
+async function saveScopeFieldsOnly(form) {
+  const fd = new FormData(form);
+  fd.delete('photos');
+  const body = new URLSearchParams();
+  for (const [k, v] of fd.entries()) if (typeof v === 'string') body.append(k, v);
+  try {
+    const res = await fetch(form.action, { method: 'POST', body, credentials: 'same-origin' });
+    return res.ok;
+  } catch (_) { return false; }
 }
 
 // Intercept every POST form submit: save a draft, send it via fetch, and
@@ -668,7 +726,16 @@ document.querySelectorAll('form').forEach((form) => {
       const photosUp = live ? uploadLivePhotos(form) : Promise.resolve(true);
 
       photosUp.then((ok) => {
-        if (!ok) { reEnableSubmit(form); return; }
+        if (!ok) {
+          reEnableSubmit(form);
+          if (form.dataset.checkId) {
+            saveScopeFieldsOnly(form).then((saved) => {
+              const st = form.querySelector('[data-upload-status]');
+              if (saved && st) st.textContent = 'Tick and comment saved. ' + st.textContent;
+            });
+          }
+          return;
+        }
         // A photos-only form has nothing left to post once its photos are up.
         if (live && hadPhotos && !form.dataset.checkId) { clearDraft(form); window.location.reload(); return; }
         const bodyReady = isMultipart ? shrinkPhotos(new FormData(form))
@@ -742,7 +809,8 @@ window.CSRF_TOKEN = CSRF;
 
 // Register the service worker for offline app-shell support (PWA).
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+  if (document.readyState === 'complete') navigator.serviceWorker.register('/sw.js').catch(() => {});
+  else onWindow('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
 }
 
 // --- Periodic GPS ping while a job is running (mobile field use) -----------
@@ -758,7 +826,7 @@ if ('serviceWorker' in navigator) {
   const pingEl = document.querySelector('[data-gps-ping-visit]');
   if (!pingEl || !('geolocation' in navigator)) return;
   const visitId = pingEl.getAttribute('data-gps-ping-visit');
-  setInterval(() => {
+  const timer = setInterval(() => {
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         const body = new URLSearchParams({
@@ -772,6 +840,7 @@ if ('serviceWorker' in navigator) {
       { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
     );
   }, GPS_PING_INTERVAL_MS);
+  teardown.push(() => clearInterval(timer));
 })();
 
 // Lightweight offline indicator so field users know saves won't go through.
@@ -801,14 +870,25 @@ function showNet() {
     bar.remove();
   }
 }
-window.addEventListener('online', showNet);
-window.addEventListener('offline', showNet);
+// Match the spacer at the foot of the job page to the fixed action bar's real
+// height, so the bar never hides the last of the page.
+function fitCtaSpacer() {
+  const cta = document.querySelector('.mobile-sticky-cta');
+  const spacer = document.querySelector('.cta-spacer');
+  if (!cta || !spacer) return;
+  const h = getComputedStyle(cta).position === 'fixed' ? Math.ceil(cta.getBoundingClientRect().height) : 0;
+  spacer.style.height = h ? `${h + 16}px` : '';
+}
+fitCtaSpacer();
+onWindow('resize', fitCtaSpacer);
+onWindow('online', showNet);
+onWindow('offline', showNet);
 // The sticky CTA's height can change after load (e.g. a photo-count note
 // wrapping to a second line) — recheck shortly after load too, not just on
 // network-state changes, so the offline bar (if already showing, e.g. after a
 // reload while offline) tracks it.
 showNet();
-window.addEventListener('resize', () => { if (!navigator.onLine) showNet(); });
+onWindow('resize', () => { if (!navigator.onLine) showNet(); });
 
 // --- Mobile: invite the user to add the app to their home screen ---
 // Only for phones/tablets that aren't already running the installed app.
@@ -843,7 +923,7 @@ window.addEventListener('resize', () => { if (!navigator.onLine) showNet(); });
   let installBtn = null;
   let stepsEl = null;
 
-  window.addEventListener('beforeinstallprompt', (e) => {
+  onWindow('beforeinstallprompt', (e) => {
     e.preventDefault();   // suppress Chrome's mini-infobar; we ask in-app instead
     deferred = e;
     // The event can land after the banner is up: swap the manual steps for the
@@ -854,7 +934,7 @@ window.addEventListener('resize', () => { if (!navigator.onLine) showNet(); });
     }
     show();
   });
-  window.addEventListener('appinstalled', () => { snooze(); close(); });
+  onWindow('appinstalled', () => { snooze(); close(); });
 
   if (isIOS) show();
   // Browsers that never fire beforeinstallprompt (Firefox, Samsung, Safari on
@@ -941,4 +1021,5 @@ window.addEventListener('resize', () => { if (!navigator.onLine) showNet(); });
 
   function snooze() { writeStore(SNOOZE_KEY, String(Date.now())); }
   function close() { if (banner) banner.remove(); banner = null; }
+})();
 })();

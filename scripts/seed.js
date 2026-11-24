@@ -2,9 +2,29 @@
 // a week of visits, tasks and a sample issue.
 // Run: DATABASE_URL=postgresql://... npm run seed
 const bcrypt = require('bcryptjs');
-const { pool, q, q1, ready } = require('../src/db');
 
+// The demo users have published passwords (admin1234, …), so never create them
+// on a live database: only a local one, unless SEED_ALLOW_REMOTE=1 is set on
+// purpose (e.g. a throwaway staging database).
+function seedRefusal(env = process.env) {
+  const url = env.DATABASE_URL || '';
+  const local = !url || /@(localhost|127\.0\.0\.1)[:/]|host=\/|host=localhost/.test(url);
+  if (env.VERCEL || env.NODE_ENV === 'production') {
+    return 'Refusing to seed demo data in production (VERCEL / NODE_ENV=production is set).';
+  }
+  if (!local && env.SEED_ALLOW_REMOTE !== '1') {
+    return 'Refusing to seed demo accounts (with known passwords) into a non-local database. ' +
+      'Set SEED_ALLOW_REMOTE=1 only for a throwaway database.';
+  }
+  return null;
+}
+
+let db = null;
 async function main() {
+  const refusal = seedRefusal();
+  if (refusal) { console.error(refusal); process.exitCode = 1; return; }
+  db = require('../src/db');
+  const { q, q1, ready } = db;
   await ready();
 
   // ready() may have created the bootstrap admin; only skip when real data exists.
@@ -78,6 +98,10 @@ async function main() {
   console.log('  gina@example.com       / garden1234  (gardener)');
 }
 
-main()
-  .catch((e) => { console.error(e); process.exitCode = 1; })
-  .finally(() => pool.end());
+if (require.main === module) {
+  main()
+    .catch((e) => { console.error(e); process.exitCode = 1; })
+    .finally(() => (db ? db.pool.end() : undefined));
+}
+
+module.exports = { seedRefusal };

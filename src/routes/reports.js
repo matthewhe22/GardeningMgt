@@ -20,8 +20,18 @@ function reportRange(req) {
 }
 
 // Shared minimal RFC-4180 CSV writer: wrap every field, double internal quotes.
+// Text that starts with = + - @ (or a tab / carriage return) is run as a
+// formula by Excel and Sheets, so a site name or comment typed as
+// "=HYPERLINK(...)" could act when the export is opened: prefix it with ' so it
+// shows as plain text. Numbers (e.g. a negative amount) are left alone.
+function csvCell(val) {
+  if (val == null) return '';
+  if (typeof val === 'number') return String(val);
+  const s = String(val);
+  return /^[=+\-@\t\r]/.test(s) && !/^-?\d+(\.\d+)?$/.test(s) ? `'${s}` : s;
+}
 function toCsv(header, rows) {
-  const esc = (val) => `"${String(val == null ? '' : val).replace(/"/g, '""')}"`;
+  const esc = (val) => `"${csvCell(val).replace(/"/g, '""')}"`;
   const lines = [header.map(esc).join(',')];
   for (const r of rows) lines.push(r.map(esc).join(','));
   return lines.join('\r\n');
@@ -125,3 +135,4 @@ router.get('/export-issues.csv', asyncHandler(async (req, res) => {
 }));
 
 module.exports = router;
+module.exports.toCsv = toCsv;

@@ -161,15 +161,70 @@ the meantime.
 
 ## Backups
 
-`npm run backup [output-dir]` (requires `pg_dump` on PATH and `DATABASE_URL`
-set) writes a full schema+data dump of every table *except* photo image bytes,
-plus a second file with the photos table's own metadata (filename, caption,
-visit/issue link, timestamps) — so a routine backup isn't multiple times
-larger than the rest of the database just from `photos.data`/`thumb_data`.
-The actual image bytes are recoverable from S3 if `S3_BUCKET` is configured
-(see above); without S3, run an occasional full `pg_dump` (no
-`--exclude-table-data`) alongside the routine backups if you need the photo
-bytes themselves preserved too.
+Three things hold your data; each needs its own backup.
+
+**1. The database.** Supabase backs up Postgres daily on paid plans (and can
+restore to a point in time with the PITR add-on) — check what your plan
+includes under Database → Backups. For your own copy, run:
+
+```bash
+DATABASE_URL="<session pooler URL>" npm run backup -- ./backups
+```
+
+This writes one `pg_dump` custom-format file with every table and column.
+`scripts/backup.js` shows how to restore it. It needs `pg_dump` with the
+server's major version or newer.
+
+**2. Photo originals (object storage).** Supabase's database backups do not
+include Storage. When a second bucket is configured, the daily job copies
+each new photo there (time-boxed, so a big backlog catches up over a few
+days), and records it in `photos.backed_up_at`. Nothing is ever deleted from
+the backup. Use a different provider than the primary, e.g. a Cloudflare R2
+bucket:
+
+| Variable | Notes |
+|---|---|
+| `BACKUP_S3_BUCKET` | backup bucket name (enables photo backups) |
+| `BACKUP_S3_ENDPOINT` | e.g. `https://<account-id>.r2.cloudflarestorage.com` |
+| `BACKUP_S3_REGION` | `auto` for R2 |
+| `BACKUP_S3_ACCESS_KEY_ID` / `BACKUP_S3_SECRET_ACCESS_KEY` | an **Object Read & Write** token for that bucket only |
+
+To copy the existing backlog in one go (from your machine, with the same
+`S3_*`, `BACKUP_S3_*` and `DATABASE_URL` values exported):
+
+```bash
+npm run backup:photos
+```
+
+It's safe to stop and re-run.
+
+**3. Thumbnails** live in the database, so backup 1 covers them.
+
+## Housekeeping (daily job)
+
+`/cron/reminders` runs once a day (see `vercel.json`). Each step runs on its
+own, so one failing doesn't skip the rest; a failure is recorded in the
+activity log as `system.cron_failed`. It sends reminders, books the next
+contract visits, prunes old notifications and activity, geocodes new sites,
+and then does three photo jobs:
+- deletes unfinished uploads older than a day;
+- deletes bucket photos that no database row refers to any more, if they're
+  older than 7 days (at most 500 per run, and never when the photos table is
+  empty);
+- copies new photos to the backup bucket.
+
+## Job photo rules
+
+Job photos (checklist items, tasks, general job photos) must:
+- come from the camera, while the job is running;
+- have been taken during the job: no more than `PHOTO_MAX_AGE_HOURS`
+  (default 12) old, and not more than `PHOTO_START_GRACE_MINUTES` (default 30)
+  before the job was started.
+
+The capture time is read from the photo itself (EXIF). When the file carries
+none, the phone's clock is used instead, and staff see the photo marked
+**time from phone**. HEIC files are refused with a request to set the camera
+to "Most Compatible" (JPG); iPhone Safari converts automatically.
 
 ## Run locally / on a normal server
 
@@ -211,6 +266,8 @@ Demo accounts (after seeding):
 | `APP_URL` | request origin | Public URL used in email links (job report "Review & approve" button), e.g. `https://gardeningmgt.vercel.app` |
 | `RESEND_API_KEY` / `RESEND_FROM` | unset | Fallback email provider for job reports when SMTP isn't configured in **Settings** |
 | `PHOTO_MAX_AGE_HOURS` | 12 | Oldest capture time (from the photo's EXIF) accepted for a job photo |
+| `PHOTO_START_GRACE_MINUTES` | 30 | How long before a job's start time a job photo may have been taken |
+| `BACKUP_S3_*` | unset | Off-site copy of photo originals — see Backups |
 | `BUSINESS_TZ` | Australia/Melbourne | Timezone for the business calendar, reminder scheduling and every timestamp shown to users |
 | `OSRM_URL` | public demo server | Road-distance routing endpoint (OSRM). Falls back to straight-line if unreachable; self-host for production volume — see [docs/OSRM.md](docs/OSRM.md) |
 | `GEOCODER_URL` / `GEOCODER_EMAIL` | Nominatim | Address→coordinates geocoder (used by Sites) |

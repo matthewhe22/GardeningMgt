@@ -58,7 +58,7 @@ async function loadChecks(visitId) {
     WHERE c.visit_id = $1 ORDER BY c.position, c.id`, [visitId]);
   if (!checks.length) return checks;
   const photos = await q(`
-    SELECT id, filename, mime, created_at, taken_at, scope_check_id FROM photos
+    SELECT id, filename, mime, created_at, taken_at, taken_source, scope_check_id FROM photos
     WHERE scope_check_id = ANY($1) ORDER BY created_at`, [checks.map((c) => c.id)]);
   const by = {};
   for (const ph of photos) (by[ph.scope_check_id] ||= []).push(ph);

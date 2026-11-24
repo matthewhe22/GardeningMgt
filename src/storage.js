@@ -53,6 +53,8 @@ function getClient() {
     // R2 / other S3-compatible stores don't all accept the trailing checksums
     // the SDK adds to server-side uploads.
     requestChecksumCalculation: 'WHEN_REQUIRED',
+    // Don't let a hung storage server hold a request (or the daily job) open.
+    requestHandler: { connectionTimeout: 10000, requestTimeout: 60000 },
     responseChecksumValidation: 'WHEN_REQUIRED',
     credentials: (env('S3_ACCESS_KEY_ID') && env('S3_SECRET_ACCESS_KEY'))
       ? { accessKeyId: env('S3_ACCESS_KEY_ID'), secretAccessKey: env('S3_SECRET_ACCESS_KEY') }
@@ -123,10 +125,22 @@ async function headKey(Key) {
   }
 }
 
-async function getPendingBuffer(filename) {
+/**
+ * A pending upload's bytes, reading at most `maxBytes` (a ranged GET, so an
+ * object swapped for a huge one after it was checked can't exhaust memory).
+ * Returns null when the object isn't there.
+ */
+async function getPendingBuffer(filename, { maxBytes } = {}) {
   const { GetObjectCommand } = require('@aws-sdk/client-s3');
-  const out = await getClient().send(new GetObjectCommand({ Bucket: BUCKET, Key: pendingKey(filename) }));
-  return Buffer.from(await out.Body.transformToByteArray());
+  try {
+    const out = await getClient().send(new GetObjectCommand({
+      Bucket: BUCKET, Key: pendingKey(filename), ...(maxBytes ? { Range: `bytes=0-${maxBytes - 1}` } : {}),
+    }));
+    return Buffer.from(await out.Body.transformToByteArray());
+  } catch (e) {
+    if (e && (e.name === 'NoSuchKey' || e.name === 'NotFound' || e.$metadata?.httpStatusCode === 404)) return null;
+    throw e;
+  }
 }
 
 /** Move a verified pending upload to its final key (copy inside the bucket, then delete). */
@@ -165,6 +179,40 @@ async function sweepPending({ olderThanMs = 24 * 3600 * 1000, now = Date.now() }
       if (!obj.LastModified || now - obj.LastModified.getTime() < olderThanMs) continue;
       await deletePending(obj.Key.slice(Prefix.length));
       removed++;
+    }
+    ContinuationToken = out.IsTruncated ? out.NextContinuationToken : undefined;
+  } while (ContinuationToken);
+  return removed;
+}
+
+/**
+ * Delete finished photos in the bucket that no `photos` row refers to any more
+ * — left behind when a row is removed by a cascade (a deleted scope item or
+ * library entry, a template re-apply) or a delete path that only touched the
+ * database. Conservative: only objects older than `olderThanMs` (7 days), at
+ * most `maxDeletes` per run, and nothing at all if the photos table looks
+ * empty (a wrong database must never wipe the bucket). Returns how many it removed.
+ */
+async function sweepOrphans(q, { olderThanMs = 7 * 24 * 3600 * 1000, maxDeletes = 500, now = Date.now() } = {}) {
+  if (!enabled()) return 0;
+  const { n } = (await q('SELECT count(*)::int AS n FROM photos'))[0];
+  if (!n) return 0;
+  const { ListObjectsV2Command } = require('@aws-sdk/client-s3');
+  const pending = pendingKey('');
+  let removed = 0;
+  let ContinuationToken;
+  do {
+    const out = await getClient().send(new ListObjectsV2Command({ Bucket: BUCKET, Prefix: PREFIX, ContinuationToken }));
+    const old = (out.Contents || []).filter((o) => o.Key && !o.Key.startsWith(pending)
+      && o.LastModified && now - o.LastModified.getTime() >= olderThanMs);
+    if (old.length) {
+      const names = old.map((o) => o.Key.slice(PREFIX.length));
+      const known = new Set((await q('SELECT filename FROM photos WHERE filename = ANY($1)', [names])).map((r) => r.filename));
+      for (const name of names) {
+        if (known.has(name)) continue;
+        await deleteObject(name);
+        if (++removed >= maxDeletes) return removed;
+      }
     }
     ContinuationToken = out.IsTruncated ? out.NextContinuationToken : undefined;
   } while (ContinuationToken);
@@ -325,5 +373,5 @@ module.exports = {
   clean, configReport, explainStorageError, selfTest, getClient,
   enabled, keyFor, putObject, getObjectStream, getObjectBuffer, deleteObject,
   headObject, pendingKey, presignPendingPut, headPending, getPendingBuffer, promotePending, deletePending,
-  sweepPending, ensureBucket, uploadOrigins, directUploads,
+  sweepPending, sweepOrphans, ensureBucket, uploadOrigins, directUploads,
 };

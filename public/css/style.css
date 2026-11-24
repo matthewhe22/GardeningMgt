@@ -1415,11 +1415,22 @@ select, input[type="date"], input[type="text"], input[type="email"], input[type=
     box-shadow: 0 6px 16px rgba(20, 83, 45, 0.22);
   }
   .mobile-sticky-cta .btn-danger { box-shadow: 0 6px 16px rgba(192, 57, 43, 0.24); }
-  .mobile-sticky-cta .cta-note { font-size: 0.85rem; }
-  .mobile-sticky-cta .confirm-line { margin: 0 0 10px; font-size: 0.9rem; }
+  /* Keep the bar to a few lines: one summary line, the tick and the button.
+     Error messages are capped and scroll, so the bar never covers most of
+     the screen (the full checklist is on the page above). */
+  .mobile-sticky-cta { max-height: 45vh; overflow-y: auto; padding: 8px 12px; }
+  .mobile-sticky-cta .cta-note {
+    font-size: 0.8rem; margin: 0 0 6px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .mobile-sticky-cta .cta-note br, .mobile-sticky-cta .cta-note br + .muted { display: none; }
+  .mobile-sticky-cta .alert { font-size: 0.8rem; padding: 6px 10px; margin: 0 0 6px; }
+  .mobile-sticky-cta .confirm-line { margin: 0 0 6px; font-size: 0.85rem; }
+  .mobile-sticky-cta .btn-block { min-height: 48px; }
 
-  /* Reserve room so the fixed action bar never hides the last bit of content. */
-  .cta-spacer { display: block; height: 150px; }
+  /* Reserve room so the fixed action bar never hides the last bit of content
+     (app.js sets the exact height to match the bar). */
+  .cta-spacer { display: block; height: 130px; }
 
   /* Make the whole field workflow roomier and easier to tap on a phone. */
   .photo-actions .photo-pick { min-height: 52px; }
@@ -1802,3 +1813,6 @@ details.fold[open] > summary { margin-bottom: 10px; }
 .storage-steps li.fail { color: var(--danger); }
 /* Long URLs in setup instructions must wrap, not push the page sideways on phones. */
 .card p code, .card li code { overflow-wrap: anywhere; }
+
+/* Job photo whose capture time came from the phone's clock, not the camera. */
+.photo-unverified { font-size: 0.68rem; color: var(--warning, #9a6700); font-weight: 600; }

@@ -33,6 +33,8 @@ function makeTransport(cfg) {
     port,
     secure: port === 465, // implicit TLS on 465; STARTTLS negotiated on 587/25/others
     auth: cfg.smtp_user ? { user: cfg.smtp_user, pass: cfg.smtp_password || '' } : undefined,
+    // Fail a stuck mail server in seconds rather than holding the request.
+    connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 30000,
   });
 }
 

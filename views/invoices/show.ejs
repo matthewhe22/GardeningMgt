@@ -2,6 +2,10 @@
 <h1><%= invoice.number %> <span class="status status-<%= invoice.status %>"><%= invoice.status %></span></h1>
 <% if (error === 'duplicate') { %>
 <p class="alert alert-error">Can't set that status: another live invoice already exists for this visit. Void or update that one first.</p>
+<% } else if (error === 'notdraftedit') { %>
+<p class="alert alert-error">This invoice has been sent, so its lines can't change. Void it and create a new one to correct it.</p>
+<% } else if (error === 'transition') { %>
+<p class="alert alert-error">That status change isn't allowed for a <%= invoice.status %> invoice.</p>
 <% } else if (error === 'hasitems') { %>
 <p class="alert alert-error">Can't delete this invoice: it already has line items. Void it instead.</p>
 <% } else if (error === 'notdraft') { %>
@@ -60,8 +64,9 @@
   <form method="post" action="/invoices/<%= invoice.id %>/status" class="filter-row" data-confirm="Update this invoice's status?"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
     <label>Status
       <select name="status">
-        <% ['draft','sent','paid','void'].forEach(s => { %>
-          <option value="<%= s %>" <%= invoice.status === s ? 'selected' : '' %>><%= s %></option>
+        <option value="<%= invoice.status %>" selected><%= invoice.status %></option>
+        <% (locals.nextStatuses || []).forEach(s => { %>
+          <option value="<%= s %>"><%= s === 'sent' && invoice.status === 'paid' ? 'sent (mark unpaid)' : s %></option>
         <% }) %>
       </select>
     </label>

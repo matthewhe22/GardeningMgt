@@ -24,5 +24,9 @@
   <form method="post" action="/logout"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
     <button class="btn btn-danger btn-block">Sign out</button>
   </form>
+  <form method="post" action="/logout/all" data-confirm="Sign out on every phone and computer, including this one?"><% if (locals.csrfToken) { %><input type="hidden" name="_csrf" value="<%= csrfToken %>"><% } %>
+    <button class="btn btn-block" style="margin-top: 10px">Sign out of all devices</button>
+  </form>
+  <p class="muted" style="margin-bottom: 0">Lost a phone? Sign out of all devices and nobody can keep using your account on it.</p>
 </div>
 <%- include('partials/footer') %>

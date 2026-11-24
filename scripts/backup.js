@@ -1,28 +1,27 @@
 #!/usr/bin/env node
-// Back up the database while keeping photo bytes out of the routine dump —
-// pg_dump can't exclude a single column, and photos.data/thumb_data (up to
-// 10MB+ per row) can make a plain pg_dump enormous compared to every other
-// table combined. This produces two files:
-//   1. backup-<timestamp>.sql              full pg_dump of the schema and
-//      every table's data EXCEPT the photos table's row data.
-//   2. backup-<timestamp>-photos-meta.sql   the photos table's own data,
-//      with the data/thumb_data columns replaced by an empty bytea, so every
-//      photo's filename/caption/visit-or-issue link/timestamp is still
-//      backed up and restorable — only the actual image bytes are dropped.
+// Back up the whole database to one file you can restore with pg_restore.
 //
-// The image bytes themselves are recoverable from S3 (when S3_BUCKET is
-// configured — see src/storage.js, which is the recommended way to keep
-// large photo backups out of Postgres entirely) or need a real, deliberately
-// less-frequent full pg_dump (no --exclude-table-data) when running without
-// object storage.
+//   DATABASE_URL=postgres://... node scripts/backup.js [output-dir]
 //
-// Usage: DATABASE_URL=postgres://... node scripts/backup.js [output-dir]
+// Every table and column is included (photo links, capture times, thumbnails
+// and all), with timestamps exactly as stored. With object storage on (S3_BUCKET),
+// photo originals are not in the database — they live in the bucket and are
+// copied to the off-site backup bucket by the daily job (BACKUP_S3_*; see
+// src/photoBackup.js and `npm run backup:photos`), so this file stays small.
+// Without object storage the originals are inside the database and the file
+// can be large.
+//
+// Restore into an empty database (which already has a public schema, so skip
+// re-creating it):
+//   pg_restore --list backup-<stamp>.dump | grep -vE ' SCHEMA - public | COMMENT - SCHEMA public ' > restore.list
+//   pg_restore --no-owner --no-privileges --exit-on-error --use-list restore.list -d "$TARGET_URL" backup-<stamp>.dump
+//
+// Needs pg_dump with the same or a newer major version than the server.
 
 const { execFile } = require('child_process');
 const { promisify } = require('util');
 const fs = require('fs');
 const path = require('path');
-const { Client } = require('pg');
 
 const execFileAsync = promisify(execFile);
 
@@ -32,46 +31,12 @@ async function main() {
   const outDir = process.argv[2] || '.';
   fs.mkdirSync(outDir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-
-  const sqlPath = path.join(outDir, `backup-${stamp}.sql`);
-  console.log(`Dumping schema + all data (photos table data excluded) -> ${sqlPath}`);
-  await execFileAsync('pg_dump', [dbUrl, '--exclude-table-data=photos', '-f', sqlPath]);
-
-  const metaPath = path.join(outDir, `backup-${stamp}-photos-meta.sql`);
-  console.log(`Dumping photo metadata only (no image bytes) -> ${metaPath}`);
-  const client = new Client({ connectionString: dbUrl });
-  await client.connect();
-  try {
-    const { rows } = await client.query(`
-      SELECT id, filename, original_name, mime, caption, visit_id, issue_id,
-             visit_comment_id, uploaded_by, shared, created_at
-      FROM photos ORDER BY id`);
-    // A bare `pg.Client` (unlike src/db.js's pool) uses node-postgres's
-    // default type parsing, which returns TIMESTAMP columns as JS Date
-    // objects — stringify explicitly to a valid Postgres timestamp literal
-    // rather than Date's default toString() format.
-    const esc = (v) => {
-      if (v == null) return 'NULL';
-      const s = v instanceof Date ? v.toISOString() : String(v);
-      return `'${s.replace(/'/g, "''")}'`;
-    };
-    const lines = [
-      '-- Photo metadata only (no image bytes) — see scripts/backup.js.',
-      '-- Restore into a database that already has the photos table; data/thumb_data stay empty.',
-      '',
-    ];
-    for (const r of rows) {
-      lines.push(
-        'INSERT INTO photos (id, filename, original_name, mime, data, caption, visit_id, issue_id, visit_comment_id, uploaded_by, shared, created_at) VALUES ' +
-        `(${r.id}, ${esc(r.filename)}, ${esc(r.original_name)}, ${esc(r.mime)}, ''::bytea, ${esc(r.caption)}, ` +
-        `${r.visit_id ?? 'NULL'}, ${r.issue_id ?? 'NULL'}, ${r.visit_comment_id ?? 'NULL'}, ${r.uploaded_by ?? 'NULL'}, ${r.shared}, ${esc(r.created_at)});`
-      );
-    }
-    fs.writeFileSync(metaPath, lines.join('\n') + '\n');
-    console.log(`Done. ${rows.length} photo row(s) recorded (metadata only, ${sqlPath} has everything else in full).`);
-  } finally {
-    await client.end();
-  }
+  const file = path.join(outDir, `backup-${stamp}.dump`);
+  console.log(`Dumping the public schema (all tables, all data) -> ${file}`);
+  await execFileAsync('pg_dump', [dbUrl, '--schema=public', '--no-owner', '--no-privileges', '--format=custom', '--file', file],
+    { maxBuffer: 64 * 1024 * 1024 });
+  const mb = (fs.statSync(file).size / 1024 / 1024).toFixed(1);
+  console.log(`Done: ${file} (${mb} MB). Keep it private — it contains customer data.`);
 }
 
-main().catch((e) => { console.error(e); process.exit(1); });
+main().catch((e) => { console.error(e.stderr || e.message || e); process.exit(1); });

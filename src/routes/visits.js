@@ -10,7 +10,7 @@ const { loadReportData, renderReportHtml, renderReportPdf, archiveToOneDrive } =
 const { asyncHandler } = require('../asyncHandler');
 const { assertCsrf } = require('../csrf');
 const { syncChecks, loadChecks, isResolved, needsPhoto, LOCKED } = require('../scope');
-const { checkCapture, reasonText, MAX_AGE_HOURS } = require('../photoCapture');
+const { checkCapture, reasonText, MAX_AGE_HOURS, normalizeMime, isHeic, HEIC_MESSAGE } = require('../photoCapture');
 const { emailJobReport, baseUrlFrom } = require('../jobReport');
 const { optimizeRouteRoad } = require('../routeOptimizer');
 const { runInBackground } = require('../background');
@@ -75,7 +75,10 @@ router.get('/', asyncHandler(async (req, res) => {
     args.push(date); where.push(`v.scheduled_date = $${args.length}`);
   } else if (upto) {
     args.push(upto); where.push(`v.scheduled_date <= $${args.length}`);
-  } else if (!showAll) {
+  } else if (!showAll && !status) {
+    // Default view: today onwards. A status filter (e.g. the "Awaiting review"
+    // queue) shows every matching visit, whatever its date — the review
+    // backlog is mostly jobs from earlier days.
     args.push(todayStr); where.push(`v.scheduled_date >= $${args.length}`);
   }
   const page = pageParam(req);
@@ -142,7 +145,8 @@ router.get('/', asyncHandler(async (req, res) => {
     date, upto, showAll, status, from, to, search, gardenerId, today: todayStr,
     canReorder: !!gardenerId && !filtered, page, totalPages,
     total: totalDays, totalLabel: totalDays === 1 ? 'day' : 'days', totalVisits,
-    flash: req.query.error || null,
+    flash: req.query.error || null, approvedId: Number(req.query.approved) || null,
+    bulkSkipped: Number(req.query.n) || null,
   });
 }));
 
@@ -221,17 +225,27 @@ router.post('/bulk', requireRole('supervisor'), asyncHandler(async (req, res) =>
       if (!g) return res.redirect('/visits?error=gardener');
       gardener = g;
     }
-    const updated = await q('UPDATE visits SET gardener_id = $1 WHERE id = ANY($2::int[]) RETURNING id',
+    // Only visits not yet worked: completed/approved work keeps who did it.
+    const updated = await q(`UPDATE visits SET gardener_id = $1 WHERE id = ANY($2::int[]) AND status = 'scheduled' RETURNING id`,
       [gardener ? gardener.id : null, ids]);
     await logActivity(req.user.id, 'visit.bulk_reassign', 'visit', null,
       `Reassigned ${updated.length} visit(s) to ${gardener ? gardener.name : 'Unassigned'}`);
+    if (updated.length < ids.length) return res.redirect(`/visits?error=bulkskipped&n=${ids.length - updated.length}`);
   } else if (req.body.bulk_action === 'reschedule') {
     const date = req.body.scheduled_date;
     if (!isValidDate(date)) return res.redirect('/visits?error=invalid');
-    const updated = await q('UPDATE visits SET scheduled_date = $1, route_order = NULL WHERE id = ANY($2::int[]) RETURNING id',
-      [date, ids]);
+    let updated;
+    try {
+      updated = await withTransaction((tx) => tx.q(`UPDATE visits SET scheduled_date = $1, route_order = NULL
+        WHERE id = ANY($2::int[]) AND status = 'scheduled' RETURNING id`, [date, ids]));
+    } catch (e) {
+      // Two visits of one contract can't be booked on the same day.
+      if (e.code === '23505') return res.redirect('/visits?error=dateclash');
+      throw e;
+    }
     await logActivity(req.user.id, 'visit.bulk_reschedule', 'visit', null,
       `Moved ${updated.length} visit(s) to ${date}`);
+    if (updated.length < ids.length) return res.redirect(`/visits?error=bulkskipped&n=${ids.length - updated.length}`);
   } else {
     return res.redirect('/visits?error=invalid');
   }
@@ -280,6 +294,85 @@ router.post('/', requireRole('supervisor'), asyncHandler(async (req, res) => {
 }));
 
 /**
+ * Minutes worked when a job is completed now. A job that was reopened keeps
+ * the minutes already recorded and adds only the time since it resumed.
+ */
+const WORKED_MINUTES_SQL = `GREATEST(0, CASE WHEN resumed_at IS NOT NULL
+    THEN COALESCE(duration_minutes, 0) + ROUND(EXTRACT(EPOCH FROM (now() - resumed_at)) / 60)
+    ELSE ROUND(EXTRACT(EPOCH FROM (now() - started_at)) / 60) END)::int`;
+
+/** Photos that count as job evidence (comment attachments don't). */
+const EVIDENCE_PHOTOS_SQL = 'SELECT COUNT(*)::int AS pc FROM photos WHERE visit_id = $1 AND visit_comment_id IS NULL';
+
+/**
+ * What still stops this job being completed, in words (empty when complete):
+ * the same rules the gardener's "Complete job" button enforces.
+ */
+async function completionGaps(visit) {
+  await syncChecks(visit);
+  const [checks, { pc }, taskGaps] = await Promise.all([
+    loadChecks(visit.id), q1(EVIDENCE_PHOTOS_SQL, [visit.id]), tasksMissingPhotos(visit.id)]);
+  const gaps = [];
+  if (!pc) gaps.push('no photos');
+  const unresolved = checks.filter((c) => !isResolved(c)).length;
+  if (unresolved) gaps.push(`${unresolved} checklist item(s) not ticked or explained`);
+  const noPhoto = checks.filter(needsPhoto).length;
+  if (noPhoto) gaps.push(`${noPhoto} checklist item(s) without a photo`);
+  if (taskGaps.length) gaps.push(`${taskGaps.length} task(s) without a photo`);
+  return gaps;
+}
+
+/**
+ * Everything that follows a job being completed, whoever completed it:
+ * notify staff, book the next occurrence, archive, invoice, email the report.
+ */
+async function afterCompletion(req, visit, minutes) {
+  const [checks, { pc }, { dc, tc }] = await Promise.all([
+    loadChecks(visit.id),
+    q1(EVIDENCE_PHOTOS_SQL, [visit.id]),
+    q1("SELECT COUNT(*) FILTER (WHERE status = 'done')::int AS dc, COUNT(*)::int AS tc FROM tasks WHERE visit_id = $1",
+      [visit.id]),
+  ]);
+  const doneScopes = checks.filter((c) => c.done).length;
+  const summary = `Visit #${visit.id} completed by ${req.user.name} at ${visit.property_name}: ` +
+    `${minutes == null ? 'no time recorded' : `${minutes} min`}, ` +
+    (checks.length ? `scope ${doneScopes}/${checks.length} done, ` : '') +
+    `tasks ${dc}/${tc} done, ${pc} photo(s). Ready for review.`;
+  await Promise.all([
+    pool.query(`
+      INSERT INTO notifications (user_id, visit_id, type, message)
+      SELECT id, $1, 'job_summary', $2 FROM users WHERE role IN ('admin','supervisor') AND active`,
+      [visit.id, summary]),
+    advanceRecurringJob(visit, req.user.id, true),
+  ]);
+  // Archive, invoice and report email run after the response (best-effort) so
+  // completing a job returns immediately.
+  runInBackground(() => archiveToOneDrive(visit.id), `onedrive archive #${visit.id}`);
+  // Auto-invoice (only when the contract has a gardening fee) and email it.
+  runInBackground(() => autoInvoiceAndEmail(visit.id), `auto-invoice #${visit.id}`);
+  const baseUrl = baseUrlFrom(req);
+  runInBackground(() => emailJobReport(visit.id, baseUrl), `report email #${visit.id}`);
+}
+
+/**
+ * Taking a completed visit to skipped/cancelled: refused when its invoice was
+ * already sent or paid (void that first); a draft invoice is voided.
+ * Returns an ?error= code, or null when it may proceed.
+ */
+async function checkCancelInvoice(visit) {
+  const inv = await q1("SELECT id, status FROM invoices WHERE visit_id = $1 AND status <> 'void' ORDER BY id DESC LIMIT 1", [visit.id]);
+  if (inv && inv.status !== 'draft') return 'invoiced';
+  return null;
+}
+async function voidDraftInvoices(visit, actorId) {
+  const voided = await q("UPDATE invoices SET status = 'void' WHERE visit_id = $1 AND status = 'draft' RETURNING id, number", [visit.id]);
+  for (const inv of voided) {
+    await logActivity(actorId, 'invoice.status', 'invoice', inv.id,
+      `Invoice ${inv.number || '#' + inv.id} voided: visit #${visit.id} was cancelled/skipped`);
+  }
+}
+
+/**
  * The job's ad-hoc tasks that still have no photo. Like scope items, each one
  * needs at least one before the job can be completed. Tasks added after the
  * job was completed (follow-ups for next time) don't count against it.
@@ -305,7 +398,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
   await syncChecks(visit);
   const [tasks, photos, comments, commentPhotos, invoice, gardeners, gpsPoints, job, nextVisit, checks, totalPhotosRow, taskPhotos, tasksNoPhoto] = await Promise.all([
     q('SELECT t.*, u.name AS assignee_name FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id WHERE t.visit_id = $1 ORDER BY t.id', [visit.id]),
-    q('SELECT ph.id, ph.filename, ph.caption, ph.original_name, ph.created_at, ph.taken_at, ph.uploaded_by, u.name AS uploader_name FROM photos ph LEFT JOIN users u ON u.id = ph.uploaded_by WHERE ph.visit_id = $1 AND ph.visit_comment_id IS NULL AND ph.scope_check_id IS NULL AND ph.task_id IS NULL ORDER BY ph.created_at DESC', [visit.id]),
+    q('SELECT ph.id, ph.filename, ph.caption, ph.original_name, ph.created_at, ph.taken_at, ph.taken_source, ph.uploaded_by, u.name AS uploader_name FROM photos ph LEFT JOIN users u ON u.id = ph.uploaded_by WHERE ph.visit_id = $1 AND ph.visit_comment_id IS NULL AND ph.scope_check_id IS NULL AND ph.task_id IS NULL ORDER BY ph.created_at DESC', [visit.id]),
     q('SELECT c.*, u.name AS author_name, u.role AS author_role FROM visit_comments c LEFT JOIN users u ON u.id = c.user_id WHERE c.visit_id = $1 ORDER BY c.created_at', [visit.id]),
     q('SELECT ph.visit_comment_id, ph.filename, ph.created_at FROM photos ph WHERE ph.visit_id = $1 AND ph.visit_comment_id IS NOT NULL ORDER BY ph.created_at', [visit.id]),
     q1('SELECT * FROM invoices WHERE visit_id = $1 ORDER BY id DESC LIMIT 1', [visit.id]),
@@ -327,7 +420,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
       : Promise.resolve(null),
     loadChecks(visit.id),
     q1('SELECT COUNT(*)::int AS c FROM photos WHERE visit_id = $1', [visit.id]),
-    q(`SELECT ph.id, ph.filename, ph.task_id, ph.taken_at, ph.created_at, ph.uploaded_by FROM photos ph
+    q(`SELECT ph.id, ph.filename, ph.task_id, ph.taken_at, ph.taken_source, ph.created_at, ph.uploaded_by FROM photos ph
        JOIN tasks t ON t.id = ph.task_id WHERE t.visit_id = $1 ORDER BY ph.created_at`, [visit.id]),
     tasksMissingPhotos(visit.id),
   ]);
@@ -353,19 +446,26 @@ router.get('/:id', asyncHandler(async (req, res) => {
   });
 }));
 
-// Update core fields (staff)
+// Update core fields (staff) — the "Manage job" form.
 router.post('/:id/update', requireRole('supervisor'), asyncHandler(async (req, res) => {
   const visit = await getVisit(req.params.id);
   if (!visit) return res.redirect('/visits');
-  const { gardener_id, scheduled_date, time_window, status, notes, duration_minutes } = req.body;
-  if (!VISIT_STATUSES.includes(status) || !isValidDate(scheduled_date) ||
+  const { gardener_id, scheduled_date, time_window, notes, duration_minutes } = req.body;
+  const requested = req.body.status;
+  if (!VISIT_STATUSES.includes(requested) || !isValidDate(scheduled_date) ||
     (time_window && !isValidTimeWindow(time_window))) {
     return res.redirect(`/visits/${visit.id}?error=invalid`);
   }
   // Payment approval only goes through the admin "Approve" action. An
   // approved visit is locked: withdraw the approval first to change it.
-  if (visit.status === 'approved') return res.redirect(`/visits/${visit.id}?error=approval`);
-  if (status === 'approved') return res.redirect(`/visits/${visit.id}?error=approval`);
+  if (visit.status === 'approved' || requested === 'approved') return res.redirect(`/visits/${visit.id}?error=approval`);
+  // The form always re-submits the status it was drawn with. Treat that as
+  // "no change" (so editing the notes on a page opened before the gardener
+  // completed the job can't put it back in progress), and refuse a deliberate
+  // change made on a page that is out of date.
+  const statusWas = VISIT_STATUSES.includes(req.body.status_was) ? req.body.status_was : visit.status;
+  if (requested !== statusWas && statusWas !== visit.status) return res.redirect(`/visits/${visit.id}?error=stale`);
+  const status = requested === statusWas ? visit.status : requested;
   // Same active-gardener check as the create route above / jobs.js — but the
   // visit's current gardener stays valid even if since disabled, so editing
   // another field doesn't silently unassign them.
@@ -377,28 +477,54 @@ router.post('/:id/update', requireRole('supervisor'), asyncHandler(async (req, r
     if (!g) return res.redirect(`/visits/${visit.id}?error=gardener`);
     gardener = g.id;
   }
-  // When staff mark a visit completed here, fill timing if missing so the
-  // record (and report) is consistent with the timer path.
   const completing = status === 'completed' && visit.status !== 'completed';
-  await q(`
-    UPDATE visits SET gardener_id = $1, scheduled_date = $2, time_window = $3, status = $4, notes = $5,
-      duration_minutes = $6,
-      finished_at = CASE WHEN $4 = 'completed' AND finished_at IS NULL THEN now() ELSE finished_at END,
-      approved_at = CASE WHEN $4 = 'approved' THEN approved_at END,
-      approved_by = CASE WHEN $4 = 'approved' THEN approved_by END
-    WHERE id = $7`,
-    [gardener, scheduled_date, time_window || null, status, notes || null,
-      duration_minutes ? Math.max(0, Number(duration_minutes) || 0) : visit.duration_minutes, visit.id]);
-  await logActivity(req.user.id, 'visit.update', 'visit', visit.id,
-    `Updated visit #${visit.id} (status: ${visit.status} -> ${status})`);
-  // Advance the recurring contract when this occurrence reaches a terminal state.
-  if (['completed', 'skipped', 'cancelled'].includes(status) && status !== visit.status
-      && visit.status !== 'approved') {
-    await advanceRecurringJob(visit, req.user.id, status === 'completed');
+  const leavingCompleted = visit.status === 'completed' && status !== 'completed';
+  // Staff completing a job here face the same rules as the gardener's
+  // "Complete job" button, unless they explicitly override (which is logged).
+  let overrideNote = '';
+  if (completing) {
+    const gaps = await completionGaps(visit);
+    if (gaps.length && req.body.force_complete !== '1') return res.redirect(`/visits/${visit.id}?error=staffgaps`);
+    if (gaps.length) overrideNote = ` — completed anyway, missing: ${gaps.join(', ')}`;
   }
-  // Staff completing a visit here (rather than via the gardener's timer) still
-  // triggers the same auto-invoice/email — same best-effort, non-blocking pattern.
-  if (completing) runInBackground(() => autoInvoiceAndEmail(visit.id), `auto-invoice #${visit.id}`);
+  if (leavingCompleted && ['skipped', 'cancelled'].includes(status)) {
+    const blocked = await checkCancelInvoice(visit);
+    if (blocked) return res.redirect(`/visits/${visit.id}?error=${blocked}`);
+  }
+  // The form re-sends the recorded minutes; only a value the supervisor
+  // actually changed overrides the minutes worked out from the timer.
+  const typed = duration_minutes !== undefined && String(duration_minutes).trim() !== ''
+    ? Math.max(0, Math.round(Number(duration_minutes)) || 0) : null;
+  const minutes = typed !== null && typed !== visit.duration_minutes ? typed : null;
+  let updated;
+  try {
+    // status = the status we read, so a change that raced this request (the
+    // gardener completing, an approval) is never overwritten.
+    updated = await q1(`
+      UPDATE visits SET gardener_id = $1, scheduled_date = $2, time_window = $3, status = $4, notes = $5,
+        duration_minutes = CASE WHEN $6::int IS NOT NULL THEN $6::int
+          WHEN $8 AND started_at IS NOT NULL THEN ${WORKED_MINUTES_SQL}
+          ELSE duration_minutes END,
+        finished_at = CASE WHEN $8 THEN now() WHEN $9 THEN NULL ELSE finished_at END,
+        resumed_at = CASE WHEN $8 THEN NULL WHEN $9 AND $4 = 'in_progress' THEN now() ELSE resumed_at END
+      WHERE id = $7 AND status = $10
+      RETURNING id, duration_minutes`,
+      [gardener, scheduled_date, time_window || null, status, notes || null, minutes, visit.id,
+        completing, leavingCompleted, visit.status]);
+  } catch (e) {
+    if (e.code === '23505') return res.redirect(`/visits/${visit.id}?error=dateclash`);
+    throw e;
+  }
+  if (!updated) return res.redirect(`/visits/${visit.id}?error=stale`);
+  await logActivity(req.user.id, 'visit.update', 'visit', visit.id,
+    `Updated visit #${visit.id} (status: ${visit.status} -> ${status})${overrideNote}`);
+  if (leavingCompleted && ['skipped', 'cancelled'].includes(status)) await voidDraftInvoices(visit, req.user.id);
+  if (completing) {
+    await afterCompletion(req, visit, updated.duration_minutes);
+  } else if (['skipped', 'cancelled'].includes(status) && status !== visit.status) {
+    // Advance the recurring contract when this occurrence reaches a terminal state.
+    await advanceRecurringJob(visit, req.user.id, false);
+  }
   const busy = status === 'scheduled'
     ? await dayConflicts(gardener, scheduled_date, visit.id) : 0;
   res.redirect(`/visits/${visit.id}${busy ? '?warning=busy' : ''}`);
@@ -477,8 +603,21 @@ router.post('/:id/status', asyncHandler(async (req, res) => {
   if (LOCKED.includes(visit.status) && !isStaff(req.user)) return res.redirect(`/visits/${visit.id}`);
   if (visit.status === 'approved') return res.redirect(`/visits/${visit.id}?error=approval`);
   if (status === visit.status) return res.redirect(`/visits/${visit.id}`);
-  await q('UPDATE visits SET status = $1 WHERE id = $2', [status, visit.id]);
+  const leavingCompleted = visit.status === 'completed';
+  if (leavingCompleted && ['skipped', 'cancelled'].includes(status)) {
+    const blocked = await checkCancelInvoice(visit);
+    if (blocked) return res.redirect(`/visits/${visit.id}?error=${blocked}`);
+  }
+  // Taking a job out of "completed" reopens it properly: it can take photos
+  // again, and re-completing adds only the new time to the minutes recorded.
+  const changed = await q1(`
+    UPDATE visits SET status = $1,
+      finished_at = CASE WHEN $3 THEN NULL ELSE finished_at END,
+      resumed_at = CASE WHEN $3 AND $1 = 'in_progress' THEN now() ELSE resumed_at END
+    WHERE id = $2 AND status = $4 RETURNING id`, [status, visit.id, leavingCompleted, visit.status]);
+  if (!changed) return res.redirect(`/visits/${visit.id}?error=stale`);
   await logActivity(req.user.id, 'visit.status', 'visit', visit.id, `Visit #${visit.id}: ${visit.status} -> ${status}`);
+  if (leavingCompleted && ['skipped', 'cancelled'].includes(status)) await voidDraftInvoices(visit, req.user.id);
   if (['skipped', 'cancelled'].includes(status)) await advanceRecurringJob(visit, req.user.id, false);
   res.redirect(`/visits/${visit.id}`);
 }));
@@ -506,12 +645,21 @@ router.post('/:id/timer/start', asyncHandler(async (req, res) => {
   // Starting a future visit early would leave its date wrong and double-book
   // the next occurrence; the gardener moves it to today first.
   if (!isStaff(req.user) && visit.scheduled_date > today()) return res.redirect(`/visits/${visit.id}?error=future`);
+  // A cancelled or skipped visit is a staff decision: a gardener can't bring it
+  // back (completing it would invoice the client for work that was called off).
+  if (!isStaff(req.user) && !['scheduled', 'in_progress'].includes(visit.status)) {
+    return res.redirect(`/visits/${visit.id}?error=notactive`);
+  }
   const reopening = visit.status === 'completed';
+  // Same rule inside the UPDATE, so a status change racing this request can't slip through.
   const started = await q1(`
-    UPDATE visits SET started_at = CASE WHEN $2 AND started_at IS NOT NULL THEN started_at ELSE now() END,
+    UPDATE visits SET
+      started_at = CASE WHEN started_at IS NOT NULL AND ($2 OR status = 'in_progress') THEN started_at ELSE now() END,
+      resumed_at = CASE WHEN $2 THEN now() ELSE resumed_at END,
       finished_at = NULL, status = 'in_progress'
-    WHERE id = $1 AND status <> 'approved' RETURNING id`, [visit.id, reopening]);
-  if (!started) return res.redirect(`/visits/${visit.id}?error=approval`);
+    WHERE id = $1 AND status <> 'approved' AND ($3 OR status IN ('scheduled', 'in_progress'))
+    RETURNING id`, [visit.id, reopening, isStaff(req.user)]);
+  if (!started) return res.redirect(`/visits/${visit.id}?error=${isStaff(req.user) ? 'approval' : 'notactive'}`);
   const gps = await recordGps(visit.id, req.user.id, req.body, 'start');
   await logActivity(req.user.id, 'visit.timer.start', 'visit', visit.id,
     `Started job timer on visit #${visit.id}${gps ? ' (GPS recorded)' : ''}`);
@@ -522,6 +670,7 @@ router.post('/:id/timer/start', asyncHandler(async (req, res) => {
 router.post('/:id/gps', asyncHandler(async (req, res) => {
   const visit = await getVisit(req.params.id);
   if (!visit || !canSeeVisit(req.user, visit)) return res.status(403).json({ ok: false });
+  if (visit.status !== 'in_progress') return res.status(409).json({ ok: false });
   await recordGps(visit.id, req.user.id, req.body, 'ping');
   res.json({ ok: true });
 }));
@@ -538,7 +687,8 @@ router.post('/:id/timer/stop', asyncHandler(async (req, res) => {
     return res.redirect(`/visits/${visit.id}?error=confirm`);
   }
   // Enforce the photo requirement server-side (not just the honor checkbox).
-  const { pc } = await q1('SELECT COUNT(*)::int AS pc FROM photos WHERE visit_id = $1', [visit.id]);
+  // Comment attachments don't count: they skip the camera and date checks.
+  const { pc } = await q1(EVIDENCE_PHOTOS_SQL, [visit.id]);
   if (pc === 0) return res.redirect(`/visits/${visit.id}?error=photos`);
   // Every scope-of-duties item must be ticked, or explained with a comment.
   await syncChecks(visit);
@@ -552,45 +702,17 @@ router.post('/:id/timer/stop', asyncHandler(async (req, res) => {
 
   // Atomic gate: only the first request that flips status off 'completed' wins.
   const gate = await q1(`
-    UPDATE visits SET finished_at = now(),
-      duration_minutes = GREATEST(0, ROUND(EXTRACT(EPOCH FROM (now() - started_at)) / 60))::int,
+    UPDATE visits SET finished_at = now(), duration_minutes = ${WORKED_MINUTES_SQL}, resumed_at = NULL,
       status = 'completed'
     WHERE id = $1 AND status = 'in_progress'
     RETURNING id, duration_minutes`, [visit.id]);
   if (!gate) return res.redirect(`/visits/${visit.id}`); // already completed — no double side effects
-
-  // These three don't depend on each other's result — run them together
-  // instead of one round-trip at a time on the gardener's "complete job" tap.
-  const [, , { dc, tc }] = await Promise.all([
+  await Promise.all([
     recordGps(visit.id, req.user.id, req.body, 'finish'),
     logActivity(req.user.id, 'visit.timer.stop', 'visit', visit.id,
       `Finished visit #${visit.id} in ${gate.duration_minutes} min`),
-    q1("SELECT COUNT(*) FILTER (WHERE status = 'done')::int AS dc, COUNT(*)::int AS tc FROM tasks WHERE visit_id = $1",
-      [visit.id]),
   ]);
-  const doneScopes = checks.filter((c) => c.done).length;
-  const summary = `Visit #${visit.id} completed by ${req.user.name} at ${visit.property_name}: ` +
-    `${gate.duration_minutes} min, ` +
-    (checks.length ? `scope ${doneScopes}/${checks.length} done, ` : '') +
-    `tasks ${dc}/${tc} done, ${pc} photo(s). Ready for review.`;
-  // Notifying staff and advancing the recurring contract are independent too.
-  await Promise.all([
-    pool.query(`
-      INSERT INTO notifications (user_id, visit_id, type, message)
-      SELECT id, $1, 'job_summary', $2 FROM users WHERE role IN ('admin','supervisor') AND active`,
-      [visit.id, summary]),
-    advanceRecurringJob(visit, req.user.id, true),
-  ]);
-  // Archive report + photos to OneDrive in the background (best-effort) so the
-  // gardener's "complete job" tap returns immediately instead of waiting on the
-  // report render + sequential Graph uploads.
-  runInBackground(() => archiveToOneDrive(visit.id), `onedrive archive #${visit.id}`);
-  // Auto-invoice (if the site's job has a gardening fee set) and email it to
-  // the site's billing address — same best-effort, non-blocking pattern.
-  runInBackground(() => autoInvoiceAndEmail(visit.id), `auto-invoice #${visit.id}`);
-  // Email the job report (scope items + photos) to every active admin.
-  const baseUrl = baseUrlFrom(req);
-  runInBackground(() => emailJobReport(visit.id, baseUrl), `report email #${visit.id}`);
+  await afterCompletion(req, visit, gate.duration_minutes);
   res.redirect(`/visits/${visit.id}`);
 }));
 
@@ -684,6 +806,20 @@ router.post('/:id/report/send-to-owners', requireRole('supervisor'), asyncHandle
     return res.redirect(`/visits/${visit.id}?error=piqstale`);
   }
 
+  // Claim the send (a double tap or a resubmitted form must not email the
+  // owners twice). A claim older than 10 minutes is a crashed send: retake it.
+  const claimed = await q1(`UPDATE visits SET owners_report_sending_at = now()
+    WHERE id = $1 AND (owners_report_sending_at IS NULL OR owners_report_sending_at < now() - interval '10 minutes')
+    RETURNING id`, [visit.id]);
+  if (!claimed) return res.redirect(`/visits/${visit.id}?error=piqbusy`);
+  try {
+    return await sendOwnersReport(req, res, visit, property);
+  } finally {
+    await q('UPDATE visits SET owners_report_sending_at = NULL WHERE id = $1', [visit.id]).catch(() => {});
+  }
+}));
+
+async function sendOwnersReport(req, res, visit, property) {
   let emails;
   try {
     emails = await propertyiq.getOwnerEmailsForBuilding(property.piq_building_id);
@@ -728,7 +864,7 @@ router.post('/:id/report/send-to-owners', requireRole('supervisor'), asyncHandle
     : `Failed to send job report for visit #${visit.id} to any of ${emails.length} owner(s) — SMTP not configured or send failed`);
 
   res.redirect(`/visits/${visit.id}?error=${sent ? 'piqsent' : 'piqsendfailed'}`);
-}));
+}
 
 // Admin approves a reviewed job for payment: completed -> approved.
 router.post('/:id/approve', requireRole(), asyncHandler(async (req, res) => {
@@ -737,7 +873,7 @@ router.post('/:id/approve', requireRole(), asyncHandler(async (req, res) => {
   if (req.body.force !== '1') {
     await syncChecks(visit);
     const [checks, ph, taskGaps] = await Promise.all([loadChecks(visit.id),
-      q1('SELECT COUNT(*)::int AS c FROM photos WHERE visit_id = $1', [visit.id]), tasksMissingPhotos(visit.id)]);
+      q1(EVIDENCE_PHOTOS_SQL.replace('AS pc', 'AS c'), [visit.id]), tasksMissingPhotos(visit.id)]);
     if (checks.some((c) => !isResolved(c) || needsPhoto(c)) || ph.c === 0 || taskGaps.length) {
       return res.redirect(`/visits/${visit.id}?error=notready`);
     }
@@ -753,7 +889,7 @@ router.post('/:id/approve', requireRole(), asyncHandler(async (req, res) => {
       [visit.gardener_id, visit.id, 'approved',
         `Job #${visit.id} at ${visit.property_name} (${visit.scheduled_date}) was approved for payment.`]);
   }
-  res.redirect(req.body.next === 'review' ? '/visits?status=completed' : `/visits/${visit.id}`);
+  res.redirect(req.body.next === 'review' ? `/visits?status=completed&approved=${visit.id}` : `/visits/${visit.id}`);
 }));
 
 // Staff re-send the job report email to all admins (e.g. after fixing email setup).
@@ -818,10 +954,12 @@ router.post('/:id/scope/:cid', upload.array('photos', 10), asyncHandler(async (r
   for (const f of req.files || []) {
     // No-JS fallback path: only the photo's own EXIF can vouch for it here
     // (the app's JS uploads through POST /:id/photo with the capture time).
-    const cap = checkCapture(f.buffer, { clientTz: req.body.tz });
+    if (isHeic(f.originalname) || isHeic(f.mimetype)) { rejected++; continue; }
+    const cap = checkCapture(f.buffer, { clientTz: req.body.tz, jobStartedAt: jobStart(visit) });
     if (!cap.ok) { rejected++; stale = cap.reason; continue; }
     // Evidence photos stay between the gardener and the office (not the team gallery).
-    if (await savePhoto(f, { visitId: visit.id, scopeCheckId: check.id, userId: req.user.id, caption: check.title, shared: false, takenAt: cap.takenAt })) n++;
+    if (await savePhoto(f, { visitId: visit.id, scopeCheckId: check.id, userId: req.user.id, caption: check.title, shared: false,
+      takenAt: cap.takenAt, takenSource: cap.source })) n++;
     else rejected++;
   }
   await logActivity(req.user.id, 'visit.scope', 'visit', visit.id,
@@ -866,6 +1004,12 @@ async function advanceRecurringJob(visit, actorId, completed) {
   const claimed = await q1('UPDATE visits SET advanced_at = now() WHERE id = $1 AND advanced_at IS NULL RETURNING id', [visit.id]);
   if (!claimed) return;
   if (!job.active) return;
+  // If the contract already has any later visit — booked ahead, moved to
+  // another day, skipped in advance, or already worked — the next occurrence
+  // exists: booking another would double-book the client (or undo a skip).
+  const later = await q1('SELECT 1 FROM visits WHERE job_id = $1 AND scheduled_date > $2 AND id <> $3 LIMIT 1',
+    [job.id, visit.scheduled_date, visit.id]);
+  if (later) return;
   const next = nextOccurrenceAfter(job.start_date, job.frequency, visit.scheduled_date);
   if (next > job.end_date) {
     // Contract term reached — flag for renewal rather than silently stopping.
@@ -952,13 +1096,20 @@ async function resolvePhotoTarget(visit, { check_id: checkId, task_id: taskId })
 }
 
 /** savePhoto()/insertPhotoRow() options for a job photo of the given target. */
-function jobPhotoOpts(visit, user, target, body, takenAt) {
+function jobPhotoOpts(visit, user, target, body, cap) {
   // Job photos are only visible to the job's gardener, the uploader and staff
   // (see photoAllowed in server.js); there is no team-sharing option any more.
-  if (target.check) return { visitId: visit.id, scopeCheckId: target.check.id, userId: user.id, caption: target.check.title, shared: false, takenAt };
-  if (target.task) return { visitId: visit.id, taskId: target.task.id, userId: user.id, caption: target.task.title, shared: false, takenAt };
+  const taken = { takenAt: cap.takenAt, takenSource: cap.source };
+  if (target.check) return { visitId: visit.id, scopeCheckId: target.check.id, userId: user.id, caption: target.check.title, shared: false, ...taken };
+  if (target.task) return { visitId: visit.id, taskId: target.task.id, userId: user.id, caption: target.task.title, shared: false, ...taken };
   return { visitId: visit.id, userId: user.id, caption: String(body.caption || '').slice(0, 500) || null,
-    shared: false, takenAt };
+    shared: false, ...taken };
+}
+
+/** When the job started (for the "taken during the job" rule), or null. */
+function jobStart(visit) {
+  const d = toDate(visit.started_at);
+  return d ? d.getTime() : null;
 }
 
 const targetLabel = (t) => (t.check ? ` for "${t.check.title}"` : t.task ? ` for task "${t.task.title}"` : '');
@@ -978,9 +1129,10 @@ router.post('/:id/photos', upload.array('photos', 10), asyncHandler(async (req, 
   let stale = null;
   for (const f of req.files || []) {
     // Only the photo's own EXIF can vouch for its capture time on this path.
-    const cap = checkCapture(f.buffer, { clientTz: req.body.tz });
+    if (isHeic(f.originalname) || isHeic(f.mimetype)) { badPhoto = true; continue; }
+    const cap = checkCapture(f.buffer, { clientTz: req.body.tz, jobStartedAt: jobStart(visit) });
     if (!cap.ok) { stale = cap.reason; continue; }
-    const filename = await savePhoto(f, jobPhotoOpts(visit, req.user, target, req.body, cap.takenAt));
+    const filename = await savePhoto(f, jobPhotoOpts(visit, req.user, target, req.body, cap));
     if (filename) saved++; else badPhoto = true;
   }
   if (saved) {
@@ -1006,9 +1158,10 @@ router.post('/:id/photo', upload.single('photo'), asyncHandler(async (req, res) 
   if (!req.file) return res.status(400).json({ ok: false, error: 'No photo received.' });
   const target = await resolvePhotoTarget(visit, req.body);
   if (target.error) return res.status(404).json({ ok: false, error: target.error });
-  const cap = checkCapture(req.file.buffer, { clientTakenAt: req.body.taken_at, clientTz: req.body.tz });
+  if (isHeic(req.file.originalname) || isHeic(req.file.mimetype)) return res.status(415).json({ ok: false, error: HEIC_MESSAGE });
+  const cap = checkCapture(req.file.buffer, { clientTakenAt: req.body.taken_at, clientTz: req.body.tz, jobStartedAt: jobStart(visit) });
   if (!cap.ok) return res.status(422).json({ ok: false, reason: cap.reason, error: reasonText(cap.reason) });
-  const filename = await savePhoto(req.file, jobPhotoOpts(visit, req.user, target, req.body, cap.takenAt));
+  const filename = await savePhoto(req.file, jobPhotoOpts(visit, req.user, target, req.body, cap));
   if (!filename) return res.status(415).json({ ok: false, error: 'That file is not a supported photo.' });
   await logActivity(req.user.id, 'photo.upload', 'visit', visit.id,
     `Uploaded a photo${targetLabel(target)} to job #${visit.id}`);
@@ -1020,8 +1173,9 @@ router.post('/:id/photo', upload.single('photo'), asyncHandler(async (req, res) 
 // front, then hand back a short-lived presigned PUT URL for a "pending" key
 // plus a signed ticket. Step 2: the browser PUTs the photo straight to the
 // bucket (no bytes through this app, no body-size cap). Step 3 (complete):
-// verify the stored object — size, real image bytes, EXIF capture time — make
-// the thumbnail and promote it to its final key. Anything rejected is deleted.
+// verify the uploaded object — size, real image bytes, EXIF capture time —
+// make the thumbnail and store those checked bytes at the final key. Anything
+// rejected is deleted.
 // Answers { direct: false } when object storage isn't configured for this,
 // and the browser falls back to POST /:id/photo.
 router.post('/:id/photo/presign', asyncHandler(async (req, res) => {
@@ -1033,16 +1187,17 @@ router.post('/:id/photo/presign', asyncHandler(async (req, res) => {
   const body = req.body || {};
   const target = await resolvePhotoTarget(visit, body);
   if (target.error) return res.status(404).json({ ok: false, error: target.error });
-  const mime = String(body.content_type || '').toLowerCase();
+  const mime = normalizeMime(body.content_type);
+  if (isHeic(mime)) return res.status(415).json({ ok: false, error: HEIC_MESSAGE });
   const ext = MIME_EXT.get(mime);
-  if (!ext) return res.status(415).json({ ok: false, error: 'Use a JPG, PNG, WEBP or HEIC photo.' });
+  if (!ext) return res.status(415).json({ ok: false, error: 'Use a JPG, PNG or WEBP photo.' });
   const size = Number(body.size);
   if (!(size > 0)) return res.status(400).json({ ok: false, error: 'No photo received.' });
   if (size > MAX_BYTES) return res.status(413).json({ ok: false, error: 'That photo is too large.' });
   // Early, advisory check on the browser's reading so a stale photo is turned
   // away before it's uploaded; the stored file's own EXIF is checked at step 3.
   if (body.taken_at) {
-    const early = checkCapture(Buffer.alloc(0), { clientTakenAt: body.taken_at });
+    const early = checkCapture(Buffer.alloc(0), { clientTakenAt: body.taken_at, jobStartedAt: jobStart(visit) });
     if (!early.ok && early.reason !== 'nodate') {
       return res.status(422).json({ ok: false, reason: early.reason, error: reasonText(early.reason) });
     }
@@ -1071,18 +1226,33 @@ router.post('/:id/photo/complete', asyncHandler(async (req, res) => {
   if (closed) return reject(409, { error: windowMessage(closed) });
   const target = await resolvePhotoTarget(visit, { check_id: tk.c, task_id: tk.t });
   if (target.error) return reject(404, { error: target.error });
-  const head = await storage.headPending(tk.f);
-  if (!head) return res.status(404).json({ ok: false, error: 'The photo did not reach storage. Please try again.' });
-  if (head.size > MAX_BYTES) return reject(413, { error: 'That photo is too large.' });
-  const buffer = await storage.getPendingBuffer(tk.f);
+  // Read at most MAX_BYTES + 1 (a ranged GET): what is checked below is
+  // exactly what gets stored, so swapping the object after the checks (the
+  // signed link stays valid for 10 minutes) can't slip anything through, and
+  // a huge object can't exhaust memory.
+  const buffer = await storage.getPendingBuffer(tk.f, { maxBytes: MAX_BYTES + 1 });
+  if (!buffer) {
+    // Already finalised by a concurrent retry of this same upload?
+    if (await q1('SELECT 1 FROM photos WHERE filename = $1', [tk.f])) return res.json({ ok: true, filename: tk.f });
+    return res.status(404).json({ ok: false, error: 'The photo did not reach storage. Please try again.' });
+  }
+  if (buffer.length > MAX_BYTES) return reject(413, { error: 'That photo is too large.' });
   if (!sniffOk(buffer, MIME_EXT.get(tk.m))) return reject(415, { error: 'That file is not a supported photo.' });
-  const cap = checkCapture(buffer, { clientTakenAt: body.taken_at, clientTz: body.tz });
+  const cap = checkCapture(buffer, { clientTakenAt: body.taken_at, clientTz: body.tz, jobStartedAt: jobStart(visit) });
   if (!cap.ok) return reject(422, { reason: cap.reason, error: reasonText(cap.reason) });
-  await storage.promotePending(tk.f);
-  await insertPhotoRow({
-    ...jobPhotoOpts(visit, req.user, target, body, cap.takenAt),
-    filename: tk.f, originalName: String(body.name || tk.f).slice(0, 200), mime: tk.m, buffer, inline: false,
-  });
+  // Store the verified bytes at the final key, then record the row; if the
+  // row can't be written, remove the object again so nothing is stranded.
+  await storage.putObject(tk.f, buffer, tk.m);
+  try {
+    await insertPhotoRow({
+      ...jobPhotoOpts(visit, req.user, target, body, cap),
+      filename: tk.f, originalName: String(body.name || tk.f).slice(0, 200), mime: tk.m, buffer, inline: false,
+    });
+  } catch (e) {
+    try { await storage.deleteObject(tk.f); } catch (_) { /* best-effort */ }
+    throw e;
+  }
+  await storage.deletePending(tk.f);
   await logActivity(req.user.id, 'photo.upload', 'visit', visit.id,
     `Uploaded a photo${targetLabel(target)} to job #${visit.id}`);
   res.json({ ok: true, filename: tk.f });
@@ -1093,6 +1263,9 @@ router.post('/:id/tasks', asyncHandler(async (req, res) => {
   const visit = await getVisit(req.params.id);
   if (!visit || !canSeeVisit(req.user, visit)) return res.redirect('/visits');
   if (visit.status === 'approved') return res.redirect(`/visits/${visit.id}?error=approval`);
+  // A gardener's job is closed once completed; staff may still add follow-ups
+  // (tasks added after completion don't count towards its photo rule).
+  if (visit.status === 'completed' && !isStaff(req.user)) return res.redirect(`/visits/${visit.id}?error=locked`);
   const title = (req.body.title || '').trim();
   if (title) {
     const { id } = await q1(`

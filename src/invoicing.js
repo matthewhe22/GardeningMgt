@@ -55,7 +55,9 @@ async function createInvoiceForVisit(visitId, { userId = null } = {}) {
   if (!visit) return { status: 'not_found' };
   // A job that hasn't happened yet has nothing to bill — block invoicing
   // until the visit is actually completed.
-  if (visit.status !== 'completed') return { status: 'not_completed' };
+  // Completed work can be invoiced before or after admin approval (e.g. to
+  // replace a voided invoice once the job is already approved).
+  if (!['completed', 'approved'].includes(visit.status)) return { status: 'not_completed' };
   // Don't create a second live invoice for the same job (voided ones don't
   // count). This check-then-insert still has a race window, closed below by
   // the uq_invoices_visit_open unique index + a 23505 catch.
@@ -125,6 +127,11 @@ async function autoInvoiceAndEmail(visitId) {
     const { renderInvoicePdf } = require('./report'); // lazy: avoids a require cycle at module-load time
     const { sendMail } = require('./email');
 
+    // Only sites whose contract has a gardening fee are auto-invoiced: no fee
+    // means nothing to bill (and no invoice number used up or $0 email sent).
+    const fee = await q1(`SELECT j.gardening_fee FROM visits v LEFT JOIN jobs j ON j.id = v.job_id
+      WHERE v.id = $1`, [visitId]);
+    if (!fee || fee.gardening_fee == null || !(Number(fee.gardening_fee) > 0)) return;
     const result = await createInvoiceForVisit(visitId, { userId: null });
     if (result.status === 'not_found' || result.status === 'not_completed') return; // nothing to invoice
     const invoice = await invoiceWithItems(result.invoiceId);
