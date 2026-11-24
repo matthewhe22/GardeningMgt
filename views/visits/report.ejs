@@ -19,6 +19,7 @@
      whole (uncropped) at the column width, so aspect ratios are preserved. */
   .photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; align-items: start; }
   figure { margin: 0; }
+  figure a { display: block; cursor: zoom-in; }
   img { width: 100%; height: auto; border-radius: 6px; border: 1px solid #e6e4dc; display: block; }
   figcaption { font-size: 0.68rem; color: #707b72; margin-top: 2px; line-height: 1.25; }
   .stamp { background: #14532d; color: #fff; padding: 1px 6px; border-radius: 4px; font-size: 0.66rem; }
@@ -64,6 +65,7 @@
     <% } %>
   </table>
 
+  <% if (photoLinks && photos.length) { %><p class="meta no-print">Click any photo to open the full-size original<%= locals.photoLinkNote ? ' ' + photoLinkNote : '' %>.</p><% } %>
   <% if (checks.length) { %>
   <h2>Scope of duties (<%= checks.filter(c => c.done).length %>/<%= checks.length %> done)</h2>
   <% checks.forEach((c, i) => { %>
@@ -77,7 +79,7 @@
       <% if (c.photos.length) { %>
       <div class="photos">
         <% c.photos.forEach(ph => { %>
-          <figure><img src="<%= photoSrc(ph) %>" alt="<%= c.title %>">
+          <figure><% if (photoHref(ph)) { %><a href="<%= photoHref(ph) %>" target="_blank" rel="noopener" title="Open the full-size photo"><img src="<%= photoSrc(ph) %>" alt="<%= c.title %>"></a><% } else { %><img src="<%= photoSrc(ph) %>" alt="<%= c.title %>"><% } %>
             <figcaption><span class="stamp">📅 <%= fmtDateTime(ph.created_at) %></span></figcaption></figure>
         <% }) %>
       </div>
@@ -118,7 +120,7 @@
   <div class="photos">
     <% otherPhotos.forEach(ph => { %>
       <figure>
-        <img src="<%= photoSrc(ph) %>" alt="<%= ph.caption || ph.filename %>">
+        <% if (photoHref(ph)) { %><a href="<%= photoHref(ph) %>" target="_blank" rel="noopener" title="Open the full-size photo"><img src="<%= photoSrc(ph) %>" alt="<%= ph.caption || ph.filename %>"></a><% } else { %><img src="<%= photoSrc(ph) %>" alt="<%= ph.caption || ph.filename %>"><% } %>
         <figcaption><span class="stamp">📅 <%= fmtDateTime(ph.created_at) %></span>
           <% if (ph.caption) { %> · <%= ph.caption %><% } %> · by <%= ph.uploader_name %></figcaption>
       </figure>

@@ -9,7 +9,7 @@
  * RESEND_FROM) when SMTP isn't configured. One message goes to all admins.
  */
 const { q } = require('./db');
-const { loadReportData, renderReportHtml } = require('./report');
+const { loadReportData, renderReportHtml, appPhotoHref } = require('./report');
 const { sendEmail, emailConfigured } = require('./notify');
 const { sendMail, getConfig: smtpConfig } = require('./email');
 const { logActivity } = require('./activity');
@@ -77,7 +77,13 @@ async function emailJobReport(visitId, baseUrl = '') {
     const v = d.visit;
     const link = `${baseUrl}/visits/${v.id}`;
     // Render the self-contained report once and send ONE message to all admins.
-    const fullHtml = await renderReportHtml(d, { inlinePhotos: true });
+    // Small previews are embedded (keeps the email small); each links to the
+    // full-size original in the app (only with an absolute app URL to point at).
+    const fullHtml = await renderReportHtml(d, {
+      inlinePhotos: true,
+      photoHref: baseUrl ? appPhotoHref(baseUrl) : null,
+      photoLinkNote: 'in GardeningMgt (sign in if asked)',
+    });
     const attach = Buffer.byteLength(fullHtml) <= MAX_ATTACHMENT_BYTES;
     const html = summaryHtml(d, link, attach);
     const done = d.checks.filter((c) => c.done).length;

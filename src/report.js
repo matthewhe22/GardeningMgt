@@ -74,7 +74,18 @@ async function loadReportImages(photos) {
   return out;
 }
 
-async function renderReportHtml(data, { inlinePhotos = false } = {}) {
+/**
+ * Full-size photo link for staff: `${base}/uploads/<file>` (opens the original
+ * in the app, after signing in). base '' gives a relative link for in-app pages.
+ */
+const appPhotoHref = (base) => (ph) => `${base || ''}/uploads/${encodeURIComponent(ph.filename)}`;
+
+/**
+ * photoHref(ph): where clicking a photo goes (the full-size original), or
+ * null for no links. Defaults to the in-app original for the in-app report;
+ * pass null for copies sent to people without an account.
+ */
+async function renderReportHtml(data, { inlinePhotos = false, photoHref = appPhotoHref(''), photoLinkNote = '' } = {}) {
   let photoSrc = (ph) => `/uploads/${ph.filename}`;
   if (inlinePhotos && data.photos.length) {
     const images = await loadReportImages(data.photos);
@@ -87,7 +98,7 @@ async function renderReportHtml(data, { inlinePhotos = false } = {}) {
   const mapLink = externalMapUrl(data.gpsPoints, data.visit);
   return ejs.renderFile(
     path.join(__dirname, '..', 'views', 'visits', 'report.ejs'),
-    { ...data, photoSrc, mapSvg, mapLink, fmtDateTime,
+    { ...data, photoSrc, photoHref: photoHref || (() => null), photoLinks: !!photoHref, photoLinkNote, mapSvg, mapLink, fmtDateTime,
       generatedAt: fmtDateTime(new Date()) }
   );
 }
@@ -107,7 +118,8 @@ async function archiveToOneDrive(visitId) {
     const data = await loadReportData(visitId);
     if (!data) return;
     const dir = `job-${visitId}-${data.visit.scheduled_date}`;
-    const html = await renderReportHtml(data, { inlinePhotos: true });
+    // The originals are archived next to report.html, so link straight to them.
+    const html = await renderReportHtml(data, { inlinePhotos: true, photoHref: (ph) => encodeURIComponent(ph.filename) });
     // Fetch the OAuth token once and reuse it for every file in this archive
     // batch instead of once per file (was 1 + N Graph token requests).
     const token = await getAccessToken(cfg);
@@ -143,8 +155,10 @@ async function archiveToOneDrive(visitId) {
  * JS, no headless browser — so it stays light on serverless cold starts
  * (pdfkit is required lazily, only when a PDF is actually generated). Photos
  * are embedded; the SVG map is summarised as GPS coordinates plus a map link.
+ * photoLinkBase (the app's URL): each photo becomes a link to its full-size
+ * original in the app (staff copies only; omit for owners).
  */
-async function renderReportPdf(data) {
+async function renderReportPdf(data, { photoLinkBase = null } = {}) {
   const PDFDocument = require('pdfkit');
   const { visit, job, tasks, comments, gpsPoints, photos } = data;
 
@@ -268,6 +282,11 @@ async function renderReportPdf(data) {
     // one large image per row, so a job with several photos stays a page or
     // two rather than many.
     heading(`Photos (${photos.length})`);
+    if (photos.length && photoLinkBase) {
+      doc.fillColor(MUTED).font('Helvetica').fontSize(8)
+        .text('Click a photo to open the full-size original in GardeningMgt (sign-in required).');
+      doc.moveDown(0.4);
+    }
     if (!photos.length) {
       doc.fillColor(MUTED).font('Helvetica').fontSize(10).text('No photos were uploaded for this job.');
     } else {
@@ -287,6 +306,7 @@ async function renderReportPdf(data) {
         if (img) {
           try {
             doc.image(img, x, rowTop, { fit: [cellW, imgH], align: 'center', valign: 'center' });
+            if (photoLinkBase) doc.link(x, rowTop, cellW, imgH, appPhotoHref(photoLinkBase)(ph));
           } catch (e) {
             doc.fillColor(MUTED).font('Helvetica').fontSize(8).text(`[${clean(ph.filename)}]`, x, rowTop, { width: cellW });
           }
@@ -471,6 +491,6 @@ async function renderInvoicePdf(invoice, business = {}) {
 }
 
 module.exports = {
-  loadReportData, renderReportHtml, renderReportPdf, renderInvoicePdf, archiveToOneDrive,
+  loadReportData, renderReportHtml, renderReportPdf, renderInvoicePdf, archiveToOneDrive, appPhotoHref,
   GST_RATE, gstComponent,
 };

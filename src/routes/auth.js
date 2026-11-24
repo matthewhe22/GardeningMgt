@@ -5,7 +5,7 @@ const { q, q1 } = db;
 const { logActivity } = require('../activity');
 const { deviceLabel } = require('../device');
 const { asyncHandler } = require('../asyncHandler');
-const { newSession, revokeSessions } = require('../auth');
+const { newSession, revokeSessions, safeNext } = require('../auth');
 const { MAX_FAILS, throttleKey, recordAttempt, clearAttempts } = require('../loginThrottle');
 
 const router = express.Router();
@@ -16,8 +16,8 @@ const router = express.Router();
 const DUMMY_HASH = bcrypt.hashSync('no-such-account', 10);
 
 router.get('/login', (req, res) => {
-  if (res.locals.user) return res.redirect('/');
-  res.render('login', { title: 'Sign in', error: null });
+  if (res.locals.user) return res.redirect(safeNext(req.query.next) || '/');
+  res.render('login', { title: 'Sign in', error: null, next: safeNext(req.query.next) });
 });
 
 router.post('/login', asyncHandler(async (req, res) => {
@@ -27,14 +27,14 @@ router.post('/login', asyncHandler(async (req, res) => {
   const attemptCount = await recordAttempt(db, key);
   if (attemptCount > MAX_FAILS) {
     return res.status(429).render('login',
-      { title: 'Sign in', error: 'Too many attempts. Please wait a few minutes and try again.' });
+      { title: 'Sign in', error: 'Too many attempts. Please wait a few minutes and try again.', next: safeNext(req.body.next) });
   }
   const user = await q1('SELECT * FROM users WHERE email = $1 AND active', [normEmail]);
   // Async compare: bcrypt is deliberately slow, and the sync variant blocks
   // the single Node event loop for that whole duration on every login attempt.
   const passwordOk = await bcrypt.compare(password || '', user ? user.password_hash : DUMMY_HASH);
   if (!user || !passwordOk) {
-    return res.status(401).render('login', { title: 'Sign in', error: 'Invalid email or password.' });
+    return res.status(401).render('login', { title: 'Sign in', error: 'Invalid email or password.', next: safeNext(req.body.next) });
   }
   await clearAttempts(db, key);
   // Rotate session on login to prevent fixation.
@@ -42,7 +42,7 @@ router.post('/login', asyncHandler(async (req, res) => {
   const device = deviceLabel(req.get('user-agent'));
   await q('UPDATE users SET last_login_at = now() WHERE id = $1', [user.id]);
   await logActivity(user.id, 'auth.login', 'user', user.id, `${user.name} signed in (${device})`);
-  res.redirect('/');
+  res.redirect(safeNext(req.body.next) || '/');
 }));
 
 router.post('/logout', asyncHandler(async (req, res) => {
