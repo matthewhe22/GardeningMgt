@@ -54,4 +54,15 @@ function fmtDate(value) {
   return d ? DATE_FMT.format(d) : '';
 }
 
-module.exports = { today, year, fmtDateTime, fmtDate, toDate, TZ };
+/**
+ * SQL for the business-timezone calendar date of a timestamp column (stored as
+ * naive UTC), e.g. localDateSql('ph.created_at'). Grouping or filtering on
+ * plain created_at::date uses the UTC date, which puts early-morning local
+ * work on the previous day.
+ */
+const SAFE_TZ = /^[A-Za-z0-9_+\-]+(\/[A-Za-z0-9_+\-]+)*$/.test(TZ) ? TZ : 'Australia/Melbourne';
+function localDateSql(col) {
+  return `((${col}) AT TIME ZONE 'UTC' AT TIME ZONE '${SAFE_TZ}')::date`;
+}
+
+module.exports = { today, year, fmtDateTime, fmtDate, toDate, localDateSql, TZ };

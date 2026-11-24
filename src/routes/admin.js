@@ -362,6 +362,7 @@ const ALL_SETTING_KEYS = [...ONEDRIVE_SETTING_KEYS, ...INVOICE_SETTING_KEYS, ...
 // Every Settings render shows the photo-storage configuration (no secrets).
 router.use('/settings', asyncHandler(async (req, res, next) => {
   res.locals.storageInfo = storage.configReport();
+  res.locals.businessTz = require('../time').TZ;
   const [cfg, counts] = await Promise.all([photoBackup.getConfig(),
     q1('SELECT count(*)::int AS total, count(backed_up_at)::int AS done FROM photos')]);
   res.locals.backupStatus = { on: cfg.on, complete: cfg.complete, total: counts.total, done: counts.done };
@@ -485,5 +486,8 @@ router.post('/settings/branding', requireRole(),
     await logActivity(req.user.id, 'settings.update', 'settings', null, 'Updated branding (logo/favicon)');
     res.redirect(error ? `/admin/settings?brandingError=${encodeURIComponent(error)}` : '/admin/settings?saved=1');
   }));
+
+// Bulk clean-up of overdue and stuck jobs (admin only).
+router.use('/cleanup', require('./cleanup'));
 
 module.exports = router;

@@ -4,6 +4,7 @@ const { isStaff } = require('../auth');
 const { gardenerIssueCond } = require('../access');
 const { logActivity } = require('../activity');
 const { asyncHandler } = require('../asyncHandler');
+const { localDateSql } = require('../time');
 const storage = require('../storage');
 const { pageParam, paginate } = require('../pagination');
 const { isValidDate } = require('../recurrence');
@@ -59,8 +60,8 @@ router.get('/', asyncHandler(async (req, res) => {
   const to = isValidDate(req.query.to) ? req.query.to : '';
   const propertyId = /^\d+$/.test(req.query.property_id || '') ? req.query.property_id : '';
   const gardenerId = /^\d+$/.test(req.query.gardener_id || '') ? req.query.gardener_id : '';
-  if (from) { args.push(from); where.push(`ph.created_at::date >= $${args.length}`); }
-  if (to) { args.push(to); where.push(`ph.created_at::date <= $${args.length}`); }
+  if (from) { args.push(from); where.push(`${localDateSql('ph.created_at')} >= $${args.length}`); }
+  if (to) { args.push(to); where.push(`${localDateSql('ph.created_at')} <= $${args.length}`); }
   if (propertyId) { args.push(Number(propertyId)); where.push(`(v.property_id = $${args.length} OR i.property_id = $${args.length})`); }
   if (gardenerId) { args.push(Number(gardenerId)); where.push(`ph.uploaded_by = $${args.length}`); }
 

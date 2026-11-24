@@ -45,7 +45,7 @@ router.get('/', asyncHandler(async (req, res) => {
   const presetVisitId = Number(req.query.visit_id) || null;
   res.render('issues/index', {
     title: 'Issues', issues, properties, users, status, search, staff, page, total, totalPages,
-    presetPropertyId, presetVisitId,
+    presetPropertyId, presetVisitId, flash: req.query.error || null,
   });
 }));
 
@@ -60,14 +60,23 @@ router.post('/', upload.array('photos', 10), asyncHandler(async (req, res) => {
   // Only staff assign issues; a gardener can only link one of their own visits.
   const assigned_to = staff ? req.body.assigned_to : null;
   let visitId = Number(visit_id) || null;
-  if (visitId && !staff) {
-    const v = await q1('SELECT id FROM visits WHERE id = $1 AND gardener_id = $2', [visitId, req.user.id]);
-    if (!v) visitId = null;
+  let propertyId = Number(property_id) || null;
+  if (!staff) {
+    // A gardener reports only on their own work: one of their own visits
+    // (which fixes the site), or one of their own sites.
+    if (visitId) {
+      const v = await q1('SELECT id, property_id FROM visits WHERE id = $1 AND gardener_id = $2', [visitId, req.user.id]);
+      if (v) propertyId = v.property_id; else visitId = null;
+    }
+    if (!visitId) {
+      const mine = propertyId && await q1(`SELECT 1 AS ok WHERE ${gardenerPropertyCond('$1::int', 2)}`, [propertyId, req.user.id]);
+      if (!mine) return res.redirect('/issues?error=site');
+    }
   }
   const { id } = await q1(`
     INSERT INTO issues (title, description, property_id, visit_id, priority, reported_by, assigned_to)
     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-    [title.trim(), description || null, property_id || null, visitId,
+    [title.trim(), description || null, propertyId, visitId,
       ['low', 'medium', 'high', 'urgent'].includes(priority) ? priority : 'medium',
       req.user.id, assigned_to || null]);
   let badPhoto = false;
