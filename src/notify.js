@@ -4,8 +4,8 @@
  * without them and never throws into a request path.
  *
  * SMS  — Twilio REST API: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM
- * Email — generic SMTP-over-HTTP not assumed; uses Resend if RESEND_API_KEY +
- *         RESEND_FROM are set (simple HTTPS API, no SMTP socket needed on Vercel).
+ * Email — the provider chosen in Settings (SMTP2GO or SMTP, see email.js);
+ *         otherwise Resend if RESEND_API_KEY + RESEND_FROM are set.
  */
 
 async function sendSms(toPhone, body) {
@@ -31,7 +31,7 @@ async function sendSms(toPhone, body) {
   }
 }
 
-/** True when an email provider is configured. */
+/** True when the Resend fallback is configured (Settings email is checked by callers / sendEmail). */
 const emailConfigured = () => !!(process.env.RESEND_API_KEY && process.env.RESEND_FROM);
 
 /**
@@ -39,6 +39,18 @@ const emailConfigured = () => !!(process.env.RESEND_API_KEY && process.env.RESEN
  * ([{ filename, content: Buffer|string }]).
  */
 async function sendEmail(toEmail, subject, text, { html, attachments } = {}) {
+  if (!toEmail) return false;
+  // The provider configured in Settings wins.
+  const email = require('./email');
+  try {
+    if (await email.getConfig()) {
+      const r = await email.sendMail({ to: toEmail, subject, text, html, attachments });
+      return !!r.ok;
+    }
+  } catch (e) {
+    console.error('[notify] email failed:', e.message);
+    return false;
+  }
   const { RESEND_API_KEY, RESEND_FROM } = process.env;
   if (!toEmail || !RESEND_API_KEY || !RESEND_FROM) return false;
   try {

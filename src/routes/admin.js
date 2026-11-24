@@ -349,29 +349,40 @@ const { testConnection: testOneDrive, SETTING_KEYS: ONEDRIVE_SETTING_KEYS } = re
 const { testConnection: testEmail, SETTING_KEYS: EMAIL_SETTING_KEYS } = require('../email');
 const { testConnection: testPiq, SETTING_KEYS: PIQ_SETTING_KEYS } = require('../propertyiq');
 const { getBranding, saveLogo, saveFavicon, clearLogo, clearFavicon } = require('../branding');
+const photoBackup = require('../photoBackup');
 const { upload: imageUpload } = require('../upload');
 
 // Settings whose masked placeholder ('********') means "leave as-is, don't
 // overwrite the stored secret" — mirrors the onedrive_client_secret pattern.
-const MASKED_SETTING_KEYS = new Set(['onedrive_client_secret', 'invoice_payment_details', 'smtp_password', 'piq_client_secret']);
-const ALL_SETTING_KEYS = [...ONEDRIVE_SETTING_KEYS, ...INVOICE_SETTING_KEYS, ...EMAIL_SETTING_KEYS, ...PIQ_SETTING_KEYS];
+const MASKED_SETTING_KEYS = new Set(['onedrive_client_secret', 'invoice_payment_details', 'smtp_password', 'piq_client_secret',
+  'smtp2go_api_key', 'photo_backup_secret_access_key']);
+const ALL_SETTING_KEYS = [...ONEDRIVE_SETTING_KEYS, ...INVOICE_SETTING_KEYS, ...EMAIL_SETTING_KEYS, ...PIQ_SETTING_KEYS,
+  ...photoBackup.SETTING_KEYS];
 
 // Every Settings render shows the photo-storage configuration (no secrets).
-router.use('/settings', (req, res, next) => { res.locals.storageInfo = storage.configReport(); next(); });
+router.use('/settings', asyncHandler(async (req, res, next) => {
+  res.locals.storageInfo = storage.configReport();
+  const [cfg, counts] = await Promise.all([photoBackup.getConfig(),
+    q1('SELECT count(*)::int AS total, count(backed_up_at)::int AS done FROM photos')]);
+  res.locals.backupStatus = { on: cfg.on, complete: cfg.complete, total: counts.total, done: counts.done };
+  next();
+}));
 
 router.get('/settings', requireRole(), asyncHandler(async (req, res) => {
   const [settings, branding] = await Promise.all([getSettings(ALL_SETTING_KEYS), getBranding()]);
   res.render('admin/settings', {
     title: 'Settings', settings, branding,
     saved: req.query.saved, brandingError: req.query.brandingError || null, test: null, emailTest: null, piqTest: null,
-    secretNeeded: { piq_base_url: 'PropertyIQ client secret', smtp_host: 'SMTP password' }[req.query.secretneeded] || null,
+    secretNeeded: { piq_base_url: 'PropertyIQ client secret', smtp_host: 'SMTP password',
+      photo_backup_endpoint: 'backup secret access key' }[req.query.secretneeded] || null,
   });
 }));
 
 // A saved secret is only ever sent to the server it was entered for: changing
 // that server's address means typing the secret again (otherwise anyone with
 // admin access could point the app at their own server and collect it).
-const SECRET_FOR_HOST = { piq_base_url: 'piq_client_secret', smtp_host: 'smtp_password' };
+const SECRET_FOR_HOST = { piq_base_url: 'piq_client_secret', smtp_host: 'smtp_password',
+  photo_backup_endpoint: 'photo_backup_secret_access_key' };
 
 router.post('/settings', requireRole(), asyncHandler(async (req, res) => {
   const current = await getSettings(ALL_SETTING_KEYS);
@@ -390,7 +401,9 @@ router.post('/settings', requireRole(), asyncHandler(async (req, res) => {
   // another (absent ≠ emptied).
   for (const key of ALL_SETTING_KEYS) {
     if (!Object.prototype.hasOwnProperty.call(req.body, key)) continue;
-    const value = String(req.body[key] || '').trim();
+    // A switch posts a hidden "0" then the checkbox's "1" when ticked: the last one wins.
+    const raw = Array.isArray(req.body[key]) ? req.body[key][req.body[key].length - 1] : req.body[key];
+    const value = String(raw || '').trim();
     // Leave the stored secret untouched when the masked placeholder comes back.
     if (MASKED_SETTING_KEYS.has(key) && value === '********') continue;
     await setSetting(key, value || null);
@@ -410,7 +423,7 @@ router.post('/settings/test', requireRole(), asyncHandler(async (req, res) => {
 
 router.post('/settings/test-email', requireRole(), asyncHandler(async (req, res) => {
   const [settings, branding] = await Promise.all([getSettings(ALL_SETTING_KEYS), getBranding()]);
-  const emailTest = await testEmail();
+  const emailTest = await testEmail(req.user.email);
   await logActivity(req.user.id, 'settings.test', 'settings', null,
     `Email (SMTP) connection test: ${emailTest.ok ? 'OK' : 'failed'}`);
   res.render('admin/settings', { title: 'Settings', settings, branding, saved: null, brandingError: null, test: null, emailTest, piqTest: null });
@@ -433,6 +446,17 @@ router.post('/settings/test-storage', requireRole(), asyncHandler(async (req, re
     `Photo storage test: ${storageTest.ok ? 'OK' : 'failed'}`);
   res.render('admin/settings', {
     title: 'Settings', settings, branding, saved: null, brandingError: null, test: null, emailTest: null, piqTest: null, storageTest,
+  });
+}));
+
+// "Test backup": write, read and delete a small file in the off-site backup bucket.
+router.post('/settings/test-backup', requireRole(), asyncHandler(async (req, res) => {
+  const [settings, branding] = await Promise.all([getSettings(ALL_SETTING_KEYS), getBranding()]);
+  const backupTest = await photoBackup.selfTest();
+  await logActivity(req.user.id, 'settings.test', 'settings', null,
+    `Photo backup test: ${backupTest.ok ? 'OK' : 'failed'}`);
+  res.render('admin/settings', {
+    title: 'Settings', settings, branding, saved: null, brandingError: null, test: null, emailTest: null, piqTest: null, backupTest,
   });
 }));
 
